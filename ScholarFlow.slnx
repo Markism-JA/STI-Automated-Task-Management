@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ScholarFlow.Core/ScholarFlow.Core.csproj" />
+    <Project Path="src/ScholarFlow.Elms.Cli/ScholarFlow.Elms.Cli.csproj" />
+    <Project Path="src/ScholarFlow.Elms/ScholarFlow.Elms.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ScholarFlow.Core.Tests/ScholarFlow.Core.Tests.csproj" />
+    <Project Path="tests/ScholarFlow.Elms.Tests/ScholarFlow.Elms.Tests.csproj" />
+  </Folder>
+</Solution>

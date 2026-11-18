@@ -1,0 +1,176 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+using ScholarFlow.Core.Models;
+
+namespace ScholarFlow.Core.Tasks;
+
+public sealed record QuickAddChip(string Kind, string Text);
+
+public sealed record ParsedQuickAddResult(
+    TaskItem Task,
+    IReadOnlyList<QuickAddChip> Chips);
+
+/// <summary>
+/// Parses Todoist-style natural-language Quick Add strings such as:
+/// "Finish OS lab 2 tomorrow p1 d4 #os @lab"
+/// </summary>
+public static partial class QuickAddParser
+{
+    [GeneratedRegex(@"(?<!\S)p([1-4])(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex PriorityRegex();
+
+    [GeneratedRegex(@"(?<!\S)d([1-5])(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex DifficultyRegex();
+
+    [GeneratedRegex(@"(?<!\S)#([A-Za-z0-9_\-]+)", RegexOptions.Compiled)]
+    private static partial Regex CourseTagRegex();
+
+    [GeneratedRegex(@"(?<!\S)@([A-Za-z0-9_\-]+)", RegexOptions.Compiled)]
+    private static partial Regex LabelTagRegex();
+
+    [GeneratedRegex(@"(?<!\S)(\d{4}-\d{2}-\d{2})(?!\S)", RegexOptions.Compiled)]
+    private static partial Regex IsoDateRegex();
+
+    [GeneratedRegex(@"(?<!\S)(today|tod|tomorrow|tom|next\s+(?:mon|monday|tue|tuesday|wed|wednesday|thu|thursday|fri|friday|sat|saturday|sun|sunday))(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex RelativeDateRegex();
+
+    public static ParsedQuickAddResult Parse(
+        string input,
+        IReadOnlyList<BasinCourseEntry>? courses = null,
+        DateOnly? todayOverride = null)
+    {
+        var today = todayOverride ?? DateOnly.FromDateTime(DateTime.Today);
+        var working = input ?? string.Empty;
+        var chips = new List<QuickAddChip>();
+
+        var priority = TaskPriority.P4;
+        working = PriorityRegex().Replace(working, m =>
+        {
+            priority = (TaskPriority)int.Parse(m.Groups[1].Value);
+            chips.Add(new QuickAddChip("Priority", $"P{(int)priority}"));
+            return string.Empty;
+        });
+
+        int difficulty = 1;
+        working = DifficultyRegex().Replace(working, m =>
+        {
+            difficulty = int.Parse(m.Groups[1].Value);
+            chips.Add(new QuickAddChip("Difficulty", $"D{difficulty}"));
+            return string.Empty;
+        });
+
+        string? courseFolder = null;
+        string? courseAlias = null;
+        working = CourseTagRegex().Replace(working, m =>
+        {
+            var tag = m.Groups[1].Value;
+            var matched = MatchCourse(tag, courses);
+            if (matched is not null)
+            {
+                courseFolder = matched.FolderName;
+                courseAlias = matched.Alias;
+                chips.Add(new QuickAddChip("Course", $"#{matched.Alias}"));
+            }
+            else
+            {
+                courseAlias = tag;
+                chips.Add(new QuickAddChip("Course", $"#{tag}"));
+            }
+            return string.Empty;
+        });
+
+        var labels = new List<string>();
+        working = LabelTagRegex().Replace(working, m =>
+        {
+            var lbl = m.Groups[1].Value;
+            labels.Add(lbl);
+            chips.Add(new QuickAddChip("Label", $"@{lbl}"));
+            return string.Empty;
+        });
+
+        DateOnly? dueDate = null;
+        working = IsoDateRegex().Replace(working, m =>
+        {
+            if (dueDate is null && DateOnly.TryParseExact(m.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            {
+                dueDate = d;
+                chips.Add(new QuickAddChip("Due", d.ToString("MMM d")));
+                return string.Empty;
+            }
+            return m.Value;
+        });
+
+        if (dueDate is null)
+        {
+            working = RelativeDateRegex().Replace(working, m =>
+            {
+                if (dueDate is not null)
+                    return m.Value;
+
+                dueDate = ResolveRelativeDate(m.Groups[1].Value, today);
+                if (dueDate.HasValue)
+                    chips.Add(new QuickAddChip("Due", dueDate.Value.ToString("MMM d")));
+                return string.Empty;
+            });
+        }
+
+        var cleanTitle = string.Join(' ', working.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+
+        var task = new TaskItem
+        {
+            Title = cleanTitle,
+            Priority = priority,
+            Difficulty = difficulty,
+            DueDate = dueDate,
+            CourseFolder = courseFolder,
+            CourseAlias = courseAlias,
+            Labels = labels
+        };
+
+        return new ParsedQuickAddResult(task, chips);
+    }
+
+    private static BasinCourseEntry? MatchCourse(string tag, IReadOnlyList<BasinCourseEntry>? courses)
+    {
+        if (courses is null || courses.Count == 0)
+            return null;
+
+        return courses.FirstOrDefault(c => c.Alias.Equals(tag, StringComparison.OrdinalIgnoreCase))
+               ?? courses.FirstOrDefault(c => c.FolderName.Contains(tag, StringComparison.OrdinalIgnoreCase))
+               ?? courses.FirstOrDefault(c => c.Title.Contains(tag, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static DateOnly? ResolveRelativeDate(string token, DateOnly today)
+    {
+        var lower = string.Join(' ', token.ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (lower is "today" or "tod")
+            return today;
+        if (lower is "tomorrow" or "tom")
+            return today.AddDays(1);
+
+        if (lower.StartsWith("next "))
+        {
+            var dayPart = lower[5..];
+            var targetDow = dayPart switch
+            {
+                "sun" or "sunday" => DayOfWeek.Sunday,
+                "mon" or "monday" => DayOfWeek.Monday,
+                "tue" or "tuesday" => DayOfWeek.Tuesday,
+                "wed" or "wednesday" => DayOfWeek.Wednesday,
+                "thu" or "thursday" => DayOfWeek.Thursday,
+                "fri" or "friday" => DayOfWeek.Friday,
+                "sat" or "saturday" => DayOfWeek.Saturday,
+                _ => (DayOfWeek?)null
+            };
+
+            if (targetDow.HasValue)
+            {
+                int diff = ((int)targetDow.Value - (int)today.DayOfWeek + 7) % 7;
+                if (diff == 0) diff = 7;
+                return today.AddDays(diff);
+            }
+        }
+
+        return null;
+    }
+}

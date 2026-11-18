@@ -1,0 +1,102 @@
+using ScholarFlow.Core.Models;
+
+namespace ScholarFlow.Core.Tasks;
+
+public enum SmartViewKind
+{
+    Inbox,
+    Today,
+    Upcoming,
+    All,
+    Completed,
+    Course,
+    Label
+}
+
+/// <summary>
+/// Provides Todoist-style smart views and scans for unregistered files inside ongoing/ folders.
+/// </summary>
+public static class TaskQueryService
+{
+    public static IReadOnlyList<TaskItem> Filter(
+        IEnumerable<TaskItem> allTasks,
+        SmartViewKind view,
+        string? targetValue = null,
+        string? searchQuery = null,
+        DateOnly? todayOverride = null)
+    {
+        var today = todayOverride ?? DateOnly.FromDateTime(DateTime.Today);
+
+        IEnumerable<TaskItem> query = view switch
+        {
+            SmartViewKind.Inbox => allTasks.Where(t => !t.IsCompleted && t.IsInbox),
+            SmartViewKind.Today => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value <= today),
+            SmartViewKind.Upcoming => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value > today),
+            SmartViewKind.Completed => allTasks.Where(t => t.IsCompleted),
+            SmartViewKind.Course => allTasks.Where(t => !t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
+            SmartViewKind.Label => allTasks.Where(t => !t.IsCompleted && t.Labels.Contains(targetValue ?? "", StringComparer.OrdinalIgnoreCase)),
+            _ => allTasks.Where(t => !t.IsCompleted)
+        };
+
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            var term = searchQuery.Trim();
+            query = query.Where(t =>
+                t.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (t.CourseFolder?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.CourseAlias?.Contains(term.TrimStart('#'), StringComparison.OrdinalIgnoreCase) ?? false) ||
+                t.Labels.Any(l => l.Contains(term.TrimStart('@'), StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return view == SmartViewKind.Completed
+            ? query.OrderByDescending(t => t.CompletedDate).ThenBy(t => t.Title).ToList()
+            : view == SmartViewKind.Upcoming
+                ? query.OrderBy(t => t.DueDate).ThenByDescending(t => UrgencyCalculator.CalculateScore(t, today)).ToList()
+                : query.OrderByDescending(t => UrgencyCalculator.CalculateScore(t, today)).ThenBy(t => t.DueDate).ToList();
+    }
+
+    public static IReadOnlyList<UnregisteredOngoingFile> FindUnregisteredOngoingFiles(
+        string basinRoot,
+        IReadOnlyList<BasinCourseEntry> courses,
+        IReadOnlyList<TaskItem> allTasks)
+    {
+        var trackedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in allTasks)
+        {
+            foreach (var f in t.LinkedFiles)
+                trackedFiles.Add(Path.GetFileName(f));
+            if (!string.IsNullOrWhiteSpace(t.NotePath))
+                trackedFiles.Add(Path.GetFileName(t.NotePath));
+        }
+
+        var results = new List<UnregisteredOngoingFile>();
+        foreach (var course in courses.Where(c => !c.IsArchived))
+        {
+            var ongoingDir = Path.Combine(basinRoot, course.FolderName, "ongoing");
+            if (!Directory.Exists(ongoingDir))
+                continue;
+
+            foreach (var filePath in Directory.EnumerateFiles(ongoingDir))
+            {
+                var name = Path.GetFileName(filePath);
+                if (name.StartsWith('.'))
+                    continue;
+
+                if (trackedFiles.Contains(name))
+                    continue;
+
+                var info = new FileInfo(filePath);
+                results.Add(new UnregisteredOngoingFile(
+                    CourseFolder: course.FolderName,
+                    CourseTitle: course.Title,
+                    FileName: name,
+                    RelativePath: $"ongoing/{name}",
+                    FullPath: filePath,
+                    SizeBytes: info.Length,
+                    LastModifiedAt: info.LastWriteTimeUtc));
+            }
+        }
+
+        return results;
+    }
+}

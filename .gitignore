@@ -1,0 +1,19 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+.vs/
+.idea/
+TestResults/
+
+# Playwright / Browser state
+browser_session/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
