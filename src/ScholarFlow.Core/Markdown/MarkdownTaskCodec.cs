@@ -7,7 +7,8 @@ namespace ScholarFlow.Core.Markdown;
 
 /// <summary>
 /// Losslessly parses and serializes Obsidian-compatible Markdown task lists (tasks.md and inbox.md),
-/// supporting subtasks, Todoist priorities, due/completion dates, file links, and LMS tracking metadata.
+/// using clean, emoji-free Dataview inline fields ([due::], [done::], [p::], [diff::], [file::], [lms_id::])
+/// while retaining backward-compatible parsing for legacy emoji markers.
 /// </summary>
 public static partial class MarkdownTaskCodec
 {
@@ -15,13 +16,13 @@ public static partial class MarkdownTaskCodec
     private static partial Regex TaskLineRegex();
 
     [GeneratedRegex(@"📅\s*(\d{4}-\d{2}-\d{2})", RegexOptions.Compiled)]
-    private static partial Regex DueDateRegex();
+    private static partial Regex LegacyDueDateRegex();
 
     [GeneratedRegex(@"⏰\s*(\d{2}:\d{2})", RegexOptions.Compiled)]
-    private static partial Regex DueTimeRegex();
+    private static partial Regex LegacyDueTimeRegex();
 
     [GeneratedRegex(@"✅\s*(\d{4}-\d{2}-\d{2})", RegexOptions.Compiled)]
-    private static partial Regex CompletedDateRegex();
+    private static partial Regex LegacyCompletedDateRegex();
 
     [GeneratedRegex(@"\[([a-z_]+)::\s*([^\]]+)\]", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex InlineFieldRegex();
@@ -89,31 +90,25 @@ public static partial class MarkdownTaskCodec
         sb.Append(task.Title.Trim());
 
         if (task.DueDate.HasValue)
-            sb.Append($" 📅 {task.DueDate.Value:yyyy-MM-dd}");
+            sb.Append($" [due:: {task.DueDate.Value:yyyy-MM-dd}]");
 
         if (task.DueTime.HasValue)
-            sb.Append($" ⏰ {task.DueTime.Value:HH:mm}");
+            sb.Append($" [time:: {task.DueTime.Value:HH:mm}]");
 
         if (task.IsCompleted && task.CompletedDate.HasValue)
-            sb.Append($" ✅ {task.CompletedDate.Value:yyyy-MM-dd}");
+            sb.Append($" [done:: {task.CompletedDate.Value:yyyy-MM-dd}]");
 
-        var priorityEmoji = task.Priority switch
-        {
-            TaskPriority.P1 => " 🔺",
-            TaskPriority.P2 => " ⏫",
-            TaskPriority.P3 => " 🔼",
-            _ => string.Empty
-        };
-        sb.Append(priorityEmoji);
+        if (task.Priority != TaskPriority.P4)
+            sb.Append($" [p:: {(int)task.Priority}]");
+
+        if (task.Difficulty is > 1 and <= 5)
+            sb.Append($" [diff:: {task.Difficulty}]");
 
         if (!string.IsNullOrWhiteSpace(task.CourseAlias))
             sb.Append($" #{task.CourseAlias.Trim().TrimStart('#')}");
 
         foreach (var label in task.Labels.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.OrdinalIgnoreCase))
             sb.Append($" @{label.Trim().TrimStart('@')}");
-
-        if (task.Difficulty is > 1 and <= 5)
-            sb.Append($" [diff:: {task.Difficulty}]");
 
         foreach (var file in task.LinkedFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
             sb.Append($" [file:: {file}]");
@@ -139,7 +134,7 @@ public static partial class MarkdownTaskCodec
             sb.Append(sub.IsCompleted ? "  - [x] " : "  - [ ] ");
             sb.Append(sub.Title.Trim());
             if (sub.IsCompleted && sub.CompletedDate.HasValue)
-                sb.Append($" ✅ {sub.CompletedDate.Value:yyyy-MM-dd}");
+                sb.Append($" [done:: {sub.CompletedDate.Value:yyyy-MM-dd}]");
         }
 
         return sb.ToString();
@@ -191,6 +186,57 @@ public static partial class MarkdownTaskCodec
         File.Move(temp, filePath, overwrite: true);
     }
 
+    public static async Task UpdateTaskInFileAsync(
+        string basinRoot,
+        TaskItem updatedTask,
+        CancellationToken ct = default)
+    {
+        var sourcePath = !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
+            ? updatedTask.SourceMarkdownPath
+            : string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
+                ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
+                : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
+
+        var tasks = (await LoadFileAsync(sourcePath, updatedTask.CourseFolder, ct)).ToList();
+        var idx = tasks.FindIndex(t =>
+            (!string.IsNullOrWhiteSpace(updatedTask.LmsId) && string.Equals(t.LmsId, updatedTask.LmsId, StringComparison.OrdinalIgnoreCase)) ||
+            (t.LineNumber == updatedTask.LineNumber && t.LineNumber > 0) ||
+            t.Id == updatedTask.Id);
+
+        if (idx >= 0)
+            tasks[idx] = updatedTask;
+        else
+            tasks.Add(updatedTask);
+
+        var header = string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
+            ? "Inbox"
+            : updatedTask.CourseFolder.Replace('_', ' ');
+        await SaveDocumentAsync(sourcePath, tasks, header, ct);
+    }
+
+    public static async Task DeleteTaskFromFileAsync(
+        string basinRoot,
+        TaskItem targetTask,
+        CancellationToken ct = default)
+    {
+        var sourcePath = !string.IsNullOrWhiteSpace(targetTask.SourceMarkdownPath)
+            ? targetTask.SourceMarkdownPath
+            : string.IsNullOrWhiteSpace(targetTask.CourseFolder)
+                ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
+                : Path.Combine(basinRoot, targetTask.CourseFolder, "tasks.md");
+
+        var tasks = (await LoadFileAsync(sourcePath, targetTask.CourseFolder, ct)).ToList();
+        tasks.RemoveAll(t =>
+            (!string.IsNullOrWhiteSpace(targetTask.LmsId) && string.Equals(t.LmsId, targetTask.LmsId, StringComparison.OrdinalIgnoreCase)) ||
+            (t.LineNumber == targetTask.LineNumber && t.Title.Equals(targetTask.Title, StringComparison.OrdinalIgnoreCase)) ||
+            t.Id == targetTask.Id);
+
+        var header = string.IsNullOrWhiteSpace(targetTask.CourseFolder)
+            ? "Inbox"
+            : targetTask.CourseFolder.Replace('_', ' ');
+        await SaveDocumentAsync(sourcePath, tasks, header, ct);
+    }
+
     /// <summary>
     /// Idempotently merges incoming LMS tasks into an existing tasks list by [lms_id:: ...],
     /// preserving user-added subtasks, difficulty, labels, and manual [x] completion state.
@@ -225,7 +271,6 @@ public static partial class MarkdownTaskCodec
                         existing.LinkedFiles.Add(f);
                 }
 
-                // Mark completed if LMS reports Submitted/Graded; never un-complete a task the user manually checked off
                 if (incoming.IsCompleted && !existing.IsCompleted)
                 {
                     existing.IsCompleted = true;
@@ -253,7 +298,7 @@ public static partial class MarkdownTaskCodec
         var working = body;
 
         DateOnly? dueDate = null;
-        var dueMatch = DueDateRegex().Match(working);
+        var dueMatch = LegacyDueDateRegex().Match(working);
         if (dueMatch.Success && DateOnly.TryParseExact(dueMatch.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dd))
         {
             dueDate = dd;
@@ -261,7 +306,7 @@ public static partial class MarkdownTaskCodec
         }
 
         TimeOnly? dueTime = null;
-        var timeMatch = DueTimeRegex().Match(working);
+        var timeMatch = LegacyDueTimeRegex().Match(working);
         if (timeMatch.Success && TimeOnly.TryParseExact(timeMatch.Groups[1].Value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
         {
             dueTime = dt;
@@ -286,6 +331,18 @@ public static partial class MarkdownTaskCodec
             var val = m.Groups[2].Value.Trim();
             switch (key)
             {
+                case "due" when DateOnly.TryParseExact(val, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDue):
+                    dueDate = parsedDue;
+                    break;
+                case "time" when TimeOnly.TryParseExact(val, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedTime):
+                    dueTime = parsedTime;
+                    break;
+                case "done" when DateOnly.TryParseExact(val, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDone):
+                    completedDate = parsedDone;
+                    break;
+                case "p" or "priority" when int.TryParse(val.TrimStart('p', 'P'), out var pVal) && pVal is >= 1 and <= 4:
+                    priority = (TaskPriority)pVal;
+                    break;
                 case "diff" when int.TryParse(val, out var d):
                     difficulty = Math.Clamp(d, 1, 5);
                     break;
@@ -353,14 +410,25 @@ public static partial class MarkdownTaskCodec
 
     private static DateOnly? ExtractCompletedDate(string text, out string cleaned)
     {
-        var match = CompletedDateRegex().Match(text);
+        var match = LegacyCompletedDateRegex().Match(text);
         if (match.Success && DateOnly.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var cd))
         {
             cleaned = text.Remove(match.Index, match.Length);
             return cd;
         }
 
-        cleaned = text;
-        return null;
+        DateOnly? inlineDone = null;
+        cleaned = InlineFieldRegex().Replace(text, m =>
+        {
+            if (m.Groups[1].Value.Equals("done", StringComparison.OrdinalIgnoreCase) &&
+                DateOnly.TryParseExact(m.Groups[2].Value.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDone))
+            {
+                inlineDone = parsedDone;
+                return string.Empty;
+            }
+            return m.Value;
+        });
+
+        return inlineDone;
     }
 }

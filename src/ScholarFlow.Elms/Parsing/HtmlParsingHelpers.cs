@@ -43,12 +43,18 @@ internal static partial class HtmlParsingHelpers
         {
             var pathAndQuery = finalUri.PathAndQuery;
             if (pathAndQuery.Contains("not_logged_in", StringComparison.OrdinalIgnoreCase) ||
+                pathAndQuery.Contains("simultaneous_logins_detected", StringComparison.OrdinalIgnoreCase) ||
                 pathAndQuery.Contains("log_in_required=true", StringComparison.OrdinalIgnoreCase) ||
                 finalUri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase) ||
                 finalUri.AbsolutePath.Contains("log_in", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
+        }
+
+        if (html.Contains("simultaneous_logins_detected", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
         }
 
         if (html.Contains("/site/not_logged_in", StringComparison.OrdinalIgnoreCase) &&

@@ -23,11 +23,42 @@ public static class CourseArtifactWriter
         var courseRoot = Path.Combine(outputRootDirectory, snapshot.Course.SanitizedFolderName);
         Directory.CreateDirectory(courseRoot);
 
-        // 1. Write term.json when at least one module has a recognized term & prefix
+        // 1. Write term.json when at least one module has a recognized term & prefix, preserving existing custom mappings
         var termMap = snapshot.BuildTermMap();
+        var termJsonPath = Path.Combine(courseRoot, "term.json");
+        if (File.Exists(termJsonPath))
+        {
+            try
+            {
+                var existingJson = await File.ReadAllTextAsync(termJsonPath, ct);
+                var existingMap = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(existingJson);
+                if (existingMap is not null && existingMap.Values.Any(v => v is { Count: > 0 }))
+                {
+                    var alreadyMapped = existingMap.Values.SelectMany(v => v).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (term, prefixes) in termMap)
+                    {
+                        if (!existingMap.TryGetValue(term, out var targetList))
+                        {
+                            targetList = [];
+                            existingMap[term] = targetList;
+                        }
+                        foreach (var p in prefixes)
+                        {
+                            if (alreadyMapped.Add(p))
+                                targetList.Add(p);
+                        }
+                    }
+                    termMap = existingMap;
+                }
+            }
+            catch
+            {
+                // Overwrite corrupted term.json with freshly built termMap
+            }
+        }
+
         if (termMap.Values.Any(v => v.Count > 0))
         {
-            var termJsonPath = Path.Combine(courseRoot, "term.json");
             var json = JsonSerializer.Serialize(termMap, JsonOptions);
             await File.WriteAllTextAsync(termJsonPath, json + "\n", ct);
         }

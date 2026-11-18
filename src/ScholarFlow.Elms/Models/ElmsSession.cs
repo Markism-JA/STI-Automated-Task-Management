@@ -63,7 +63,22 @@ public sealed record AuthOptions
     public bool ForceInteractive { get; init; }
 
     /// <summary>
+    /// When false (e.g., background polling), never launches a visible browser window if silent/headless auth fails.
+    /// </summary>
+    public bool AllowInteractiveBrowser { get; init; } = true;
+
+    /// <summary>
     /// Maximum time to wait for manual login when interactive mode is triggered.
     /// </summary>
     public TimeSpan LoginTimeout { get; init; } = TimeSpan.FromMinutes(5);
+}
+
+/// <summary>
+/// Thrown when an authenticated eLMS session cannot be established silently and interactive browser login is disabled.
+/// </summary>
+public sealed class ElmsAuthenticationRequiredException : InvalidOperationException
+{
+    public ElmsAuthenticationRequiredException(string message) : base(message)
+    {
+    }
 }

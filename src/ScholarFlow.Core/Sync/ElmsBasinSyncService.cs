@@ -51,13 +51,16 @@ public sealed class ElmsBasinSyncService
         bool forceRedownload = false,
         bool compileMasterPdfs = true,
         IProgress<SyncProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool allowInteractiveAuth = true)
     {
         var notifications = new List<AppNotification>();
         var errors = new List<string>();
 
         var config = await _basinService.InitializeOrOpenAsync(basinRoot, ct: ct);
-        await _elmsClient.EnsureConnectedAsync(new AuthOptions { BaseUrl = config.ElmsBaseUrl }, ct);
+        await _elmsClient.EnsureConnectedAsync(
+            new AuthOptions { BaseUrl = config.ElmsBaseUrl, AllowInteractiveBrowser = allowInteractiveAuth },
+            ct);
 
         var ignoreFilter = await CourseFilterStore.LoadAsync(CourseFilterStore.GetDefaultFilterPath(basinRoot), ct);
         var discoveredCourses = await _elmsClient.GetEnrolledCoursesAsync(ignoreFilter, ct: ct);
@@ -69,11 +72,20 @@ public sealed class ElmsBasinSyncService
 
         int downloaded = 0, updated = 0, relocated = 0, tasksUpserted = 0, pdfsCompiled = 0;
 
-        foreach (var elmsCourse in discoveredCourses)
+        foreach (var rawElmsCourse in discoveredCourses)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
+                var courseEntry = basinCourses.FirstOrDefault(c =>
+                    (!string.IsNullOrWhiteSpace(c.CourseId) && c.CourseId == rawElmsCourse.CourseId) ||
+                    c.FolderName.Equals(rawElmsCourse.SanitizedFolderName, StringComparison.OrdinalIgnoreCase) ||
+                    BasinService.IsSameCourseFuzzy(c.FolderName, rawElmsCourse.SanitizedFolderName))
+                    ?? basinCourses.First(c => c.Title.Equals(rawElmsCourse.Title, StringComparison.OrdinalIgnoreCase));
+
+                // Map to the canonical local course folder name from courses.json so we never create duplicate directories
+                var elmsCourse = rawElmsCourse with { SanitizedFolderName = courseEntry.FolderName };
+
                 var snapshot = await _elmsClient.GetCourseSnapshotAsync(elmsCourse, progress, ct);
                 var plan = _syncResolver.Resolve(snapshot, syncState, basinRoot, forceRedownload);
 
@@ -96,34 +108,33 @@ public sealed class ElmsBasinSyncService
                 {
                     notifications.Add(new AppNotification(
                         NotificationKind.MaterialDownloaded,
-                        $"{elmsCourse.Title}: {execResult.Downloaded + execResult.Updated} file(s) synced",
+                        $"{courseEntry.Title}: {execResult.Downloaded + execResult.Updated} file(s) synced",
                         $"Downloaded {execResult.Downloaded} new, updated {execResult.Updated}.",
-                        elmsCourse.SanitizedFolderName,
+                        courseEntry.FolderName,
                         elmsCourse.CourseUrl));
                 }
 
-                var courseEntry = basinCourses.First(c => c.FolderName.Equals(elmsCourse.SanitizedFolderName, StringComparison.OrdinalIgnoreCase));
                 var upserted = await UpsertCourseAssignmentsAsync(basinRoot, courseEntry, snapshot.Assignments, pollState, notifications, ct);
                 tasksUpserted += upserted;
 
                 if (compileMasterPdfs && config.AutoCompileMasterPdf)
                 {
-                    var pdfResult = await _pdfService.CompileIfStaleAsync(basinRoot, elmsCourse.SanitizedFolderName, elmsCourse.Title, force: false, ct);
+                    var pdfResult = await _pdfService.CompileIfStaleAsync(basinRoot, courseEntry.FolderName, courseEntry.Title, force: false, ct);
                     if (pdfResult.WasRegenerated)
                     {
                         pdfsCompiled++;
                         notifications.Add(new AppNotification(
                             NotificationKind.MasterPdfCompiled,
-                            $"Compiled {elmsCourse.Title} Master PDF",
+                            $"Compiled {courseEntry.Title} Master PDF",
                             $"Regenerated {Path.GetFileName(pdfResult.OutputPdfPath)} ({pdfResult.PageCount} pages).",
-                            elmsCourse.SanitizedFolderName));
+                            courseEntry.FolderName));
                     }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger?.LogError(ex, "Error syncing course {Course}", elmsCourse.Title);
-                errors.Add($"{elmsCourse.Title}: {ex.Message}");
+                _logger?.LogError(ex, "Error syncing course {Course}", rawElmsCourse.Title);
+                errors.Add($"{rawElmsCourse.Title}: {ex.Message}");
             }
         }
 
@@ -150,11 +161,14 @@ public sealed class ElmsBasinSyncService
     /// </summary>
     public async Task<IReadOnlyList<AppNotification>> FastPollAssignmentsAsync(
         string basinRoot,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool allowInteractiveAuth = true)
     {
         var notifications = new List<AppNotification>();
         var config = await _basinService.InitializeOrOpenAsync(basinRoot, ct: ct);
-        await _elmsClient.EnsureConnectedAsync(new AuthOptions { BaseUrl = config.ElmsBaseUrl }, ct);
+        await _elmsClient.EnsureConnectedAsync(
+            new AuthOptions { BaseUrl = config.ElmsBaseUrl, AllowInteractiveBrowser = allowInteractiveAuth },
+            ct);
 
         var courses = (await _basinService.LoadCoursesAsync(basinRoot, ct))
             .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))

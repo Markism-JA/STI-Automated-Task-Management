@@ -49,14 +49,22 @@ public sealed class ElmsPollingService : IAsyncDisposable
         _loopTask = null;
     }
 
-    public async Task<IReadOnlyList<AppNotification>> TriggerFastPollAsync(string basinRoot, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AppNotification>> TriggerFastPollAsync(
+        string basinRoot,
+        CancellationToken ct = default,
+        bool allowInteractiveAuth = true)
     {
         try
         {
-            var notifs = await _syncService.FastPollAssignmentsAsync(basinRoot, ct);
+            var notifs = await _syncService.FastPollAssignmentsAsync(basinRoot, ct, allowInteractiveAuth);
             foreach (var n in notifs)
                 NotificationEmitted?.Invoke(this, n);
             return notifs;
+        }
+        catch (ScholarFlow.Elms.Models.ElmsAuthenticationRequiredException ex)
+        {
+            _logger?.LogInformation("Skipping background fast poll: {Message}", ex.Message);
+            return [];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -67,9 +75,17 @@ public sealed class ElmsPollingService : IAsyncDisposable
         }
     }
 
-    public async Task<BasinSyncReport> TriggerFullSyncAsync(string basinRoot, bool force = false, CancellationToken ct = default)
+    public async Task<BasinSyncReport> TriggerFullSyncAsync(
+        string basinRoot,
+        bool force = false,
+        CancellationToken ct = default,
+        bool allowInteractiveAuth = true)
     {
-        var report = await _syncService.SyncAllAsync(basinRoot, forceRedownload: force, ct: ct);
+        var report = await _syncService.SyncAllAsync(
+            basinRoot,
+            forceRedownload: force,
+            ct: ct,
+            allowInteractiveAuth: allowInteractiveAuth);
         foreach (var n in report.Notifications)
             NotificationEmitted?.Invoke(this, n);
         return report;
@@ -77,34 +93,38 @@ public sealed class ElmsPollingService : IAsyncDisposable
 
     private async Task RunLoopAsync(string basinRoot, TimeSpan fastInterval, TimeSpan fullInterval, CancellationToken ct)
     {
-        var lastFullSync = DateTimeOffset.MinValue;
+        var lastFullSync = DateTimeOffset.UtcNow;
         using var timer = new PeriodicTimer(fastInterval);
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
+                // Wait for the first interval tick before polling in the background so app startup never spams eLMS
+                if (!await timer.WaitForNextTickAsync(ct))
+                    break;
+
                 if (DateTimeOffset.UtcNow - lastFullSync >= fullInterval)
                 {
-                    await TriggerFullSyncAsync(basinRoot, force: false, ct);
+                    await TriggerFullSyncAsync(basinRoot, force: false, ct, allowInteractiveAuth: false);
                     lastFullSync = DateTimeOffset.UtcNow;
                 }
                 else
                 {
-                    await TriggerFastPollAsync(basinRoot, ct);
+                    await TriggerFastPollAsync(basinRoot, ct, allowInteractiveAuth: false);
                 }
-
-                if (!await timer.WaitForNextTickAsync(ct))
-                    break;
             }
             catch (OperationCanceledException)
             {
                 break;
             }
+            catch (ScholarFlow.Elms.Models.ElmsAuthenticationRequiredException ex)
+            {
+                _logger?.LogInformation("Background sync deferred until user re-authenticates: {Message}", ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Unhandled error in polling loop");
-                NotificationEmitted?.Invoke(this, new AppNotification(NotificationKind.Error, "Sync Loop Error", ex.Message));
                 await Task.Delay(TimeSpan.FromMinutes(1), ct);
             }
         }

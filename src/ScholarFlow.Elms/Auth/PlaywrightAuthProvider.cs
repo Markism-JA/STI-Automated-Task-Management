@@ -29,13 +29,26 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
         {
             // 1. Fast path: validate cached session.json via HttpClient without launching Chromium
             var cached = await ElmsSessionStore.LoadAsync(options.SessionFilePath, ct);
-            if (cached is not null && await ValidateSessionAsync(cached, ct))
+            if (cached is not null)
             {
-                _logger?.LogInformation("Reused cached HTTP session ({CookieCount} cookies).", cached.Cookies.Count);
-                return cached;
+                var validated = await ValidateAndRefreshCookiesAsync(cached, options.SessionFilePath, ct);
+                if (validated is not null)
+                {
+                    _logger?.LogInformation("Reused cached HTTP session ({CookieCount} cookies).", validated.Cookies.Count);
+                    return validated;
+                }
+
+                // 2. Silent HTTP Microsoft Entra SSO refresh using cached ESTSAUTHPERSISTENT cookies (zero browser launch)
+                var silentSso = await TrySilentHttpSsoRefreshAsync(cached, options, ct);
+                if (silentSso is not null)
+                {
+                    await ElmsSessionStore.SaveAsync(silentSso, options.SessionFilePath, ct);
+                    _logger?.LogInformation("Silently refreshed eLMS session via HTTP Microsoft Entra SSO ({CookieCount} cookies).", silentSso.Cookies.Count);
+                    return silentSso;
+                }
             }
 
-            // 2. Headless Playwright persistent profile (+ optional automated credential login)
+            // 3. Headless Playwright persistent profile (+ Microsoft SSO redirect or optional automated credential login)
             var credentials = ResolveCredentials(options);
             var headlessSession = await TryCaptureSessionAsync(options, headless: true, credentials, ct);
             if (headlessSession is not null)
@@ -43,6 +56,12 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
                 await ElmsSessionStore.SaveAsync(headlessSession, options.SessionFilePath, ct);
                 _logger?.LogInformation("Established headless Playwright session ({CookieCount} cookies).", headlessSession.Cookies.Count);
                 return headlessSession;
+            }
+
+            if (!options.AllowInteractiveBrowser)
+            {
+                throw new ElmsAuthenticationRequiredException(
+                    "eLMS session expired and interactive browser login is disabled for background sync. Click 'Sync eLMS' to sign in.");
             }
 
             _logger?.LogInformation("Headless session unavailable; launching interactive login window.");
@@ -58,8 +77,17 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
 
     public async Task<bool> ValidateSessionAsync(ElmsSession session, CancellationToken ct = default)
     {
+        var updated = await ValidateAndRefreshCookiesAsync(session, sessionFilePath: null, ct);
+        return updated is not null;
+    }
+
+    private async Task<ElmsSession?> ValidateAndRefreshCookiesAsync(
+        ElmsSession session,
+        string? sessionFilePath,
+        CancellationToken ct)
+    {
         if (!session.HasCookies)
-            return false;
+            return null;
 
         try
         {
@@ -70,14 +98,107 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
             var dashboardUrl = $"{session.BaseUrl.TrimEnd('/')}/user_dashboard";
             using var response = await client.GetAsync(dashboardUrl, ct);
             if (!response.IsSuccessStatusCode)
-                return false;
+                return null;
 
             var html = await response.Content.ReadAsStringAsync(ct);
-            return !HtmlParsingHelpers.IsLoginRedirectHtml(html, response.RequestMessage?.RequestUri);
+            if (HtmlParsingHelpers.IsLoginRedirectHtml(html, response.RequestMessage?.RequestUri))
+                return null;
+
+            var updatedSession = MergeContainerCookies(session, handler.CookieContainer, replaceStiCookies: false);
+            if (!string.IsNullOrWhiteSpace(sessionFilePath))
+            {
+                await ElmsSessionStore.SaveAsync(updatedSession, sessionFilePath, ct);
+            }
+
+            return updatedSession;
         }
         catch
         {
-            return false;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to silently re-authenticate against STI eLMS over pure HttpClient using cached Microsoft Entra SSO cookies
+    /// (ESTSAUTHPERSISTENT / ESTSAUTH on login.microsoftonline.com), avoiding any browser window launch.
+    /// </summary>
+    private async Task<ElmsSession?> TrySilentHttpSsoRefreshAsync(
+        ElmsSession cachedSession,
+        AuthOptions options,
+        CancellationToken ct)
+    {
+        var msCookies = cachedSession.Cookies
+            .Where(c =>
+                c.Domain.Contains("microsoftonline.com", StringComparison.OrdinalIgnoreCase) ||
+                c.Domain.Contains("microsoft.com", StringComparison.OrdinalIgnoreCase) ||
+                c.Domain.Contains("live.com", StringComparison.OrdinalIgnoreCase) ||
+                c.Domain.Contains("msauth.net", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (msCookies.Count == 0)
+            return null;
+
+        try
+        {
+            var container = new CookieContainer();
+            foreach (var c in msCookies)
+            {
+                if (c.ExpiresAt.HasValue && c.ExpiresAt.Value <= DateTimeOffset.UtcNow)
+                    continue;
+
+                var cleanDomain = c.Domain.TrimStart('.');
+                if (string.IsNullOrWhiteSpace(cleanDomain))
+                    continue;
+
+                try
+                {
+                    var cookie = new System.Net.Cookie(
+                        c.Name,
+                        c.Value,
+                        string.IsNullOrEmpty(c.Path) ? "/" : c.Path,
+                        c.Domain)
+                    {
+                        Secure = c.Secure,
+                        HttpOnly = c.HttpOnly
+                    };
+                    container.Add(new Uri($"https://{cleanDomain}"), cookie);
+                }
+                catch
+                {
+                    // Ignore malformed third-party cookies
+                }
+            }
+
+            using var handler = new HttpClientHandler
+            {
+                CookieContainer = container,
+                AllowAutoRedirect = true,
+                AutomaticDecompression = DecompressionMethods.All
+            };
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(cachedSession.UserAgent);
+
+            var ssoUrl = $"{options.BaseUrl.TrimEnd('/')}/auth/microsoft_office365?state=%7B%22visitor_portal_id%22%3A1200%7D";
+            using var response = await client.GetAsync(ssoUrl, ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var finalUri = response.RequestMessage?.RequestUri;
+            var html = await response.Content.ReadAsStringAsync(ct);
+
+            if (finalUri is null ||
+                !IsOnDashboard(finalUri.ToString()) ||
+                HtmlParsingHelpers.IsLoginRedirectHtml(html, finalUri))
+            {
+                return null;
+            }
+
+            return MergeContainerCookies(cachedSession, container, replaceStiCookies: true);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug("Silent HTTP Microsoft SSO refresh did not succeed: {Message}", ex.Message);
+            return null;
         }
     }
 
@@ -110,6 +231,23 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
 
         if (IsOnDashboard(page.Url))
             return await ExtractSessionAsync(context, page, options.BaseUrl);
+
+        // Try direct Microsoft Office 365 SSO redirect using persistent Chromium cookies
+        try
+        {
+            var ssoUrl = $"{options.BaseUrl.TrimEnd('/')}/auth/microsoft_office365?state=%7B%22visitor_portal_id%22%3A1200%7D";
+            await page.GotoAsync(ssoUrl, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 20000
+            });
+            if (IsOnDashboard(page.Url))
+                return await ExtractSessionAsync(context, page, options.BaseUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug("Playwright SSO redirect probe did not land on dashboard: {Message}", ex.Message);
+        }
 
         if (credentials is not null)
         {
@@ -263,6 +401,74 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
             CookieContainer = container,
             AllowAutoRedirect = true,
             AutomaticDecompression = DecompressionMethods.All
+        };
+    }
+
+    internal static void PopulateCookieContainer(CookieContainer container, ElmsSession session)
+    {
+        var baseUri = new Uri(session.BaseUrl);
+
+        foreach (var c in session.Cookies)
+        {
+            if (!ElmsUrlCanonicalizer.IsSameOrSubdomain(c.Domain, baseUri.Host))
+                continue;
+
+            try
+            {
+                var cookie = new System.Net.Cookie(c.Name, c.Value, string.IsNullOrEmpty(c.Path) ? "/" : c.Path, c.Domain.TrimStart('.'))
+                {
+                    Secure = c.Secure,
+                    HttpOnly = c.HttpOnly
+                };
+                container.Add(baseUri, cookie);
+            }
+            catch (CookieException)
+            {
+                // Ignore third-party cookies incompatible with baseUri
+            }
+        }
+    }
+
+    internal static ElmsSession MergeContainerCookies(
+        ElmsSession baseSession,
+        CookieContainer container,
+        bool replaceStiCookies)
+    {
+        var baseHost = new Uri(baseSession.BaseUrl).Host;
+        var merged = new Dictionary<string, ElmsCookie>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var existing in baseSession.Cookies)
+        {
+            if (replaceStiCookies && ElmsUrlCanonicalizer.IsSameOrSubdomain(existing.Domain, baseHost))
+                continue;
+
+            var key = $"{existing.Domain.TrimStart('.')}|{existing.Path}|{existing.Name}";
+            merged[key] = existing;
+        }
+
+        foreach (System.Net.Cookie c in container.GetAllCookies())
+        {
+            if (c.Expired)
+                continue;
+
+            var domain = string.IsNullOrWhiteSpace(c.Domain) ? baseHost : c.Domain;
+            var path = string.IsNullOrWhiteSpace(c.Path) ? "/" : c.Path;
+            var key = $"{domain.TrimStart('.')}|{path}|{c.Name}";
+
+            merged[key] = new ElmsCookie(
+                Name: c.Name,
+                Value: c.Value,
+                Domain: domain,
+                Path: path,
+                Secure: c.Secure,
+                HttpOnly: c.HttpOnly,
+                ExpiresAt: c.Expires == DateTime.MinValue ? null : new DateTimeOffset(c.Expires.ToUniversalTime()));
+        }
+
+        return baseSession with
+        {
+            Cookies = merged.Values.ToList(),
+            AuthenticatedAt = DateTimeOffset.UtcNow
         };
     }
 }

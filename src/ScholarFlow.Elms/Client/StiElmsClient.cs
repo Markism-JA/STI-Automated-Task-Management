@@ -18,21 +18,36 @@ public sealed class StiElmsClient : IElmsClient
 
     private AuthOptions _authOptions = new();
     private ElmsSession? _session;
-    private HttpClient? _httpClient;
-    private HttpClientHandler? _httpHandler;
+    private readonly CookieContainer _cookieContainer = new();
+    private readonly HttpClientHandler _httpHandler;
+    private readonly HttpClient _httpClient;
 
     public StiElmsClient(IElmsAuthProvider? authProvider = null, ILogger<StiElmsClient>? logger = null)
     {
         _authProvider = authProvider ?? new PlaywrightAuthProvider();
         _logger = logger;
+        _httpHandler = new HttpClientHandler
+        {
+            CookieContainer = _cookieContainer,
+            AllowAutoRedirect = true,
+            AutomaticDecompression = DecompressionMethods.All
+        };
+        _httpClient = new HttpClient(_httpHandler) { Timeout = TimeSpan.FromSeconds(60) };
     }
 
-    public HttpClient HttpClient => _httpClient ?? throw new InvalidOperationException("Client is not connected. Call EnsureConnectedAsync first.");
+    public HttpClient HttpClient => _session is not null
+        ? _httpClient
+        : throw new InvalidOperationException("Client is not connected. Call EnsureConnectedAsync first.");
     public string BaseUrl => _authOptions.BaseUrl.TrimEnd('/');
 
     public async Task EnsureConnectedAsync(AuthOptions? options = null, CancellationToken ct = default)
     {
-        if (_session is not null && _httpClient is not null && options?.ForceInteractive != true)
+        if (options is not null)
+        {
+            _authOptions = options;
+        }
+
+        if (_session is not null && options?.ForceInteractive != true)
             return;
 
         await _authLock.WaitAsync(ct);
@@ -41,11 +56,11 @@ public sealed class StiElmsClient : IElmsClient
             if (options is not null)
                 _authOptions = options;
 
-            if (_session is not null && _httpClient is not null && options?.ForceInteractive != true)
+            if (_session is not null && options?.ForceInteractive != true)
                 return;
 
             _session = await _authProvider.EnsureAuthenticatedAsync(_authOptions, ct);
-            RebuildHttpClient(_session);
+            ApplySessionToClient(_session);
         }
         finally
         {
@@ -260,12 +275,13 @@ public sealed class StiElmsClient : IElmsClient
     {
         await EnsureConnectedAsync(ct: ct);
         var targetUrl = HtmlParsingHelpers.ToAbsoluteUrl(urlOrPath, BaseUrl);
+        var sessionBefore = _session;
 
-        using var response = await HttpClient.GetAsync(targetUrl, ct);
+        using var response = await _httpClient.GetAsync(targetUrl, ct);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            await RefreshAndRebuildAsync(ct);
-            using var retry = await HttpClient.GetAsync(targetUrl, ct);
+            await RefreshAndRebuildAsync(sessionBefore, ct);
+            using var retry = await _httpClient.GetAsync(targetUrl, ct);
             retry.EnsureSuccessStatusCode();
             return await retry.Content.ReadAsStringAsync(ct);
         }
@@ -276,22 +292,31 @@ public sealed class StiElmsClient : IElmsClient
         if (HtmlParsingHelpers.IsLoginRedirectHtml(html, response.RequestMessage?.RequestUri))
         {
             _logger?.LogWarning("Detected login redirect while fetching {Url}; refreshing session.", targetUrl);
-            await RefreshAndRebuildAsync(ct);
-            using var retry = await HttpClient.GetAsync(targetUrl, ct);
+            await RefreshAndRebuildAsync(sessionBefore, ct);
+            using var retry = await _httpClient.GetAsync(targetUrl, ct);
             retry.EnsureSuccessStatusCode();
-            return await retry.Content.ReadAsStringAsync(ct);
+            var retryHtml = await retry.Content.ReadAsStringAsync(ct);
+            await PersistRotatedCookiesIfNeededAsync(ct);
+            return retryHtml;
         }
 
+        await PersistRotatedCookiesIfNeededAsync(ct);
         return html;
     }
 
-    private async Task RefreshAndRebuildAsync(CancellationToken ct)
+    private async Task RefreshAndRebuildAsync(ElmsSession? failedSession, CancellationToken ct)
     {
         await _authLock.WaitAsync(ct);
         try
         {
+            if (_session is not null && !ReferenceEquals(_session, failedSession))
+            {
+                // Another concurrent task already refreshed the session while we waited for the lock.
+                return;
+            }
+
             _session = await _authProvider.RefreshSessionAsync(_authOptions, ct);
-            RebuildHttpClient(_session);
+            ApplySessionToClient(_session);
         }
         finally
         {
@@ -299,20 +324,58 @@ public sealed class StiElmsClient : IElmsClient
         }
     }
 
-    private void RebuildHttpClient(ElmsSession session)
+    private void ApplySessionToClient(ElmsSession session)
     {
-        _httpClient?.Dispose();
-        _httpHandler?.Dispose();
+        PlaywrightAuthProvider.PopulateCookieContainer(_cookieContainer, session);
+        _httpClient.DefaultRequestHeaders.UserAgent.Clear();
+        if (!string.IsNullOrWhiteSpace(session.UserAgent))
+        {
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(session.UserAgent);
+        }
+    }
 
-        _httpHandler = PlaywrightAuthProvider.CreateCookieHandler(session);
-        _httpClient = new HttpClient(_httpHandler) { Timeout = TimeSpan.FromSeconds(60) };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(session.UserAgent);
+    private async Task PersistRotatedCookiesIfNeededAsync(CancellationToken ct)
+    {
+        var current = _session;
+        if (current is null || string.IsNullOrWhiteSpace(_authOptions.SessionFilePath))
+            return;
+
+        try
+        {
+            var baseUri = new Uri(current.BaseUrl);
+            var containerCookies = _cookieContainer.GetCookies(baseUri);
+            var liveSessionCookie = containerCookies["lms_session_v1"]?.Value;
+            var cachedSessionCookie = current.Cookies
+                .FirstOrDefault(c => c.Name.Equals("lms_session_v1", StringComparison.OrdinalIgnoreCase))?.Value;
+
+            if (!string.IsNullOrWhiteSpace(liveSessionCookie) &&
+                !string.Equals(liveSessionCookie, cachedSessionCookie, StringComparison.Ordinal))
+            {
+                await _authLock.WaitAsync(ct);
+                try
+                {
+                    if (_session is not null)
+                    {
+                        _session = PlaywrightAuthProvider.MergeContainerCookies(_session, _cookieContainer, replaceStiCookies: false);
+                        await Sync.ElmsSessionStore.SaveAsync(_session, _authOptions.SessionFilePath, ct);
+                    }
+                }
+                finally
+                {
+                    _authLock.Release();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore non-fatal cookie persistence race
+        }
     }
 
     public ValueTask DisposeAsync()
     {
-        _httpClient?.Dispose();
-        _httpHandler?.Dispose();
+        _httpClient.Dispose();
+        _httpHandler.Dispose();
         _authLock.Dispose();
         return ValueTask.CompletedTask;
     }

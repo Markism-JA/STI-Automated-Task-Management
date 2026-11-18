@@ -34,6 +34,24 @@ public sealed class MasterPdfService
     public static string GetPdfStatePath(string basinRoot)
         => Path.Combine(basinRoot, ".scholarflow", "pdf_state.json");
 
+    public static string GetExpectedMasterPdfPath(string basinRoot, string courseFolder)
+        => Path.Combine(basinRoot, courseFolder, $"{courseFolder}_Master.pdf");
+
+    public static string? FindExistingMasterPdfPath(string basinRoot, string courseFolder)
+    {
+        var coursePath = Path.Combine(basinRoot, courseFolder);
+        if (!Directory.Exists(coursePath))
+            return null;
+
+        var exact = Path.Combine(coursePath, $"{courseFolder}_Master.pdf");
+        if (File.Exists(exact))
+            return exact;
+
+        return Directory.EnumerateFiles(coursePath, "*_Master.pdf", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+    }
+
     public async Task<MasterPdfCompileResult> CompileIfStaleAsync(
         string basinRoot,
         string courseFolder,
@@ -61,7 +79,7 @@ public sealed class MasterPdfService
 
         int pageCount = await Task.Run(() => CompileCourseSync(coursePath, title, outPath, ct), ct);
 
-        state[courseFolder] = fingerprint;
+        state[courseFolder] = ComputeCourseFingerprint(coursePath);
         await SaveStateAsync(statePath, state, ct);
 
         return new MasterPdfCompileResult(courseFolder, outPath, WasRegenerated: true, PageCount: pageCount);
@@ -96,7 +114,7 @@ public sealed class MasterPdfService
         {
             var startLogical = destDoc.PageCount;
             var dirPath = Path.Combine(subjectPath, syllabusDir);
-            var files = Directory.GetFiles(dirPath, "*.pdf", SearchOption.TopDirectoryOnly).OrderBy(f => f).ToList();
+            var files = GetUniquePdfFiles(dirPath);
             if (files.Count > 0)
             {
                 foreach (var f in files)
@@ -110,8 +128,8 @@ public sealed class MasterPdfService
             }
         }
 
-        // 3. Term Logic from term.json
-        var termConfig = LoadTermConfig(Path.Combine(subjectPath, "term.json"));
+        // 3. Term Logic from term.json (with smart STI 4-term fallback for unmapped numbered prefixes)
+        var termConfig = LoadOrInferTermConfig(Path.Combine(subjectPath, "term.json"), allDirs);
         foreach (var (term, prefixes) in termConfig)
         {
             var handouts = new List<string>();
@@ -119,13 +137,21 @@ public sealed class MasterPdfService
 
             foreach (var prefix in prefixes)
             {
-                var matches = allDirs.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+                var matches = allDirs.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !categorized.Contains(d)).ToList();
                 foreach (var m in matches)
                 {
-                    if (m.Contains("activity", StringComparison.OrdinalIgnoreCase))
+                    if (m.Contains("activity", StringComparison.OrdinalIgnoreCase) ||
+                        m.Contains("quiz", StringComparison.OrdinalIgnoreCase) ||
+                        m.Contains("seatwork", StringComparison.OrdinalIgnoreCase) ||
+                        m.Contains("exercise", StringComparison.OrdinalIgnoreCase) ||
+                        m.Contains("task", StringComparison.OrdinalIgnoreCase))
+                    {
                         activities.Add(m);
+                    }
                     else
+                    {
                         handouts.Add(m);
+                    }
                     categorized.Add(m);
                 }
             }
@@ -141,7 +167,7 @@ public sealed class MasterPdfService
             foreach (var mod in handouts.OrderBy(m => m, StringComparer.OrdinalIgnoreCase))
             {
                 var mPath = Path.Combine(subjectPath, mod);
-                var files = Directory.GetFiles(mPath, "*.pdf", SearchOption.TopDirectoryOnly).OrderBy(f => f).ToList();
+                var files = GetUniquePdfFiles(mPath);
                 if (files.Count == 0)
                     continue;
 
@@ -166,7 +192,7 @@ public sealed class MasterPdfService
                 foreach (var act in activities.OrderBy(a => a, StringComparer.OrdinalIgnoreCase))
                 {
                     var mPath = Path.Combine(subjectPath, act);
-                    var files = Directory.GetFiles(mPath, "*.pdf", SearchOption.TopDirectoryOnly).OrderBy(f => f).ToList();
+                    var files = GetUniquePdfFiles(mPath);
                     if (files.Count == 0)
                         continue;
 
@@ -188,7 +214,7 @@ public sealed class MasterPdfService
         var appendixDirs = allDirs
             .Where(d => !categorized.Contains(d))
             .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
-            .Select(d => (Name: d, Files: Directory.GetFiles(Path.Combine(subjectPath, d), "*.pdf", SearchOption.TopDirectoryOnly).OrderBy(f => f).ToList()))
+            .Select(d => (Name: d, Files: GetUniquePdfFiles(Path.Combine(subjectPath, d))))
             .Where(x => x.Files.Count > 0)
             .ToList();
 
@@ -261,54 +287,157 @@ public sealed class MasterPdfService
             pigBoxes = null;
         }
 
-        using var form = XPdfForm.FromFile(srcPath);
-        for (int idx = 0; idx < form.PageCount; idx++)
+        using var form = OpenPdfFormSafe(srcPath, out var tempNormPath);
+        try
         {
-            form.PageNumber = idx + 1;
-            double w = form.PointWidth;
-            double h = form.PointHeight;
-            if (w <= 0 || h <= 0)
-                continue;
-
-            var contentBox = (pigBoxes is not null && idx < pigBoxes.Count)
-                ? pigBoxes[idx]
-                : new ContentBox(0.0, 0.0, w, h, w, h);
-
-            if (contentBox.W < 50 || contentBox.H < 50)
-                contentBox = new ContentBox(0, 0, w, h, w, h);
-
-            if (w > h)
+            for (int idx = 0; idx < form.PageCount; idx++)
             {
-                if (forceRotate)
+                form.PageNumber = idx + 1;
+                double w = form.PointWidth;
+                double h = form.PointHeight;
+                if (w <= 0 || h <= 0)
+                    continue;
+
+                var contentBox = (pigBoxes is not null && idx < pigBoxes.Count)
+                    ? pigBoxes[idx]
+                    : new ContentBox(0.0, 0.0, w, h, w, h);
+
+                if (contentBox.W < 50 || contentBox.H < 50)
+                    contentBox = new ContentBox(0, 0, w, h, w, h);
+
+                if (w > h)
                 {
-                    var page = AddA4Page(destDoc);
-                    using var gfx = XGraphics.FromPdfPage(page);
-                    var target = GetTargetRectForContent(contentBox.H, contentBox.W);
+                    if (forceRotate)
+                    {
+                        var page = AddA4Page(destDoc);
+                        using var gfx = XGraphics.FromPdfPage(page);
+                        var target = GetTargetRectForContent(contentBox.H, contentBox.W);
 
-                    gfx.Save();
-                    gfx.TranslateTransform(target.X + target.Width / 2, target.Y + target.Height / 2);
-                    gfx.RotateTransform(90);
-                    gfx.TranslateTransform(-(target.Height / 2), -(target.Width / 2));
+                        gfx.Save();
+                        gfx.TranslateTransform(target.X + target.Width / 2, target.Y + target.Height / 2);
+                        gfx.RotateTransform(90);
+                        gfx.TranslateTransform(-(target.Height / 2), -(target.Width / 2));
 
-                    var scale = Math.Min(target.Height / contentBox.W, target.Width / contentBox.H);
-                    gfx.IntersectClip(new XRect(0, 0, contentBox.W * scale, contentBox.H * scale));
-                    gfx.DrawImage(
-                        form,
-                        new XRect(-contentBox.X0 * scale, -contentBox.Y0 * scale, w * scale, h * scale));
-                    gfx.Restore();
+                        var scale = Math.Min(target.Height / contentBox.W, target.Width / contentBox.H);
+                        gfx.IntersectClip(new XRect(0, 0, contentBox.W * scale, contentBox.H * scale));
+                        gfx.DrawImage(
+                            form,
+                            new XRect(-contentBox.X0 * scale, -contentBox.Y0 * scale, w * scale, h * scale));
+                        gfx.Restore();
+                    }
+                    else
+                    {
+                        double midW = w / 2.0;
+                        DrawClippedRegion(destDoc, form, w, h, new XRect(0, 0, midW, h));
+                        DrawClippedRegion(destDoc, form, w, h, new XRect(midW, 0, midW, h));
+                    }
                 }
                 else
                 {
-                    double midW = w / 2.0;
-                    DrawClippedRegion(destDoc, form, w, h, new XRect(0, 0, midW, h));
-                    DrawClippedRegion(destDoc, form, w, h, new XRect(midW, 0, midW, h));
+                    DrawClippedRegion(destDoc, form, w, h, new XRect(contentBox.X0, contentBox.Y0, contentBox.W, contentBox.H));
                 }
             }
-            else
+        }
+        finally
+        {
+            if (tempNormPath is not null && File.Exists(tempNormPath))
             {
-                DrawClippedRegion(destDoc, form, w, h, new XRect(contentBox.X0, contentBox.Y0, contentBox.W, contentBox.H));
+                try { File.Delete(tempNormPath); } catch { /* ignore */ }
             }
         }
+    }
+
+    /// <summary>
+    /// Normalizes unsigned 32-bit /P permissions integers (e.g. /P 4294965444 -> /P -1852     )
+    /// that cause PdfSharpCore's EncryptorBase.Initialize -> DictionaryElements.GetInteger("/P")
+    /// to throw InvalidCastException ("GetInteger: Object is not an integer.").
+    /// Preserves exact byte length so PDF xref byte offsets remain 100% intact.
+    /// </summary>
+    private static XPdfForm OpenPdfFormSafe(string srcPath, out string? tempNormalizedPath)
+    {
+        tempNormalizedPath = null;
+        NormalizeUnsignedPdfPermissionsInPlace(srcPath);
+        return XPdfForm.FromFile(srcPath);
+    }
+
+    public static bool NormalizeUnsignedPdfPermissionsInPlace(string pdfPath)
+    {
+        if (!File.Exists(pdfPath))
+            return false;
+
+        var bytes = File.ReadAllBytes(pdfPath);
+        var text = Encoding.Latin1.GetString(bytes);
+        if (!System.Text.RegularExpressions.Regex.IsMatch(text, @"/P\s+\d{10}\b"))
+            return false;
+
+        bool modified = false;
+        var patched = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"/P\s+(\d{10})\b",
+            m =>
+            {
+                if (uint.TryParse(m.Groups[1].Value, out uint u) && u > int.MaxValue)
+                {
+                    modified = true;
+                    int signed = unchecked((int)u);
+                    var rep = $"/P {signed}";
+                    return rep.PadRight(m.Value.Length, ' ');
+                }
+                return m.Value;
+            });
+
+        if (modified)
+        {
+            File.WriteAllBytes(pdfPath, Encoding.Latin1.GetBytes(patched));
+        }
+
+        return modified;
+    }
+
+    private static List<string> GetUniquePdfFiles(string dirPath)
+    {
+        if (!Directory.Exists(dirPath))
+            return [];
+
+        var allFiles = Directory.GetFiles(dirPath, "*.pdf", SearchOption.TopDirectoryOnly)
+            .OrderBy(f => Path.GetFileNameWithoutExtension(f).EndsWith('_') ? 1 : 0)
+            .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var unique = new List<string>();
+        var seenStems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in allFiles)
+        {
+            var rawStem = Path.GetFileNameWithoutExtension(file);
+            var cleanStem = rawStem.TrimEnd('_', ' ', '.');
+
+            string hash;
+            try
+            {
+                NormalizeUnsignedPdfPermissionsInPlace(file);
+                hash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)));
+            }
+            catch
+            {
+                hash = cleanStem;
+            }
+
+            if (!seenStems.Add(cleanStem) || !seenHashes.Add(hash))
+            {
+                // If this is a legacy trailing-underscore duplicate (e.g. 05_Handout_1_.pdf alongside 05_Handout_1.pdf), clean it up
+                if (rawStem.EndsWith('_'))
+                {
+                    try { File.Delete(file); } catch { /* ignore */ }
+                }
+                continue;
+            }
+
+            unique.Add(file);
+        }
+
+        return unique;
     }
 
     private static void DrawClippedRegion(PdfSharpDocument destDoc, XPdfForm form, double fullW, double fullH, XRect srcClip)
@@ -520,20 +649,71 @@ public sealed class MasterPdfService
         return lines;
     }
 
-    private static Dictionary<string, List<string>> LoadTermConfig(string termJsonPath)
+    private static Dictionary<string, List<string>> LoadOrInferTermConfig(string termJsonPath, List<string> allDirs)
     {
-        if (!File.Exists(termJsonPath))
-            return [];
+        var config = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Prelims"] = [],
+            ["Midterms"] = [],
+            ["Prefinals"] = [],
+            ["Finals"] = []
+        };
 
-        try
+        if (File.Exists(termJsonPath))
         {
-            var json = File.ReadAllText(termJsonPath);
-            return JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json) ?? [];
+            try
+            {
+                var json = File.ReadAllText(termJsonPath);
+                var loaded = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
+                if (loaded is not null)
+                {
+                    foreach (var (k, v) in loaded)
+                        config[k] = v ?? [];
+                }
+            }
+            catch
+            {
+                // Fall back to inference
+            }
         }
-        catch
+
+        var assignedPrefixes = config.Values.SelectMany(x => x).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Discover any numbered module folders (e.g., 01_Handout_1 .. 09_Handout_1) not covered by term.json
+        var numberedPrefixes = allDirs
+            .Where(d => d.Length >= 2 && char.IsDigit(d[0]) && char.IsDigit(d[1]))
+            .Select(d => d[..2])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var prefix in numberedPrefixes)
         {
-            return [];
+            if (assignedPrefixes.Contains(prefix))
+                continue;
+
+            if (!int.TryParse(prefix, out int num))
+                continue;
+
+            // Standard STI 4-term module distribution fallback
+            var targetTerm = num switch
+            {
+                <= 2 => "Prelims",
+                <= 4 => "Midterms",
+                <= 6 => "Prefinals",
+                _ => "Finals"
+            };
+
+            if (!config.TryGetValue(targetTerm, out var list))
+            {
+                list = [];
+                config[targetTerm] = list;
+            }
+
+            list.Add(prefix);
         }
+
+        return config;
     }
 
     internal static string ComputeCourseFingerprint(string coursePath)

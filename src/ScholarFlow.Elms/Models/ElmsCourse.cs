@@ -99,6 +99,8 @@ public sealed record ElmsCourseSnapshot(
             ["Finals"] = []
         };
 
+        var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var mod in Modules)
         {
             if (string.IsNullOrWhiteSpace(mod.TermHeader) || string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix))
@@ -111,7 +113,34 @@ public sealed record ElmsCourseSnapshot(
             }
 
             if (!list.Contains(mod.ModuleNumberPrefix, StringComparer.OrdinalIgnoreCase))
+            {
                 list.Add(mod.ModuleNumberPrefix);
+                assigned.Add(mod.ModuleNumberPrefix);
+            }
+        }
+
+        // Standard STI 4-term fallback for numbered modules when instructor omitted (Prelim)/(Midterm) from module title
+        foreach (var mod in Modules)
+        {
+            if (string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix) || assigned.Contains(mod.ModuleNumberPrefix))
+                continue;
+
+            if (!int.TryParse(mod.ModuleNumberPrefix, out int num))
+                continue;
+
+            var inferredTerm = num switch
+            {
+                <= 2 => "Prelims",
+                <= 4 => "Midterms",
+                <= 6 => "Prefinals",
+                _ => "Finals"
+            };
+
+            if (!map[inferredTerm].Contains(mod.ModuleNumberPrefix, StringComparer.OrdinalIgnoreCase))
+            {
+                map[inferredTerm].Add(mod.ModuleNumberPrefix);
+                assigned.Add(mod.ModuleNumberPrefix);
+            }
         }
 
         return map;
