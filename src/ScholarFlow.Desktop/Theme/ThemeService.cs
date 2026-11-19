@@ -74,6 +74,16 @@ public static class ThemeService
             SetBrush(res, PriorityP4Bg, "#22242A");
             SetBrush(res, SuccessFg, "#45C486");
             SetBrush(res, SuccessBg, "#182B22");
+
+            // FluentTheme input controls (avoid pitch-black default TextBox/CalendarDatePicker)
+            SetBrush(res, "TextControlBackground", "#1D2027");
+            SetBrush(res, "TextControlBackgroundPointerOver", "#232730");
+            SetBrush(res, "TextControlBackgroundFocused", "#181B21");
+            SetBrush(res, "TextControlBorderBrush", "#2E333F");
+            SetBrush(res, "TextControlBorderBrushPointerOver", "#3E4554");
+            SetBrush(res, "TextControlBorderBrushFocused", "#E0564B");
+            SetBrush(res, "TextControlForeground", "#EAECEF");
+            SetBrush(res, "TextControlPlaceholderForeground", "#686F7C");
         }
         else
         {
@@ -100,6 +110,16 @@ public static class ThemeService
             SetBrush(res, PriorityP4Bg, "#F2F3F5");
             SetBrush(res, SuccessFg, "#1F8A58");
             SetBrush(res, SuccessBg, "#EAF7F0");
+
+            // FluentTheme input controls (warm paper surface instead of harsh pure white)
+            SetBrush(res, "TextControlBackground", "#F7F6F3");
+            SetBrush(res, "TextControlBackgroundPointerOver", "#F1EFEA");
+            SetBrush(res, "TextControlBackgroundFocused", "#FFFFFF");
+            SetBrush(res, "TextControlBorderBrush", "#D6D4CE");
+            SetBrush(res, "TextControlBorderBrushPointerOver", "#B8B5AE");
+            SetBrush(res, "TextControlBorderBrushFocused", "#DC4C3E");
+            SetBrush(res, "TextControlForeground", "#1E2024");
+            SetBrush(res, "TextControlPlaceholderForeground", "#8E939D");
         }
 
         ThemeChanged?.Invoke(null, mode);

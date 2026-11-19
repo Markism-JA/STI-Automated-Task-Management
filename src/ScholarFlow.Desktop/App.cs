@@ -53,6 +53,15 @@ public sealed class App : Application
             }
         };
         Styles.Add(textBoxStyle);
+
+        var datePickerStyle = new Style(x => x.OfType<CalendarDatePicker>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6))
+            }
+        };
+        Styles.Add(datePickerStyle);
     }
 
     public override void OnFrameworkInitializationCompleted()
