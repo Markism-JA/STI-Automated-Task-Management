@@ -212,13 +212,10 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
         CancellationToken ct)
     {
         using var playwright = await Playwright.CreateAsync();
-        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
+        await using var context = await LaunchPersistentContextWithFallbackAsync(
+            playwright,
             options.BrowserProfileDirectory,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                Headless = headless,
-                Args = ["--no-sandbox", "--disable-setuid-sandbox"]
-            });
+            headless);
 
         var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
         var dashboardUrl = $"{options.BaseUrl.TrimEnd('/')}/user_dashboard";
@@ -470,5 +467,56 @@ public sealed class PlaywrightAuthProvider : IElmsAuthProvider
             Cookies = merged.Values.ToList(),
             AuthenticatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    private async Task<IBrowserContext> LaunchPersistentContextWithFallbackAsync(
+        IPlaywright playwright,
+        string profileDir,
+        bool headless)
+    {
+        var launchOpts = new BrowserTypeLaunchPersistentContextOptions
+        {
+            Headless = headless,
+            Args = ["--no-sandbox", "--disable-setuid-sandbox"]
+        };
+
+        var discoveredExe = ElmsBrowserLauncher.FindChromiumExecutable();
+        if (!string.IsNullOrWhiteSpace(discoveredExe))
+        {
+            launchOpts.ExecutablePath = discoveredExe;
+            return await playwright.Chromium.LaunchPersistentContextAsync(profileDir, launchOpts);
+        }
+
+        try
+        {
+            return await playwright.Chromium.LaunchPersistentContextAsync(profileDir, launchOpts);
+        }
+        catch (PlaywrightException ex) when (ex.Message.Contains("Executable doesn't exist", StringComparison.OrdinalIgnoreCase))
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                foreach (var channel in new[] { "msedge", "chrome" })
+                {
+                    try
+                    {
+                        var chOpts = new BrowserTypeLaunchPersistentContextOptions
+                        {
+                            Headless = headless,
+                            Channel = channel,
+                            Args = ["--no-sandbox", "--disable-setuid-sandbox"]
+                        };
+                        return await playwright.Chromium.LaunchPersistentContextAsync(profileDir, chOpts);
+                    }
+                    catch
+                    {
+                        // Try next channel
+                    }
+                }
+            }
+
+            _logger?.LogInformation("Installing Playwright Chromium browser on first run...");
+            Microsoft.Playwright.Program.Main(["install", "chromium"]);
+            return await playwright.Chromium.LaunchPersistentContextAsync(profileDir, launchOpts);
+        }
     }
 }
