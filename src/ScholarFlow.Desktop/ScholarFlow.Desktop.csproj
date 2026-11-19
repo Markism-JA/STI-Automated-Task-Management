@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <AssemblyName>ScholarFlow</AssemblyName>
     <Version>1.0.0</Version>
+    <ApplicationIcon>..\..\assets\scholarflow.ico</ApplicationIcon>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
