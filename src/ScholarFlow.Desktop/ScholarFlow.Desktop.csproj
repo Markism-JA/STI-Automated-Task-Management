@@ -13,6 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\scholarflow.ico" LogicalName="ScholarFlow.Assets.scholarflow.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ScholarFlow.Core\ScholarFlow.Core.csproj" />
     <ProjectReference Include="..\ScholarFlow.Elms\ScholarFlow.Elms.csproj" />
   </ItemGroup>

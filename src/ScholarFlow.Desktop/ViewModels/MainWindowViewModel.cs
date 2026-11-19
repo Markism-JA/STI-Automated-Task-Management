@@ -115,6 +115,12 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     public bool IsQuickAddModalOpen { get; private set; }
     public bool IsSearchModalOpen { get; private set; }
     public bool IsShortcutsModalOpen { get; private set; }
+    public bool IsSettingsModalOpen { get; private set; }
+    public bool IsOnboardingOpen { get; private set; }
+    public string OnboardingVaultPath { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        "Documents",
+        "ScholarFlow-Basin");
 
     public bool IsSyncing { get; private set; }
     public string StatusText { get; private set; } = "Ready";
@@ -150,13 +156,84 @@ public sealed class MainWindowViewModel : IAsyncDisposable
             "School-Files",
             "YR4_01");
 
+        if (!Settings.HasCompletedOnboarding &&
+            Settings.KnownBasins.Count == 0 &&
+            string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath) &&
+            !Directory.Exists(defaultSchoolFiles))
+        {
+            IsOnboardingOpen = true;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return;
+        }
+
+        if (!Settings.HasCompletedOnboarding)
+        {
+            Settings.HasCompletedOnboarding = true;
+            await AppSettingsStore.SaveAsync(Settings);
+        }
+
         var initialBasin = !string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath) && Directory.Exists(Settings.LastOpenedBasinPath)
             ? Settings.LastOpenedBasinPath
             : Directory.Exists(defaultSchoolFiles)
                 ? defaultSchoolFiles
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "ScholarFlow-Basin");
+                : OnboardingVaultPath;
 
         await OpenBasinAsync(initialBasin);
+    }
+
+    public void OpenOnboardingWizard()
+    {
+        OnboardingVaultPath = !string.IsNullOrWhiteSpace(BasinRoot)
+            ? BasinRoot
+            : OnboardingVaultPath;
+        IsSettingsModalOpen = false;
+        IsOnboardingOpen = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public async Task CompleteOnboardingAsync(string vaultPath, bool runElmsAuth, bool runInitialSync)
+    {
+        var resolvedPath = string.IsNullOrWhiteSpace(vaultPath) ? OnboardingVaultPath : vaultPath.Trim();
+        IsOnboardingOpen = false;
+        Settings.HasCompletedOnboarding = true;
+        await AppSettingsStore.SaveAsync(Settings);
+
+        await OpenBasinAsync(resolvedPath);
+
+        if (runElmsAuth || runInitialSync)
+            await RunFullSyncAsync();
+    }
+
+    public void ToggleSettingsModal()
+    {
+        IsSettingsModalOpen = !IsSettingsModalOpen;
+        IsSearchModalOpen = false;
+        IsShortcutsModalOpen = false;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public async Task ToggleMinimizeToTrayAsync()
+    {
+        Settings.MinimizeToTrayOnClose = !Settings.MinimizeToTrayOnClose;
+        await AppSettingsStore.SaveAsync(Settings);
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public async Task ToggleDesktopNotificationsAsync()
+    {
+        Settings.EnableDesktopNotifications = !Settings.EnableDesktopNotifications;
+        await AppSettingsStore.SaveAsync(Settings);
+        if (Settings.EnableDesktopNotifications)
+            DesktopNotificationService.TryShow("ScholarFlow", "Desktop notifications enabled.");
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public async Task ToggleLaunchOnStartupAsync()
+    {
+        Settings.LaunchOnStartup = !Settings.LaunchOnStartup;
+        Services.StartupRegistrationService.SetEnabled(Settings.LaunchOnStartup);
+        await AppSettingsStore.SaveAsync(Settings);
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
     }
 
     public async Task OpenBasinAsync(string basinPath)
@@ -524,12 +601,25 @@ public sealed class MainWindowViewModel : IAsyncDisposable
             IsQuickAddModalOpen = false;
             IsSearchModalOpen = false;
             IsNotificationDrawerOpen = false;
+            IsSettingsModalOpen = false;
         }
         NotifyStateChanged(UiChangeKind.OverlayOnly);
     }
 
     public bool CloseTopOverlayOrDrawer()
     {
+        if (IsSettingsModalOpen)
+        {
+            IsSettingsModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
+        if (IsOnboardingOpen && !string.IsNullOrWhiteSpace(BasinRoot))
+        {
+            IsOnboardingOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
         if (IsQuickAddModalOpen)
         {
             IsQuickAddModalOpen = false;
@@ -539,6 +629,18 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         if (IsSearchModalOpen)
         {
             IsSearchModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
+        if (IsSettingsModalOpen)
+        {
+            IsSettingsModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
+        if (IsOnboardingOpen && !string.IsNullOrWhiteSpace(BasinRoot))
+        {
+            IsOnboardingOpen = false;
             NotifyStateChanged(UiChangeKind.OverlayOnly);
             return true;
         }
@@ -1260,7 +1362,8 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         Notifications.Insert(0, notification);
         if (!IsNotificationDrawerOpen)
             UnreadNotificationsCount++;
-        _notificationService.SendSystemNotification(notification);
+        if (Settings.EnableDesktopNotifications)
+            _notificationService.SendSystemNotification(notification);
         NotifyStateChanged(UiChangeKind.NotificationsOnly);
     }
 

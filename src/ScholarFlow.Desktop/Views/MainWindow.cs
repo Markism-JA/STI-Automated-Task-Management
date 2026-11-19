@@ -690,7 +690,7 @@ public sealed class MainWindow : Window
         {
             var bottomRow = new Grid
             {
-                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto"),
+                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto,Auto"),
             };
             var syncBtn = UiBuilder.GhostButton(
                 _vm.IsSyncing ? "Syncing..." : "Sync eLMS",
@@ -719,12 +719,21 @@ public sealed class MainWindow : Window
             Grid.SetColumn(themeBtn, 2);
             bottomRow.Children.Add(themeBtn);
 
+            var settingsBtn = UiBuilder.IconButton(
+                MaterialIconKind.CogOutline,
+                () => _vm.ToggleSettingsModal(),
+                14.5
+            );
+            ToolTip.SetTip(settingsBtn, "Desktop Settings (Tray, Notifications, Startup, Vault)");
+            Grid.SetColumn(settingsBtn, 3);
+            bottomRow.Children.Add(settingsBtn);
+
             var helpBtn = UiBuilder.IconButton(
                 MaterialIconKind.KeyboardOutline,
                 () => _vm.ToggleShortcutsModal(),
                 14.5
             );
-            Grid.SetColumn(helpBtn, 3);
+            Grid.SetColumn(helpBtn, 4);
             bottomRow.Children.Add(helpBtn);
 
             footer.Children.Add(bottomRow);
@@ -1788,7 +1797,9 @@ public sealed class MainWindow : Window
     private void RefreshOverlayModal()
     {
         string targetKind =
-            _vm.IsQuickAddModalOpen ? "QuickAdd"
+            _vm.IsOnboardingOpen ? "Onboarding"
+            : _vm.IsSettingsModalOpen ? "Settings"
+            : _vm.IsQuickAddModalOpen ? "QuickAdd"
             : _vm.IsSearchModalOpen ? "Search"
             : _vm.IsNotificationDrawerOpen ? "Notifications"
             : _vm.IsShortcutsModalOpen ? "Shortcuts"
@@ -1836,6 +1847,22 @@ public sealed class MainWindow : Window
                 Focus();
             }
         };
+
+        if (_vm.IsOnboardingOpen)
+        {
+            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildOnboardingModal(this, _vm);
+            _modalOverlayContainer.Child = backdrop;
+            _modalOverlayContainer.IsVisible = true;
+            return;
+        }
+
+        if (_vm.IsSettingsModalOpen)
+        {
+            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildSettingsModal(_vm);
+            _modalOverlayContainer.Child = backdrop;
+            _modalOverlayContainer.IsVisible = true;
+            return;
+        }
 
         if (_vm.IsQuickAddModalOpen)
         {
@@ -2537,232 +2564,6 @@ public sealed class MainWindow : Window
     protected override async void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.Handled)
-            return;
-
-        // Global Escape always untoggles/closes the top-most floating modal or inspector drawer
-        if (e.Key == Key.Escape)
-        {
-            if (_vm.CloseTopOverlayOrDrawer())
-            {
-                e.Handled = true;
-                Focus();
-                return;
-            }
-        }
-
-        // Global Ctrl+K / Ctrl+F / Ctrl+B / Ctrl+S shortcuts
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            if (e.Key is Key.K or Key.F)
-            {
-                e.Handled = true;
-                _vm.ToggleSearchModal();
-                return;
-            }
-            if (e.Key == Key.B)
-            {
-                e.Handled = true;
-                _vm.ToggleSidebar();
-                return;
-            }
-            if (e.Key == Key.S)
-            {
-                e.Handled = true;
-                await _vm.RunFullSyncAsync();
-                return;
-            }
-        }
-
-        // Skip single-key shortcuts when typing inside any TextBox
-        if (FocusManager?.GetFocusedElement() is TextBox)
-            return;
-
-        // Active Quiz Runner hotkeys (1-4 option/SRS pick, Left/P prev, Right/N next)
-        if (_vm.ActiveMode == WorkspaceTabMode.QuizStudio &&
-            _vm.QuizStudio.ActiveSession is not null &&
-            !_vm.QuizStudio.IsShowingResultsSummary &&
-            !_vm.IsSearchModalOpen)
-        {
-            var curQ = _vm.QuizStudio.CurrentQuestion;
-            if (e.Key is Key.D1 or Key.D2 or Key.D3 or Key.D4)
-            {
-                int slot = e.Key switch
-                {
-                    Key.D1 => 0,
-                    Key.D2 => 1,
-                    Key.D3 => 2,
-                    _ => 3
-                };
-
-                if (!_vm.QuizStudio.IsAnswerRevealed &&
-                    curQ is not null &&
-                    curQ.Kind is Core.Quiz.QuizQuestionKind.MultipleChoice or Core.Quiz.QuizQuestionKind.Situational or Core.Quiz.QuizQuestionKind.TrueFalse &&
-                    slot < curQ.Options.Count)
-                {
-                    e.Handled = true;
-                    await _vm.QuizStudio.SubmitAnswerAsync(curQ.Options[slot]);
-                    return;
-                }
-
-                if (_vm.QuizStudio.IsAnswerRevealed)
-                {
-                    e.Handled = true;
-                    int rating = slot switch { 0 => 1, 1 => 3, 2 => 4, _ => 5 };
-                    await _vm.QuizStudio.RateAndAdvanceAsync(rating);
-                    return;
-                }
-            }
-            else if (e.Key is Key.Left or Key.P)
-            {
-                e.Handled = true;
-                _vm.QuizStudio.PreviousQuestion();
-                return;
-            }
-            else if (e.Key is Key.Right or Key.N)
-            {
-                e.Handled = true;
-                await _vm.QuizStudio.AdvanceNextQuestionAsync();
-                return;
-            }
-        }
-
-        switch (e.Key)
-        {
-            case Key.J or Key.Down:
-                e.Handled = true;
-                if (_vm.IsSearchModalOpen)
-                    _vm.MoveSearchSelection(+1);
-                else if (_vm.ActiveMode == WorkspaceTabMode.PdfReader)
-                    _vm.PdfReader.NextPage();
-                else
-                    _vm.MoveSelection(+1);
-                break;
-
-            case Key.K
-            or Key.Up:
-                e.Handled = true;
-                if (_vm.IsSearchModalOpen)
-                    _vm.MoveSearchSelection(-1);
-                else if (_vm.ActiveMode == WorkspaceTabMode.PdfReader)
-                    _vm.PdfReader.PreviousPage();
-                else
-                    _vm.MoveSelection(-1);
-                break;
-
-            case Key.PageDown when _vm.ActiveMode == WorkspaceTabMode.PdfReader:
-                e.Handled = true;
-                _vm.PdfReader.NextPage();
-                break;
-
-            case Key.PageUp when _vm.ActiveMode == WorkspaceTabMode.PdfReader:
-                e.Handled = true;
-                _vm.PdfReader.PreviousPage();
-                break;
-
-            case Key.G:
-                e.Handled = true;
-                if (_vm.ActiveMode == WorkspaceTabMode.PdfReader)
-                    _vm.PdfReader.JumpToPage(
-                        e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? _vm.PdfReader.PageCount : 1
-                    );
-                else
-                    _vm.JumpSelection(toEnd: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
-                break;
-
-            case Key.D
-            or Key.Space
-                when _vm.SelectedTask is not null && _vm.ActiveMode != WorkspaceTabMode.PdfReader:
-                e.Handled = true;
-                await _vm.ToggleTaskCompletedAsync(_vm.SelectedTask);
-                break;
-
-            case Key.E
-                when _vm.SelectedTask is not null && _vm.ActiveMode != WorkspaceTabMode.PdfReader:
-                e.Handled = true;
-                _vm.ToggleInspector();
-                break;
-
-            case Key.Enter
-                when _vm.SelectedTask is not null && _vm.ActiveMode != WorkspaceTabMode.PdfReader:
-                e.Handled = true;
-                if (!_vm.IsInspectorOpen)
-                    _vm.OpenInspector(_vm.SelectedTask);
-                else
-                    _vm.OpenPrimaryTaskFileOrNote(_vm.SelectedTask);
-                break;
-
-            case Key.O:
-                e.Handled = true;
-                await _vm.OpenTaskInElmsAppAsync(_vm.SelectedTask);
-                break;
-
-            case Key.Q:
-                e.Handled = true;
-                _vm.ToggleQuickAddModal();
-                break;
-
-            case Key.OemQuestion
-            or Key.Divide:
-                e.Handled = true;
-                if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-                    _vm.ToggleShortcutsModal();
-                else
-                    _vm.ToggleSearchModal();
-                break;
-
-            case Key.OemOpenBrackets:
-                e.Handled = true;
-                if (_vm.ActiveMode == WorkspaceTabMode.Calendar)
-                    _vm.Calendar.PreviousMonth();
-                else
-                    _vm.ToggleSidebar();
-                break;
-
-            case Key.OemCloseBrackets when _vm.ActiveMode == WorkspaceTabMode.Calendar:
-                e.Handled = true;
-                _vm.Calendar.NextMonth();
-                break;
-
-            case Key.T:
-                e.Handled = true;
-                await _vm.ToggleThemeAsync();
-                break;
-
-            case Key.R:
-                e.Handled = true;
-                await _vm.RunFastPollAsync();
-                break;
-
-            case Key.D1:
-                e.Handled = true;
-                _vm.SelectSmartView(SmartViewKind.Inbox);
-                break;
-
-            case Key.D2:
-                e.Handled = true;
-                _vm.SelectSmartView(SmartViewKind.Today);
-                break;
-
-            case Key.D3:
-                e.Handled = true;
-                _vm.SelectSmartView(SmartViewKind.Upcoming);
-                break;
-
-            case Key.D4:
-                e.Handled = true;
-                _vm.SelectCalendarView();
-                break;
-
-            case Key.D5:
-                e.Handled = true;
-                _vm.SelectSmartView(SmartViewKind.Completed);
-                break;
-
-            case Key.D6:
-                e.Handled = true;
-                await _vm.SelectQuizStudioViewAsync();
-                break;
-        }
+        await Shell.ShortcutDispatcher.HandleKeyDownAsync(this, _vm, e);
     }
 }

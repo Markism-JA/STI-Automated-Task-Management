@@ -24,4 +24,10 @@ public sealed class AppSettings
     public string AiBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
     public string? AiApiKey { get; set; }
     public string AiModelName { get; set; } = "gemini-2.5-flash";
+
+    // Desktop Tray, Notifications, Startup & Onboarding
+    public bool MinimizeToTrayOnClose { get; set; } = true;
+    public bool EnableDesktopNotifications { get; set; } = true;
+    public bool LaunchOnStartup { get; set; }
+    public bool HasCompletedOnboarding { get; set; }
 }

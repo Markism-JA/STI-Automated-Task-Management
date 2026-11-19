@@ -19,6 +19,8 @@ namespace ScholarFlow.Desktop;
 public sealed class App : Application
 {
     private MainWindowViewModel? _mainVm;
+    private TrayIcon? _trayIcon;
+    private bool _isExplicitExit;
 
     public override void Initialize()
     {
@@ -57,19 +59,92 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             _mainVm = new MainWindowViewModel();
             var window = new MainWindow(_mainVm);
             desktop.MainWindow = window;
 
+            window.Closing += (_, e) =>
+            {
+                if (!_isExplicitExit && _mainVm.Settings.MinimizeToTrayOnClose)
+                {
+                    e.Cancel = true;
+                    window.Hide();
+                }
+            };
+
+            InitializeTrayIcon(desktop, window);
+
             desktop.Exit += async (_, _) =>
             {
+                _trayIcon?.Dispose();
                 if (_mainVm is not null)
                     await _mainVm.DisposeAsync();
             };
+
+            if (Program.StartMinimized)
+                window.Hide();
 
             _ = _mainVm.InitializeAsync();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void InitializeTrayIcon(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window)
+    {
+        try
+        {
+            WindowIcon? icon = null;
+            using var stream = typeof(App).Assembly.GetManifestResourceStream("ScholarFlow.Assets.scholarflow.ico");
+            if (stream is not null)
+                icon = new WindowIcon(stream);
+
+            var menu = new NativeMenu();
+            var showItem = new NativeMenuItem("Show ScholarFlow");
+            showItem.Click += (_, _) => RestoreMainWindow(window);
+            menu.Items.Add(showItem);
+
+            var syncItem = new NativeMenuItem("Sync eLMS Now");
+            syncItem.Click += async (_, _) =>
+            {
+                if (_mainVm is not null)
+                    await _mainVm.RunFullSyncAsync();
+            };
+            menu.Items.Add(syncItem);
+
+            menu.Items.Add(new NativeMenuItemSeparator());
+
+            var quitItem = new NativeMenuItem("Quit ScholarFlow");
+            quitItem.Click += (_, _) =>
+            {
+                _isExplicitExit = true;
+                desktop.Shutdown();
+            };
+            menu.Items.Add(quitItem);
+
+            _trayIcon = new TrayIcon
+            {
+                ToolTipText = "ScholarFlow — Academic Workspace",
+                Icon = icon,
+                Menu = menu,
+                IsVisible = true
+            };
+            _trayIcon.Clicked += (_, _) => RestoreMainWindow(window);
+        }
+        catch
+        {
+            // TrayIcon is optional on headless/unsupported window managers
+        }
+    }
+
+    private static void RestoreMainWindow(MainWindow window)
+    {
+        if (!window.IsVisible)
+            window.Show();
+        if (window.WindowState == WindowState.Minimized)
+            window.WindowState = WindowState.Normal;
+        window.Activate();
     }
 }

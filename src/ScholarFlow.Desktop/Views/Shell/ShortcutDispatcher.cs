@@ -1,0 +1,237 @@
+using Avalonia.Controls;
+using Avalonia.Input;
+using ScholarFlow.Core.Models;
+using ScholarFlow.Core.Quiz;
+using ScholarFlow.Core.Tasks;
+using ScholarFlow.Desktop.ViewModels;
+
+namespace ScholarFlow.Desktop.Views.Shell;
+
+/// <summary>
+/// Centralized keyboard shortcut dispatcher decoupled from MainWindow.
+/// </summary>
+public static class ShortcutDispatcher
+{
+    public static async Task HandleKeyDownAsync(Window window, MainWindowViewModel vm, KeyEventArgs e)
+    {
+        if (e.Handled)
+            return;
+
+        // Global Escape always untoggles/closes the top-most floating modal or inspector drawer
+        if (e.Key == Key.Escape)
+        {
+            if (vm.CloseTopOverlayOrDrawer())
+            {
+                e.Handled = true;
+                window.Focus();
+                return;
+            }
+        }
+
+        // Global Ctrl+K / Ctrl+F / Ctrl+B / Ctrl+S shortcuts
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            if (e.Key is Key.K or Key.F)
+            {
+                e.Handled = true;
+                vm.ToggleSearchModal();
+                return;
+            }
+            if (e.Key == Key.B)
+            {
+                e.Handled = true;
+                vm.ToggleSidebar();
+                return;
+            }
+            if (e.Key == Key.S)
+            {
+                e.Handled = true;
+                await vm.RunFullSyncAsync();
+                return;
+            }
+        }
+
+        // Skip single-key shortcuts when typing inside any TextBox
+        if (window.FocusManager?.GetFocusedElement() is TextBox)
+            return;
+
+        // Active Quiz Runner hotkeys (1-4 option/SRS pick, Left/P prev, Right/N next)
+        if (vm.ActiveMode == WorkspaceTabMode.QuizStudio &&
+            vm.QuizStudio.ActiveSession is not null &&
+            !vm.QuizStudio.IsShowingResultsSummary &&
+            !vm.IsSearchModalOpen)
+        {
+            var curQ = vm.QuizStudio.CurrentQuestion;
+            if (e.Key is Key.D1 or Key.D2 or Key.D3 or Key.D4)
+            {
+                int slot = e.Key switch
+                {
+                    Key.D1 => 0,
+                    Key.D2 => 1,
+                    Key.D3 => 2,
+                    _ => 3
+                };
+
+                if (!vm.QuizStudio.IsAnswerRevealed &&
+                    curQ is not null &&
+                    curQ.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational or QuizQuestionKind.TrueFalse &&
+                    slot < curQ.Options.Count)
+                {
+                    e.Handled = true;
+                    await vm.QuizStudio.SubmitAnswerAsync(curQ.Options[slot]);
+                    return;
+                }
+
+                if (vm.QuizStudio.IsAnswerRevealed)
+                {
+                    e.Handled = true;
+                    int rating = slot switch { 0 => 1, 1 => 3, 2 => 4, _ => 5 };
+                    await vm.QuizStudio.RateAndAdvanceAsync(rating);
+                    return;
+                }
+            }
+            else if (e.Key is Key.Left or Key.P)
+            {
+                e.Handled = true;
+                vm.QuizStudio.PreviousQuestion();
+                return;
+            }
+            else if (e.Key is Key.Right or Key.N)
+            {
+                e.Handled = true;
+                await vm.QuizStudio.AdvanceNextQuestionAsync();
+                return;
+            }
+        }
+
+        switch (e.Key)
+        {
+            case Key.J or Key.Down:
+                e.Handled = true;
+                if (vm.IsSearchModalOpen)
+                    vm.MoveSearchSelection(+1);
+                else if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                    vm.PdfReader.NextPage();
+                else
+                    vm.MoveSelection(+1);
+                break;
+
+            case Key.K or Key.Up:
+                e.Handled = true;
+                if (vm.IsSearchModalOpen)
+                    vm.MoveSearchSelection(-1);
+                else if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                    vm.PdfReader.PreviousPage();
+                else
+                    vm.MoveSelection(-1);
+                break;
+
+            case Key.PageDown when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                vm.PdfReader.NextPage();
+                break;
+
+            case Key.PageUp when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                vm.PdfReader.PreviousPage();
+                break;
+
+            case Key.G:
+                e.Handled = true;
+                if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                    vm.PdfReader.JumpToPage(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? vm.PdfReader.PageCount : 1);
+                else
+                    vm.JumpSelection(toEnd: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
+                break;
+
+            case Key.D or Key.Space when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                await vm.ToggleTaskCompletedAsync(vm.SelectedTask);
+                break;
+
+            case Key.E when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                vm.ToggleInspector();
+                break;
+
+            case Key.Enter when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                if (!vm.IsInspectorOpen)
+                    vm.OpenInspector(vm.SelectedTask);
+                else
+                    vm.OpenPrimaryTaskFileOrNote(vm.SelectedTask);
+                break;
+
+            case Key.O:
+                e.Handled = true;
+                await vm.OpenTaskInElmsAppAsync(vm.SelectedTask);
+                break;
+
+            case Key.Q:
+                e.Handled = true;
+                vm.ToggleQuickAddModal();
+                break;
+
+            case Key.OemQuestion or Key.Divide:
+                e.Handled = true;
+                if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                    vm.ToggleShortcutsModal();
+                else
+                    vm.ToggleSearchModal();
+                break;
+
+            case Key.OemOpenBrackets:
+                e.Handled = true;
+                if (vm.ActiveMode == WorkspaceTabMode.Calendar)
+                    vm.Calendar.PreviousMonth();
+                else
+                    vm.ToggleSidebar();
+                break;
+
+            case Key.OemCloseBrackets when vm.ActiveMode == WorkspaceTabMode.Calendar:
+                e.Handled = true;
+                vm.Calendar.NextMonth();
+                break;
+
+            case Key.T:
+                e.Handled = true;
+                await vm.ToggleThemeAsync();
+                break;
+
+            case Key.R:
+                e.Handled = true;
+                await vm.RunFastPollAsync();
+                break;
+
+            case Key.D1:
+                e.Handled = true;
+                vm.SelectSmartView(SmartViewKind.Inbox);
+                break;
+
+            case Key.D2:
+                e.Handled = true;
+                vm.SelectSmartView(SmartViewKind.Today);
+                break;
+
+            case Key.D3:
+                e.Handled = true;
+                vm.SelectSmartView(SmartViewKind.Upcoming);
+                break;
+
+            case Key.D4:
+                e.Handled = true;
+                vm.SelectCalendarView();
+                break;
+
+            case Key.D5:
+                e.Handled = true;
+                vm.SelectSmartView(SmartViewKind.Completed);
+                break;
+
+            case Key.D6:
+                e.Handled = true;
+                await vm.SelectQuizStudioViewAsync();
+                break;
+        }
+    }
+}
