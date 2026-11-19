@@ -1,0 +1,228 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Material.Icons;
+using ScholarFlow.Core.Quiz;
+using ScholarFlow.Desktop.Theme;
+using ScholarFlow.Desktop.UI;
+using ScholarFlow.Desktop.ViewModels;
+
+namespace ScholarFlow.Desktop.Views;
+
+public static partial class QuizStudioViewBuilder
+{
+    private static Control BuildAiSettingsCard(MainWindowViewModel vm, QuizStudioViewModel studio)
+    {
+        var settings = vm.Settings;
+        var cardStack = new StackPanel { Spacing = 8 };
+
+        cardStack.Children.Add(
+            UiBuilder.SectionHeader("Unified OpenAI-Compatible AI Engine & Saved Model Profiles")
+        );
+
+        var presetRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        void AddProviderPreset(string id, string label, MaterialIconKind icon)
+        {
+            bool active = string.Equals(
+                settings.AiProviderPreset,
+                id,
+                StringComparison.OrdinalIgnoreCase
+            ) && string.IsNullOrWhiteSpace(settings.ActiveAiProfileId);
+            var btn = UiBuilder.GhostButton(
+                label,
+                icon,
+                async () => await studio.ApplyAiProviderPresetAsync(id),
+                isActive: active
+            );
+            btn.Margin = new Thickness(0, 0, 6, 4);
+            presetRow.Children.Add(btn);
+        }
+
+        AddProviderPreset("OpenAI", "OpenAI", MaterialIconKind.CreationOutline);
+        AddProviderPreset("OpenRouter", "OpenRouter (Claude / Multi)", MaterialIconKind.SwapHorizontal);
+        AddProviderPreset("GeminiAiStudio", "Google AI Studio", MaterialIconKind.AutoFix);
+        AddProviderPreset("DeepSeek", "DeepSeek", MaterialIconKind.Brain);
+        AddProviderPreset("Groq", "Groq", MaterialIconKind.LightningBoltOutline);
+        AddProviderPreset("OllamaLocal", "Ollama (Local)", MaterialIconKind.ServerNetwork);
+        AddProviderPreset("LmStudio", "LM Studio / Custom", MaterialIconKind.DesktopClassic);
+        AddProviderPreset("OfflineSmart", "Offline PDF Analyzer", MaterialIconKind.FileSearchOutline);
+        cardStack.Children.Add(presetRow);
+
+        // Saved Custom Model Profiles
+        if (settings.SavedAiProfiles.Count > 0)
+        {
+            var profilesWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var prof in settings.SavedAiProfiles)
+            {
+                var capturedProf = prof;
+                bool isActiveProf = string.Equals(settings.ActiveAiProfileId, prof.Id, StringComparison.OrdinalIgnoreCase);
+
+                var chipStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                var selectBtn = UiBuilder.GhostButton(
+                    $"{prof.Name} ({prof.ModelName})",
+                    isActiveProf ? MaterialIconKind.Check : MaterialIconKind.RobotOutline,
+                    async () => await studio.SelectSavedAiProfileAsync(capturedProf),
+                    isActive: isActiveProf
+                );
+                chipStack.Children.Add(selectBtn);
+
+                var delBtn = UiBuilder.IconButton(
+                    MaterialIconKind.Close,
+                    async () => await studio.DeleteSavedAiProfileAsync(capturedProf.Id),
+                    12.5,
+                    ThemeService.Brush(ThemeService.TextMuted)
+                );
+                chipStack.Children.Add(delBtn);
+
+                chipStack.Margin = new Thickness(0, 0, 8, 4);
+                profilesWrap.Children.Add(chipStack);
+            }
+            cardStack.Children.Add(profilesWrap);
+        }
+
+        var fieldsGrid = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("1.1*,1.8*,1.2*,1.3*,Auto,Auto"),
+            ColumnSpacing = 6,
+        };
+
+        var profileNameBox = new TextBox
+        {
+            Watermark = "Profile name (optional)",
+            FontSize = 12,
+        };
+        fieldsGrid.Children.Add(profileNameBox);
+
+        var urlBox = new TextBox
+        {
+            Text = settings.AiBaseUrl,
+            Watermark = "OpenAI-compatible /chat/completions URL",
+            FontSize = 12,
+        };
+        Grid.SetColumn(urlBox, 1);
+        fieldsGrid.Children.Add(urlBox);
+
+        var modelBox = new TextBox
+        {
+            Text = settings.AiModelName,
+            Watermark = "Model ID (e.g. gpt-4o-mini, claude-3.5-sonnet, qwen2.5:7b)",
+            FontSize = 12,
+        };
+        Grid.SetColumn(modelBox, 2);
+        fieldsGrid.Children.Add(modelBox);
+
+        var keyBox = new TextBox
+        {
+            Text = settings.AiApiKey ?? string.Empty,
+            Watermark = "API Key (or env var)",
+            PasswordChar = '•',
+            FontSize = 12,
+        };
+        Grid.SetColumn(keyBox, 3);
+        fieldsGrid.Children.Add(keyBox);
+
+        var saveBtn = UiBuilder.PrimaryButton(
+            "Save",
+            MaterialIconKind.ContentSaveOutline,
+            async () =>
+                await studio.SaveAiCredentialsAsync(
+                    urlBox.Text ?? "",
+                    modelBox.Text ?? "",
+                    keyBox.Text
+                )
+        );
+        Grid.SetColumn(saveBtn, 4);
+        fieldsGrid.Children.Add(saveBtn);
+
+        var addProfileBtn = UiBuilder.GhostButton(
+            "+ Save Profile",
+            MaterialIconKind.BookmarkPlusOutline,
+            async () =>
+                await studio.SaveAsNewAiProfileAsync(
+                    profileNameBox.Text ?? "",
+                    urlBox.Text ?? "",
+                    modelBox.Text ?? "",
+                    keyBox.Text
+                )
+        );
+        Grid.SetColumn(addProfileBtn, 5);
+        fieldsGrid.Children.Add(addProfileBtn);
+
+        cardStack.Children.Add(fieldsGrid);
+        return UiBuilder.Card(cardStack, padding: new Thickness(12, 10));
+    }
+
+    private static Control BuildManualJsonBridgeCard(QuizStudioViewModel studio)
+    {
+        var cardStack = new StackPanel { Spacing = 8 };
+        cardStack.Children.Add(
+            UiBuilder.SectionHeader("Universal Web AI JSON Bridge (ChatGPT, Claude, Gemini, DeepSeek — Zero API Quota)")
+        );
+
+        var split = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("*,12,*"),
+            RowDefinitions = RowDefinitions.Parse("*,Auto"),
+            RowSpacing = 8,
+        };
+
+        var promptBox = new TextBox
+        {
+            Text = studio.IsBuildingPrompt
+                ? "Building grounded prompt from selected PDF pages..."
+                : studio.GeneratedPromptPreview,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            MinHeight = 125,
+            MaxHeight = 220,
+            FontSize = 11.5,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        split.Children.Add(promptBox);
+
+        var copyBtn = UiBuilder.GhostButton(
+            "Copy Grounded Prompt",
+            MaterialIconKind.ContentCopy,
+            async () =>
+            {
+                var top = TopLevel.GetTopLevel(promptBox);
+                if (top?.Clipboard is not null)
+                    await top.Clipboard.SetTextAsync(studio.GeneratedPromptPreview);
+            }
+        );
+        Grid.SetRow(copyBtn, 1);
+        Grid.SetColumn(copyBtn, 0);
+        split.Children.Add(copyBtn);
+
+        var jsonInputBox = new TextBox
+        {
+            Watermark = "Paste the JSON response from any AI chat (ChatGPT, Claude, Gemini, DeepSeek...) here...",
+            AcceptsReturn = true,
+            MinHeight = 125,
+            MaxHeight = 220,
+            FontSize = 11.5,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        Grid.SetColumn(jsonInputBox, 2);
+        split.Children.Add(jsonInputBox);
+
+        var importBtn = UiBuilder.PrimaryButton(
+            studio.IsGenerating ? "Importing & Grounding..." : "Import JSON & Ground to PDF",
+            MaterialIconKind.CheckDecagramOutline,
+            async () => await studio.ImportPastedJsonQuizAsync(jsonInputBox.Text ?? string.Empty)
+        );
+        Grid.SetRow(importBtn, 1);
+        Grid.SetColumn(importBtn, 2);
+        split.Children.Add(importBtn);
+
+        cardStack.Children.Add(split);
+        return UiBuilder.Card(cardStack, padding: new Thickness(12, 10));
+    }
+
+    // =========================================================================
+    // 2. INTERACTIVE QUESTION RUNNER & GROUNDED PDF EVIDENCE VIEW
+    // =========================================================================
+
+}
