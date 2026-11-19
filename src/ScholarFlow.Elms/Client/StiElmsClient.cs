@@ -193,8 +193,19 @@ public sealed class StiElmsClient : IElmsClient
                 warnings.Add($"Could not fetch assignments list ({parsedCourse.AssignmentsListUrl}): {ex.Message}");
         }
 
+        var listedTitles = summariesByUrl.Values
+            .Select(s => HtmlParsingHelpers.NormalizeWhitespace(s.Title))
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var moduleAssignmentUrls = parsedCourse.Modules
+            .SelectMany(m => m.ModuleSections)
+            .Where(s => s.Kind == ElmsSectionKind.Assignment && !listedTitles.Contains(HtmlParsingHelpers.NormalizeWhitespace(s.Title)))
+            .Select(s => s.Url);
+
         var targetUrls = summariesByUrl.Values.Select(s => s.Url)
             .Concat(parsedCourse.AssignmentUrls)
+            .Concat(moduleAssignmentUrls)
             .DistinctBy(ElmsUrlCanonicalizer.GetCanonicalUrl, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -205,8 +216,8 @@ public sealed class StiElmsClient : IElmsClient
             await throttle.WaitAsync(ct);
             try
             {
-                var html = await FetchAuthenticatedHtmlAsync(url, ct);
-                var assignment = AssignmentParser.Parse(html, url, courseId, BaseUrl, summary);
+                var (html, finalUrl) = await FetchAuthenticatedHtmlWithFinalUrlAsync(url, ct);
+                var assignment = AssignmentParser.Parse(html, finalUrl, courseId, BaseUrl, summary);
                 if (assignment is null)
                     return SummaryToFallbackAssignment(summary);
 
@@ -247,7 +258,11 @@ public sealed class StiElmsClient : IElmsClient
         });
 
         var results = await Task.WhenAll(tasks);
-        return results.Where(a => a is not null).Select(a => a!).ToList();
+        return results
+            .Where(a => a is not null)
+            .Select(a => a!)
+            .DistinctBy(a => a.LmsId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static ElmsAssignment? SummaryToFallbackAssignment(ElmsAssignmentSummary? summary)
@@ -273,6 +288,12 @@ public sealed class StiElmsClient : IElmsClient
 
     public async Task<string> FetchAuthenticatedHtmlAsync(string urlOrPath, CancellationToken ct = default)
     {
+        var (html, _) = await FetchAuthenticatedHtmlWithFinalUrlAsync(urlOrPath, ct);
+        return html;
+    }
+
+    private async Task<(string Html, string FinalUrl)> FetchAuthenticatedHtmlWithFinalUrlAsync(string urlOrPath, CancellationToken ct = default)
+    {
         await EnsureConnectedAsync(ct: ct);
         var targetUrl = HtmlParsingHelpers.ToAbsoluteUrl(urlOrPath, BaseUrl);
         var sessionBefore = _session;
@@ -283,11 +304,13 @@ public sealed class StiElmsClient : IElmsClient
             await RefreshAndRebuildAsync(sessionBefore, ct);
             using var retry = await _httpClient.GetAsync(targetUrl, ct);
             retry.EnsureSuccessStatusCode();
-            return await retry.Content.ReadAsStringAsync(ct);
+            var finalRetryUrl = retry.RequestMessage?.RequestUri?.ToString() ?? targetUrl;
+            return (await retry.Content.ReadAsStringAsync(ct), finalRetryUrl);
         }
 
         response.EnsureSuccessStatusCode();
         var html = await response.Content.ReadAsStringAsync(ct);
+        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? targetUrl;
 
         if (HtmlParsingHelpers.IsLoginRedirectHtml(html, response.RequestMessage?.RequestUri))
         {
@@ -296,12 +319,13 @@ public sealed class StiElmsClient : IElmsClient
             using var retry = await _httpClient.GetAsync(targetUrl, ct);
             retry.EnsureSuccessStatusCode();
             var retryHtml = await retry.Content.ReadAsStringAsync(ct);
+            var finalRetryUrl = retry.RequestMessage?.RequestUri?.ToString() ?? targetUrl;
             await PersistRotatedCookiesIfNeededAsync(ct);
-            return retryHtml;
+            return (retryHtml, finalRetryUrl);
         }
 
         await PersistRotatedCookiesIfNeededAsync(ct);
-        return html;
+        return (html, finalUrl);
     }
 
     private async Task RefreshAndRebuildAsync(ElmsSession? failedSession, CancellationToken ct)

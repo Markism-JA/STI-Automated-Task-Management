@@ -42,6 +42,16 @@ public static partial class AssignmentParser
             return null;
 
         var (lmsId, kind) = AssignmentsListParser.ParseIdAndKind(assignmentUrl);
+        if (kind == ElmsAssignmentKind.Unknown)
+        {
+            var canonicalTabHref = centre.QuerySelector("#tab_instructions[href*=\"_assignment/show/\"], a[href*=\"_assignment/show/\"]")
+                ?.GetAttribute("href");
+            if (!string.IsNullOrWhiteSpace(canonicalTabHref))
+            {
+                assignmentUrl = HtmlParsingHelpers.ToAbsoluteUrl(canonicalTabHref, baseUrl);
+                (lmsId, kind) = AssignmentsListParser.ParseIdAndKind(assignmentUrl);
+            }
+        }
         if (summary is not null && kind == ElmsAssignmentKind.Unknown)
             kind = summary.Kind;
 
@@ -68,6 +78,8 @@ public static partial class AssignmentParser
 
         var rightCol = centre.QuerySelector("aside.rightColumn, .grading_fixed_col");
         var rightColText = HtmlParsingHelpers.NormalizeWhitespace(rightCol?.TextContent);
+        if (kind == ElmsAssignmentKind.Unknown && rightColText.Contains("Type: Quiz", StringComparison.OrdinalIgnoreCase))
+            kind = ElmsAssignmentKind.Quiz;
 
         int? maxScore = null;
         var maxScoreMatch = MaxScoreRegex().Match(rightColText);

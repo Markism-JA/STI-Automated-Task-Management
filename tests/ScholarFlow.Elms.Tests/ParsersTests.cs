@@ -223,4 +223,65 @@ public sealed class ParsersTests
         Assert.Equal("Finals", quiz.TermHeader);
         Assert.Equal(AssignmentStatus.Pending, quiz.Status);
     }
+
+    [Fact]
+    public void AssignmentParser_ParsesModuleEmbeddedQuizAssignmentPage()
+    {
+        const string quizHtml = """
+            <html><body><div id="centreColumn">
+              <div id="fixedSectionHeader" class="student assignment">
+                <h1 class="centerHeading"><a href="/student_lessons/list/5725165">07 Assuring Software Quality Conformance for Operation Services (Pre-final)</a></h1>
+                <h2>07 Quiz 1</h2>
+                <nav class="tabnav">
+                  <a role="tab" id="tab_instructions" href="/student_quiz_assignment/show/59104103"><span>Instructions</span></a>
+                </nav>
+              </div>
+              <div class="hasRightColumn">
+                <div class="leftColumn">
+                  <h2>Instructions</h2>
+                  <p>The quiz is timed, and you have 20:00 (mm:ss) to complete it.</p>
+                </div>
+                <aside class="rightColumn">
+                  <div class="block">
+                    <h2>Assignment</h2>
+                    <ul>
+                      <li>Type: Quiz</li>
+                      <li>Max score: 20</li>
+                      <li>Start: Nov 19, 7:00 pm</li>
+                      <li>Due: Nov 20, 11:00 am</li>
+                    </ul>
+                  </div>
+                  <div class="block">
+                    <h2>Score</h2>
+                    <p>Nothing submitted yet</p>
+                  </div>
+                  <div class="block">
+                    <h2>Submission</h2>
+                    <p>Almost due</p>
+                    <p>Attempts: <span class="number-of-attempts">0</span></p>
+                    <p>Max. attempts: 1</p>
+                    <p>Allow late submissions: No</p>
+                  </div>
+                </aside>
+              </div>
+            </div></body></html>
+            """;
+
+        var parsed = AssignmentParser.Parse(
+            quizHtml,
+            "https://elms.sti.edu/student_lesson/show/5725165?lesson_id=26713731&section_id=113888033",
+            "5725165",
+            referenceYear: 2026);
+
+        Assert.NotNull(parsed);
+        Assert.Equal("59104103", parsed.LmsId);
+        Assert.Equal(ElmsAssignmentKind.Quiz, parsed.Kind);
+        Assert.Equal("07 Quiz 1", parsed.Title);
+        Assert.Equal("https://elms.sti.edu/student_quiz_assignment/show/59104103", parsed.Url);
+        Assert.Equal("Prefinals", parsed.TermHeader);
+        Assert.Equal(20, parsed.MaxScore);
+        Assert.Equal(AssignmentStatus.Pending, parsed.Status);
+        Assert.NotNull(parsed.DueDate);
+        Assert.Equal(new DateTime(2026, 11, 20, 11, 0, 0), parsed.DueDate.Value.LocalDateTime);
+    }
 }
