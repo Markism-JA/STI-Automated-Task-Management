@@ -100,6 +100,13 @@ public static class CourseWorkspaceViewBuilder
                 isActive: true);
             viewPdfBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(viewPdfBtn);
+
+            var quizBtn = UiBuilder.GhostButton(
+                "Generate Quiz",
+                MaterialIconKind.HeadLightbulbOutline,
+                async () => await vm.SelectQuizStudioViewAsync(course, masterPdfPath));
+            quizBtn.Margin = new Thickness(0, 0, 6, 6);
+            actionWrap.Children.Add(quizBtn);
         }
 
         var compileBtn = UiBuilder.GhostButton(

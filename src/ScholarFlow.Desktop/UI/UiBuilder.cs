@@ -270,4 +270,20 @@ public static class UiBuilder
         Foreground = ThemeService.Brush(ThemeService.TextMuted),
         Margin = new Thickness(6, 10, 4, 4)
     };
+
+    public static Button PrimaryButton(string label, MaterialIconKind icon, Action onClick) =>
+        ActionButton(label, icon, onClick, isPrimary: true);
+
+    public static Border PillBadge(string text, IBrush fg, IBrush bg) =>
+        Pill(text, fg, bg);
+
+    public static Border Card(Control child, Thickness? padding = null) => new()
+    {
+        Background = ThemeService.Brush(ThemeService.BgSurface),
+        BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = padding ?? new Thickness(14, 12),
+        Child = child
+    };
 }

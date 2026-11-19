@@ -18,4 +18,10 @@ public sealed class AppSettings
     public string? LastOpenedBasinPath { get; set; }
     public ThemeMode Theme { get; set; } = ThemeMode.Dark;
     public List<KnownBasinEntry> KnownBasins { get; set; } = [];
+
+    // AI Quiz & Active Recall Provider Configuration
+    public string AiProviderPreset { get; set; } = "GeminiAiStudio";
+    public string AiBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    public string? AiApiKey { get; set; }
+    public string AiModelName { get; set; } = "gemini-2.5-flash";
 }

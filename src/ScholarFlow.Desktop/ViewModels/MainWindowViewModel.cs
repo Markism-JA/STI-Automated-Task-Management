@@ -18,7 +18,8 @@ public enum WorkspaceTabMode
     TaskList,
     Calendar,
     CourseWorkspace,
-    PdfReader
+    PdfReader,
+    QuizStudio
 }
 
 public enum TaskGroupingMode
@@ -97,6 +98,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     public TaskItem? SelectedTask { get; private set; }
     public string? SelectedTaskNoteContent { get; private set; }
     public TaskItem? PdfReturnTask { get; private set; }
+    public bool PdfOpenedFromQuiz { get; private set; }
     public WorkspaceTabMode PdfReturnMode { get; private set; } = WorkspaceTabMode.TaskList;
 
     public string QuickAddText { get; private set; } = string.Empty;
@@ -120,6 +122,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
 
     public CalendarViewModel Calendar { get; } = new();
     public PdfReaderViewModel PdfReader { get; } = new();
+    public QuizStudioViewModel QuizStudio { get; }
 
     public event EventHandler? StateChanged;
     public event EventHandler<UiChangeKind>? UiChanged;
@@ -130,6 +133,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         _syncService = new ElmsBasinSyncService(_elmsClient, _basinService, pdfService: _pdfService);
         _pollingService = new ElmsPollingService(_syncService);
         _pollingService.NotificationEmitted += OnPollingNotification;
+        QuizStudio = new QuizStudioViewModel(this);
     }
 
     public async Task InitializeAsync()
@@ -207,6 +211,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
                 .ToList();
             UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(BasinRoot, Courses, AllTasks);
             Calendar.UpdateTasks(AllTasks);
+            await QuizStudio.RefreshAsync();
 
             RecomputeVisibleTasks();
         }
@@ -307,11 +312,54 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         NotifyStateChanged();
     }
 
+    public void RequestUiRefresh() => NotifyStateChanged(UiChangeKind.FullLayout);
+
+    public async Task SelectQuizStudioViewAsync(
+        BasinCourseEntry? course = null,
+        string? pdfPath = null,
+        int? focusPage = null)
+    {
+        ActiveMode = WorkspaceTabMode.QuizStudio;
+        if (course is not null)
+            ActiveCourse = course;
+        await QuizStudio.RefreshAsync(course ?? ActiveCourse, pdfPath, focusPage);
+        NotifyStateChanged();
+    }
+
+    public void OpenQuizStudioForCurrentPdf()
+    {
+        var currentPdf = PdfReader.CurrentFilePath;
+        var currentPage = PdfReader.CurrentPage;
+        var matchedCourse = Courses.FirstOrDefault(c =>
+            !string.IsNullOrWhiteSpace(currentPdf) &&
+            currentPdf.Contains(c.FolderName, StringComparison.OrdinalIgnoreCase)) ?? ActiveCourse;
+
+        _ = SelectQuizStudioViewAsync(matchedCourse, currentPdf, currentPage);
+    }
+
+    public void OpenPdfWithQuizEvidence(
+        string pdfFullPath,
+        int pageNumber,
+        IReadOnlyList<ScholarFlow.Core.Quiz.NormalizedHighlightRect> highlights,
+        string? verbatimQuote,
+        string? questionPrompt)
+    {
+        PdfReturnMode = WorkspaceTabMode.QuizStudio;
+        PdfReturnTask = null;
+        PdfOpenedFromQuiz = true;
+        if (!string.Equals(PdfReader.CurrentFilePath, pdfFullPath, StringComparison.OrdinalIgnoreCase))
+            PdfReader.LoadPdf(pdfFullPath);
+        PdfReader.SetEvidenceHighlight(pageNumber, highlights, verbatimQuote, questionPrompt);
+        ActiveMode = WorkspaceTabMode.PdfReader;
+        NotifyStateChanged();
+    }
+
     public void OpenPdfInReader(string pdfFullPath, TaskItem? associatedTask = null)
     {
         if (ActiveMode != WorkspaceTabMode.PdfReader)
             PdfReturnMode = ActiveMode;
         PdfReturnTask = associatedTask;
+        PdfOpenedFromQuiz = ActiveMode == WorkspaceTabMode.QuizStudio;
         PdfReader.LoadPdf(pdfFullPath);
         ActiveMode = WorkspaceTabMode.PdfReader;
         NotifyStateChanged();
@@ -319,6 +367,14 @@ public sealed class MainWindowViewModel : IAsyncDisposable
 
     public void ReturnFromPdfReader()
     {
+        if (PdfOpenedFromQuiz || PdfReturnMode == WorkspaceTabMode.QuizStudio)
+        {
+            PdfOpenedFromQuiz = false;
+            ActiveMode = WorkspaceTabMode.QuizStudio;
+            NotifyStateChanged();
+            return;
+        }
+
         var returnTask = PdfReturnTask;
         PdfReturnTask = null;
         if (returnTask is not null)

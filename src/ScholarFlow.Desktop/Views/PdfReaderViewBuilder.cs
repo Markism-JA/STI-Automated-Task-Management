@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
+using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -11,7 +12,8 @@ using ScholarFlow.Desktop.ViewModels;
 namespace ScholarFlow.Desktop.Views;
 
 /// <summary>
-/// Builds the Built-in PDF Reader view with a collapsible nested tree outline sidebar, responsive toolbar, and Fit-to-Width page canvas.
+/// Builds the Built-in PDF Reader view with a collapsible nested tree outline sidebar, responsive toolbar,
+/// Grounded Quiz Evidence banner, and Fit-to-Width page canvas with normalized [0..1] highlight bounding box overlays.
 /// </summary>
 public static class PdfReaderViewBuilder
 {
@@ -22,7 +24,7 @@ public static class PdfReaderViewBuilder
 
         var root = new Grid
         {
-            RowDefinitions = RowDefinitions.Parse("Auto,*"),
+            RowDefinitions = RowDefinitions.Parse("Auto,Auto,*"),
             Margin = new Thickness(12, 8)
         };
 
@@ -49,9 +51,11 @@ public static class PdfReaderViewBuilder
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        var backLabel = vm.PdfReturnTask is not null
-            ? $"Back to Task"
-            : "Back";
+        var backLabel = vm.PdfOpenedFromQuiz
+            ? "Back to Quiz"
+            : vm.PdfReturnTask is not null
+                ? "Back to Task"
+                : "Back";
 
         leftGroup.Children.Add(UiBuilder.GhostButton(
             backLabel,
@@ -132,6 +136,10 @@ public static class PdfReaderViewBuilder
             () => reader.ResetZoom()));
         zoomRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.MagnifyPlusOutline, () => reader.ZoomIn()));
         zoomRow.Children.Add(UiBuilder.GhostButton(
+            "Quiz PDF",
+            MaterialIconKind.HeadLightbulbOutline,
+            () => vm.OpenQuizStudioForCurrentPdf()));
+        zoomRow.Children.Add(UiBuilder.GhostButton(
             "External",
             MaterialIconKind.OpenInNew,
             () => reader.OpenExternal()));
@@ -141,6 +149,78 @@ public static class PdfReaderViewBuilder
         toolbarGrid.Children.Add(rightControls);
         toolbarBorder.Child = toolbarGrid;
         root.Children.Add(toolbarBorder);
+
+        // 1b. Grounded Quiz Evidence Banner (when viewing highlighted proof from a Quiz Question)
+        if (reader.ActiveHighlightPage.HasValue)
+        {
+            var bannerGrid = new Grid
+            {
+                ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto"),
+                ColumnSpacing = 10
+            };
+
+            bannerGrid.Children.Add(UiBuilder.Icon(
+                MaterialIconKind.Marker,
+                18,
+                ThemeService.Brush(ThemeService.PriorityP2Fg)));
+
+            var quoteStack = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            if (!string.IsNullOrWhiteSpace(reader.ActiveEvidenceQuestionPrompt))
+            {
+                quoteStack.Children.Add(new TextBlock
+                {
+                    Text = $"Grounded Evidence (Page {reader.ActiveHighlightPage.Value}) · {reader.ActiveEvidenceQuestionPrompt}",
+                    FontSize = 11.5,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+            }
+            if (!string.IsNullOrWhiteSpace(reader.ActiveEvidenceQuote))
+            {
+                quoteStack.Children.Add(new TextBlock
+                {
+                    Text = $"\"{reader.ActiveEvidenceQuote}\"",
+                    FontSize = 12,
+                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            Grid.SetColumn(quoteStack, 1);
+            bannerGrid.Children.Add(quoteStack);
+
+            if (reader.CurrentPage != reader.ActiveHighlightPage.Value)
+            {
+                var jumpHighlightBtn = UiBuilder.GhostButton(
+                    $"Go to Page {reader.ActiveHighlightPage.Value}",
+                    MaterialIconKind.Target,
+                    () => reader.JumpToPage(reader.ActiveHighlightPage.Value),
+                    isActive: true);
+                Grid.SetColumn(jumpHighlightBtn, 2);
+                bannerGrid.Children.Add(jumpHighlightBtn);
+            }
+
+            var clearHighlightBtn = UiBuilder.IconButton(
+                MaterialIconKind.Close,
+                () => reader.ClearEvidenceHighlight(),
+                14,
+                ThemeService.Brush(ThemeService.TextMuted));
+            Grid.SetColumn(clearHighlightBtn, 3);
+            bannerGrid.Children.Add(clearHighlightBtn);
+
+            var bannerBorder = new Border
+            {
+                Background = ThemeService.Brush(ThemeService.PriorityP2Bg),
+                BorderBrush = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                Padding = new Thickness(12, 8),
+                Margin = new Thickness(0, 0, 0, 8),
+                Child = bannerGrid
+            };
+            Grid.SetRow(bannerBorder, 1);
+            root.Children.Add(bannerBorder);
+        }
 
         // 2. Body: Left Nested Tree Outline + Center Page Canvas
         bool showOutline = reader.IsOutlineVisible && reader.BookmarkRoots.Count > 0;
@@ -194,13 +274,30 @@ public static class PdfReaderViewBuilder
             {
                 Source = bmp,
                 Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Top
             };
 
             if (!reader.FitToWidth)
             {
                 img.Width = 720 * (reader.ZoomPercent / 100.0);
+            }
+
+            var pageLayerGrid = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            pageLayerGrid.Children.Add(img);
+
+            if (reader.ActiveHighlightPage == reader.CurrentPage && reader.ActiveHighlights.Count > 0)
+            {
+                pageLayerGrid.Children.Add(new PdfHighlightOverlayControl(reader.ActiveHighlights)
+                {
+                    IsHitTestVisible = false,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
+                });
             }
 
             var pageSheet = new Border
@@ -214,7 +311,7 @@ public static class PdfReaderViewBuilder
                 HorizontalAlignment = reader.FitToWidth ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Top,
                 MaxWidth = reader.FitToWidth ? 860 : double.PositiveInfinity,
-                Child = img
+                Child = pageLayerGrid
             };
 
             canvasContent = new ScrollViewer
@@ -248,10 +345,42 @@ public static class PdfReaderViewBuilder
         Grid.SetColumn(canvasBorder, 2);
         body.Children.Add(canvasBorder);
 
-        Grid.SetRow(body, 1);
+        Grid.SetRow(body, 2);
         root.Children.Add(body);
 
         return root;
+    }
+
+    private sealed class PdfHighlightOverlayControl : Control
+    {
+        private static readonly IBrush HighlightFill = new SolidColorBrush(Color.Parse("#48F59E0B"));
+        private static readonly IPen HighlightBorder = new Pen(new SolidColorBrush(Color.Parse("#E6D97706")), 1.6);
+
+        private readonly IReadOnlyList<NormalizedHighlightRect> _rects;
+
+        public PdfHighlightOverlayControl(IReadOnlyList<NormalizedHighlightRect> rects)
+        {
+            _rects = rects;
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            base.Render(context);
+            double w = Bounds.Width;
+            double h = Bounds.Height;
+            if (w <= 1 || h <= 1)
+                return;
+
+            foreach (var r in _rects)
+            {
+                var rect = new Rect(
+                    r.X * w,
+                    r.Y * h,
+                    Math.Max(8, r.Width * w),
+                    Math.Max(10, r.Height * h));
+                context.DrawRectangle(HighlightFill, HighlightBorder, rect, 3, 3);
+            }
+        }
     }
 
     private static Control BuildBookmarkTreeNode(

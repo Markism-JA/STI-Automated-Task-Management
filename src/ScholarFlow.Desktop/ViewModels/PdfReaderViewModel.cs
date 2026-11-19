@@ -1,4 +1,5 @@
 using Avalonia.Media.Imaging;
+using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Services;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Outline;
@@ -35,11 +36,17 @@ public sealed class PdfReaderViewModel : IDisposable
     public IReadOnlyList<PdfBookmarkNode> BookmarkRoots { get; private set; } = [];
     public string? ErrorMessage { get; private set; }
 
+    public int? ActiveHighlightPage { get; private set; }
+    public IReadOnlyList<NormalizedHighlightRect> ActiveHighlights { get; private set; } = [];
+    public string? ActiveEvidenceQuote { get; private set; }
+    public string? ActiveEvidenceQuestionPrompt { get; private set; }
+
     public event EventHandler? Changed;
 
     public void LoadPdf(string filePath)
     {
         ClearCache();
+        ClearEvidenceHighlight(notify: false);
         CurrentFilePath = filePath;
         ErrorMessage = null;
 
@@ -138,6 +145,34 @@ public sealed class PdfReaderViewModel : IDisposable
 
         CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SetEvidenceHighlight(
+        int oneBasedPage,
+        IReadOnlyList<NormalizedHighlightRect> highlights,
+        string? verbatimQuote = null,
+        string? questionPrompt = null)
+    {
+        if (PageCount > 0)
+            CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
+        else
+            CurrentPage = Math.Max(1, oneBasedPage);
+
+        ActiveHighlightPage = CurrentPage;
+        ActiveHighlights = highlights ?? [];
+        ActiveEvidenceQuote = verbatimQuote;
+        ActiveEvidenceQuestionPrompt = questionPrompt;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ClearEvidenceHighlight(bool notify = true)
+    {
+        ActiveHighlightPage = null;
+        ActiveHighlights = [];
+        ActiveEvidenceQuote = null;
+        ActiveEvidenceQuestionPrompt = null;
+        if (notify)
+            Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void ZoomIn()
