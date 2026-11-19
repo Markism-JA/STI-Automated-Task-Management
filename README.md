@@ -41,90 +41,89 @@
 
 ---
 
-## Installation
-
-Download the latest archive for your platform from the [GitHub Releases](https://github.com/Markism-JA/STI-Automated-Task-Management/releases) page.
+## Quick Install & Uninstall (One-Line, No Clone)
 
 ### Linux (`x64`)
 
-1. Extract the release archive:
-   ```bash
-   tar -xzf ScholarFlow-v1.2.0-linux-x64.tar.gz
-   cd ScholarFlow-v1.2.0-linux-x64 || true
-   ```
-   *(If the archive extracts directly into the current directory, run `./install.sh` from where `ScholarFlow` was extracted.)*
-2. Run the installer:
-   ```bash
-   chmod +x install.sh
-   ./install.sh
-   ```
-   This installs:
-   - Application & Playwright runtime: `~/.local/share/scholarflow/`
-   - CLI symlink: `~/.local/bin/ScholarFlow`
-   - Icon: `~/.local/share/icons/hicolor/scalable/apps/scholarflow.svg`
-   - Desktop entry: `~/.local/share/applications/scholarflow.desktop`
+**Install** (downloads the latest release archive, extracts to a temp folder, and runs `install.sh`):
+```bash
+curl -fsSL https://api.github.com/repos/Markism-JA/ScholarFlow/releases/latest | grep -o 'https://[^"]*linux-x64\.tar\.gz' | head -n1 | xargs -I{} sh -c 'd=$(mktemp -d) && curl -fsSL "{}" | tar -xz -C "$d" && "$d/install.sh" && rm -rf "$d"'
+```
 
-### Windows (`x64`)
+**Uninstall:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Markism-JA/ScholarFlow/master/scripts/uninstall-linux.sh | bash
+```
 
-1. Extract `ScholarFlow-v1.2.0-win-x64.zip`.
-2. Right-click `install.ps1` and choose **Run with PowerShell** (or run in PowerShell):
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-   This installs:
-   - Executable & Playwright runtime: `%LOCALAPPDATA%\Programs\ScholarFlow\`
-   - User `PATH` entry for `%LOCALAPPDATA%\Programs\ScholarFlow`
-   - Start Menu and Desktop shortcuts (`ScholarFlow.lnk`)
+### Windows (`x64` PowerShell)
 
-### Build from Source
+**Install** (downloads the latest release zip, extracts to `%TEMP%`, and runs `install.ps1`):
+```powershell
+$r = irm https://api.github.com/repos/Markism-JA/ScholarFlow/releases/latest; $u = ($r.assets | ? name -like '*win-x64.zip')[0].browser_download_url; $z = "$env:TEMP\ScholarFlow.zip"; $d = "$env:TEMP\ScholarFlow-install"; irm $u -OutFile $z; Expand-Archive $z $d -Force; & "$d\install.ps1"; Remove-Item $z,$d -Recurse -Force
+```
+
+**Uninstall:**
+```powershell
+irm https://raw.githubusercontent.com/Markism-JA/ScholarFlow/master/scripts/uninstall-windows.ps1 | iex
+```
+
+> **Note:** Uninstalling removes the application binary, Playwright runtime, and desktop/menu shortcuts. Your Study Vault folder (Markdown files, PDFs, and `.scholarflow/scholarflow.db`) is preserved unless you delete it manually.
+
+---
+
+## Manual Build, Publish & Install (From Clone)
 
 Requires the **.NET 10 SDK**.
 
 ```bash
-git clone https://github.com/Markism-JA/STI-Automated-Task-Management.git
-cd STI-Automated-Task-Management
-dotnet build ScholarFlow.slnx --disable-build-servers -m:1
-dotnet run --project src/ScholarFlow.Desktop/ScholarFlow.Desktop.csproj
+git clone https://github.com/Markism-JA/ScholarFlow.git
+cd ScholarFlow
 ```
 
-To build self-contained single-file release archives for both Linux and Windows:
+### Publish Release Binaries (`linux-x64` & `win-x64`)
 
 ```bash
 ./scripts/publish.sh v1.2.0
 ```
 
+This outputs self-contained single-file builds and archives to `dist/`:
+- `dist/linux-x64/` & `dist/ScholarFlow-v1.2.0-linux-x64.tar.gz`
+- `dist/win-x64/` & `dist/ScholarFlow-v1.2.0-win-x64.zip`
+
+### Install / Uninstall from the Cloned Repo
+
+**Linux:**
+```bash
+./scripts/install-linux.sh
+# To uninstall:
+./scripts/uninstall-linux.sh
+```
+Installs to `~/.local/share/scholarflow/`, symlinks `~/.local/bin/ScholarFlow`, and registers the desktop entry & SVG icon under `~/.local/share/`.
+
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+# To uninstall:
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
+```
+Installs to `%LOCALAPPDATA%\Programs\ScholarFlow\`, adds it to User `PATH`, and creates Start Menu and Desktop shortcuts.
+
 ---
 
-## Uninstallation
+## Development
 
-Uninstalling removes the application binary, runtime, and desktop shortcuts. Your Study Vault folder (Markdown files, PDFs, and `.scholarflow/scholarflow.db`) is **preserved** unless you delete it manually.
-
-### Linux
-
-Run the included uninstaller:
+Run the desktop app directly from source during development:
 
 ```bash
-./uninstall.sh
+dotnet run --project src/ScholarFlow.Desktop/ScholarFlow.Desktop.csproj
 ```
 
-Or remove the installed files manually:
+Build and run the full test suite (using `--disable-build-servers -m:1` to avoid MSBuild server locks):
 
 ```bash
-rm -rf ~/.local/share/scholarflow
-rm -f ~/.local/bin/ScholarFlow
-rm -f ~/.local/share/icons/hicolor/scalable/apps/scholarflow.svg
-rm -f ~/.local/share/applications/scholarflow.desktop
+dotnet build ScholarFlow.slnx --disable-build-servers -m:1
+dotnet test ScholarFlow.slnx --no-build --disable-build-servers
 ```
-
-### Windows
-
-Run the included PowerShell uninstaller:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
-```
-
-Or remove `%LOCALAPPDATA%\Programs\ScholarFlow`, along with the `ScholarFlow.lnk` shortcuts from the Start Menu (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\`) and Desktop.
 
 ---
 
