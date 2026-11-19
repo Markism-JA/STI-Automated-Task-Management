@@ -34,6 +34,21 @@ public enum QuestionAllocationMode
     ExactCounts
 }
 
+public enum QuizContentModalityMode
+{
+    AutoDetect,
+    StandardProseOnly,
+    IncludeCodeSnippets,
+    IncludeMathLatex,
+    IncludeDiagrams
+}
+
+public sealed record ContentModalityProfile(
+    bool HasCode,
+    bool HasMath,
+    bool HasDiagrams,
+    string? DetectedLanguage = null);
+
 /// <summary>
 /// Normalized top-left [0..1] bounding box on a PDF page so highlights scale cleanly at any zoom level.
 /// </summary>
@@ -90,6 +105,18 @@ public sealed class GeneratedQuestionDto
     [JsonPropertyName("explanation")]
     public string Explanation { get; set; } = string.Empty;
 
+    [JsonPropertyName("codeSnippet")]
+    public string? CodeSnippet { get; set; }
+
+    [JsonPropertyName("codeLanguage")]
+    public string? CodeLanguage { get; set; }
+
+    [JsonPropertyName("mathLatex")]
+    public string? MathLatex { get; set; }
+
+    [JsonPropertyName("diagram")]
+    public string? Diagram { get; set; }
+
     [JsonPropertyName("evidence")]
     public EvidenceAnchorDto Evidence { get; set; } = new();
 }
@@ -129,6 +156,10 @@ public sealed class QuizQuestionRecord
     public string CorrectAnswer { get; set; } = string.Empty;
     public List<string> AcceptedAliases { get; set; } = [];
     public string Explanation { get; set; } = string.Empty;
+    public string? CodeSnippet { get; set; }
+    public string? CodeLanguage { get; set; }
+    public string? MathLatex { get; set; }
+    public string? Diagram { get; set; }
 
     // Grounding to Master / Handout PDF
     public string SourcePdfPath { get; set; } = string.Empty;
@@ -287,6 +318,7 @@ public sealed class QuizGenerationRequest
     public QuizPresetMode Preset { get; set; } = QuizPresetMode.ExamSimulator;
     public QuestionAllocationMode AllocationMode { get; set; } = QuestionAllocationMode.Percentages;
     public Dictionary<QuizQuestionKind, int> KindAllocations { get; set; } = GetDefaultAllocationsForPreset(QuizPresetMode.ExamSimulator);
+    public QuizContentModalityMode ModalityMode { get; set; } = QuizContentModalityMode.AutoDetect;
     public List<string> ExcludePromptsOrTopics { get; set; } = [];
     public string? CustomInstructions { get; set; }
     public string? AppendToQuizId { get; set; }

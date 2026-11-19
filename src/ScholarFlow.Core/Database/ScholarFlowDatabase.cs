@@ -152,7 +152,11 @@ public static class ScholarFlowDatabase
                 srs_due_date TEXT NULL,
                 srs_reps INTEGER NOT NULL DEFAULT 0,
                 srs_lapses INTEGER NOT NULL DEFAULT 0,
-                last_answered_correct INTEGER NULL
+                last_answered_correct INTEGER NULL,
+                code_snippet TEXT NULL,
+                code_language TEXT NULL,
+                math_latex TEXT NULL,
+                diagram_text TEXT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id);
@@ -177,7 +181,11 @@ public static class ScholarFlowDatabase
                  {
                      "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;",
                      "ALTER TABLE quizzes ADD COLUMN in_progress_index INTEGER NULL;",
-                     "ALTER TABLE quizzes ADD COLUMN in_progress_answers_json TEXT NULL;"
+                     "ALTER TABLE quizzes ADD COLUMN in_progress_answers_json TEXT NULL;",
+                     "ALTER TABLE quiz_questions ADD COLUMN code_snippet TEXT NULL;",
+                     "ALTER TABLE quiz_questions ADD COLUMN code_language TEXT NULL;",
+                     "ALTER TABLE quiz_questions ADD COLUMN math_latex TEXT NULL;",
+                     "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;"
                  })
         {
             try
@@ -802,12 +810,14 @@ public static class ScholarFlowDatabase
                         id, quiz_id, order_index, kind, cognitive_level, difficulty, topic_tag,
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
-                        srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct
+                        srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
+                        code_snippet, code_language, math_latex, diagram_text
                     ) VALUES (
                         $id, $quiz_id, $order_index, $kind, $cognitive_level, $difficulty, $topic_tag,
                         $prompt, $options_json, $correct_answer, $aliases_json, $explanation,
                         $source_pdf_path, $source_page, $section_title, $verbatim_quote, $highlight_rects_json,
-                        $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct
+                        $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct,
+                        $code_snippet, $code_language, $math_latex, $diagram_text
                     );
                     """;
                 itemCmd.Parameters.AddWithValue("$id", q.Id);
@@ -833,6 +843,10 @@ public static class ScholarFlowDatabase
                 itemCmd.Parameters.AddWithValue("$srs_reps", q.SrsReps);
                 itemCmd.Parameters.AddWithValue("$srs_lapses", q.SrsLapses);
                 itemCmd.Parameters.AddWithValue("$last_answered_correct", q.LastAnsweredCorrect.HasValue ? (q.LastAnsweredCorrect.Value ? 1 : 0) : DBNull.Value);
+                itemCmd.Parameters.AddWithValue("$code_snippet", (object?)q.CodeSnippet ?? DBNull.Value);
+                itemCmd.Parameters.AddWithValue("$code_language", (object?)q.CodeLanguage ?? DBNull.Value);
+                itemCmd.Parameters.AddWithValue("$math_latex", (object?)q.MathLatex ?? DBNull.Value);
+                itemCmd.Parameters.AddWithValue("$diagram_text", (object?)q.Diagram ?? DBNull.Value);
                 await itemCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -906,7 +920,8 @@ public static class ScholarFlowDatabase
                         id, quiz_id, order_index, kind, cognitive_level, difficulty, topic_tag,
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
-                        srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct
+                        srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
+                        code_snippet, code_language, math_latex, diagram_text
                     FROM quiz_questions
                     ORDER BY quiz_id, order_index;
                     """;
@@ -942,7 +957,11 @@ public static class ScholarFlowDatabase
                         SrsDueDate = !r.IsDBNull(19) && DateOnly.TryParseExact(r.GetString(19), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var sd) ? sd : null,
                         SrsReps = r.GetInt32(20),
                         SrsLapses = r.GetInt32(21),
-                        LastAnsweredCorrect = r.IsDBNull(22) ? null : r.GetInt32(22) != 0
+                        LastAnsweredCorrect = r.IsDBNull(22) ? null : r.GetInt32(22) != 0,
+                        CodeSnippet = r.FieldCount > 23 && !r.IsDBNull(23) ? r.GetString(23) : null,
+                        CodeLanguage = r.FieldCount > 24 && !r.IsDBNull(24) ? r.GetString(24) : null,
+                        MathLatex = r.FieldCount > 25 && !r.IsDBNull(25) ? r.GetString(25) : null,
+                        Diagram = r.FieldCount > 26 && !r.IsDBNull(26) ? r.GetString(26) : null
                     };
 
                     parentQuiz.Questions.Add(q);

@@ -936,6 +936,41 @@ public static class QuizStudioViewBuilder
             }
         );
 
+        // Specialized Content Modality Mode (Auto-Detect vs Prose-Only vs Code / Math LaTeX / Diagrams)
+        var modalityStack = new StackPanel { Spacing = 5 };
+        modalityStack.Children.Add(
+            new TextBlock
+            {
+                Text = "Specialized Content Formats (Auto-detects whether material uses Code, Math LaTeX, or Diagrams):",
+                FontSize = 11.5,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+            }
+        );
+
+        var modalityWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var (mMode, mLabel, mIcon) in new[]
+                 {
+                     (QuizContentModalityMode.AutoDetect, "Smart Auto-Detect", MaterialIconKind.AutoFix),
+                     (QuizContentModalityMode.StandardProseOnly, "Prose Only", MaterialIconKind.TextBoxOutline),
+                     (QuizContentModalityMode.IncludeCodeSnippets, "Code Snippets", MaterialIconKind.CodeTags),
+                     (QuizContentModalityMode.IncludeMathLatex, "Math LaTeX (Strict MCQ)", MaterialIconKind.FunctionVariant),
+                     (QuizContentModalityMode.IncludeDiagrams, "Flow Diagrams", MaterialIconKind.SitemapOutline),
+                 })
+        {
+            var capturedMode = mMode;
+            var mBtn = UiBuilder.GhostButton(
+                mLabel,
+                mIcon,
+                () => studio.SetModalityMode(capturedMode),
+                isActive: studio.ModalityMode == capturedMode
+            );
+            mBtn.Margin = new Thickness(0, 0, 5, 4);
+            modalityWrap.Children.Add(mBtn);
+        }
+        modalityStack.Children.Add(modalityWrap);
+        configCard.Children.Add(modalityStack);
+
         // Guarded Custom Prompt Instructions (Focus / Tone / Difficulty — schema & evidence locked)
         var customPromptStack = new StackPanel { Spacing = 6 };
         var customPromptHeader = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
@@ -2123,11 +2158,11 @@ public static class QuizStudioViewBuilder
             headerGrid.Children.Add(rowActions);
             cardStack.Children.Add(headerGrid);
 
-            // Tier 2: Full-Width Question Prompt (never squeezed or cut off)
+            // Tier 2: Full-Width Question Prompt + Specialized Rich Cards (Code, Math LaTeX, Diagram)
             cardStack.Children.Add(
                 new TextBlock
                 {
-                    Text = q.Prompt,
+                    Text = QuizRichContentRenderer.FormatInlineMath(q.Prompt),
                     FontSize = 14,
                     FontWeight = FontWeight.SemiBold,
                     Foreground = ThemeService.Brush(ThemeService.TextPrimary),
@@ -2135,6 +2170,15 @@ public static class QuizStudioViewBuilder
                     LineHeight = 20,
                 }
             );
+
+            if (!string.IsNullOrWhiteSpace(q.CodeSnippet))
+                cardStack.Children.Add(QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage));
+
+            if (!string.IsNullOrWhiteSpace(q.MathLatex))
+                cardStack.Children.Add(QuizRichContentRenderer.BuildMathLatexCard(q.MathLatex));
+
+            if (!string.IsNullOrWhiteSpace(q.Diagram))
+                cardStack.Children.Add(QuizRichContentRenderer.BuildDiagramCard(q.Diagram));
 
             // Tier 3: Relative Kind-Aware Preview OR Inline Editor
             if (!isEditing)
@@ -2403,6 +2447,56 @@ public static class QuizStudioViewBuilder
                         capturedQ.Explanation = (expBox.Text ?? string.Empty).Trim();
                 };
                 editStack.Children.Add(expBox);
+
+                // Optional Rich Content Editors (Code Snippet, Math LaTeX, Diagram)
+                var richGrid = new Grid
+                {
+                    ColumnDefinitions = ColumnDefinitions.Parse("*,*"),
+                    ColumnSpacing = 8,
+                };
+                var mathBox = new TextBox
+                {
+                    Text = capturedQ.MathLatex ?? string.Empty,
+                    Watermark = "Optional Math LaTeX (e.g. \\frac{a+b}{n} or O(n \\log n))...",
+                    FontSize = 12,
+                };
+                mathBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        capturedQ.MathLatex = string.IsNullOrWhiteSpace(mathBox.Text) ? null : mathBox.Text.Trim();
+                };
+                richGrid.Children.Add(mathBox);
+
+                var diagBox = new TextBox
+                {
+                    Text = capturedQ.Diagram ?? string.Empty,
+                    Watermark = "Optional Flow Diagram (e.g. [Client] -> [API] -> [DB])...",
+                    FontSize = 12,
+                };
+                diagBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        capturedQ.Diagram = string.IsNullOrWhiteSpace(diagBox.Text) ? null : diagBox.Text.Trim();
+                };
+                Grid.SetColumn(diagBox, 1);
+                richGrid.Children.Add(diagBox);
+                editStack.Children.Add(richGrid);
+
+                var codeEditBox = new TextBox
+                {
+                    Text = capturedQ.CodeSnippet ?? string.Empty,
+                    Watermark = "Optional Code Snippet block...",
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.NoWrap,
+                    MinHeight = 46,
+                    FontSize = 12,
+                };
+                codeEditBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        capturedQ.CodeSnippet = string.IsNullOrWhiteSpace(codeEditBox.Text) ? null : codeEditBox.Text;
+                };
+                editStack.Children.Add(codeEditBox);
 
                 cardStack.Children.Add(
                     new Border
@@ -2778,7 +2872,7 @@ public static class QuizStudioViewBuilder
         qCardStack.Children.Add(
             new TextBlock
             {
-                Text = q.Prompt,
+                Text = QuizRichContentRenderer.FormatInlineMath(q.Prompt),
                 FontSize = 15.5,
                 FontWeight = FontWeight.SemiBold,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary),
@@ -2786,6 +2880,15 @@ public static class QuizStudioViewBuilder
                 LineHeight = 23,
             }
         );
+
+        if (!string.IsNullOrWhiteSpace(q.CodeSnippet))
+            qCardStack.Children.Add(QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage));
+
+        if (!string.IsNullOrWhiteSpace(q.MathLatex))
+            qCardStack.Children.Add(QuizRichContentRenderer.BuildMathLatexCard(q.MathLatex));
+
+        if (!string.IsNullOrWhiteSpace(q.Diagram))
+            qCardStack.Children.Add(QuizRichContentRenderer.BuildDiagramCard(q.Diagram));
 
         if (
             q.Kind
@@ -2861,7 +2964,7 @@ public static class QuizStudioViewBuilder
                 optContentGrid.Children.Add(
                     new TextBlock
                     {
-                        Text = optText,
+                        Text = QuizRichContentRenderer.FormatInlineMath(optText),
                         FontSize = 13.5,
                         Foreground = fgBrush,
                         TextWrapping = TextWrapping.Wrap,

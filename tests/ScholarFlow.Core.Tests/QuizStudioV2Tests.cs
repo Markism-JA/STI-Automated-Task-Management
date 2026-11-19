@@ -288,4 +288,95 @@ public class QuizStudioV2Tests
         Assert.Contains("Focus on 'edge cases' and troubleshooting.", block);
         Assert.Equal(string.Empty, QuizLlmService.BuildGuardedCustomInstructionsBlock("   "));
     }
+
+    [Fact]
+    public void DetectContentModalities_IdentifiesProseCodeMathAndDiagramsAccurately()
+    {
+        var prosePages = new[]
+        {
+            new GroundedPdfPage(1, "Prelims", "Lesson 1", "Technopreneurship combines technology and entrepreneurship to solve customer pain points.")
+        };
+        var proseResult = QuizLlmService.DetectContentModalities(prosePages, "Technopreneurship");
+        Assert.False(proseResult.HasCode);
+        Assert.False(proseResult.HasMath);
+        Assert.False(proseResult.HasDiagrams);
+
+        var codePages = new[]
+        {
+            new GroundedPdfPage(1, "Midterms", "OOP", "public class OrderProcessor { private void Run() { Console.Write(\"ok\"); } }")
+        };
+        var codeResult = QuizLlmService.DetectContentModalities(codePages, "Object Oriented Programming");
+        Assert.True(codeResult.HasCode);
+        Assert.Equal("csharp", codeResult.DetectedLanguage);
+        Assert.False(codeResult.HasMath);
+
+        var mathPages = new[]
+        {
+            new GroundedPdfPage(2, "Finals", "Complexity", @"Using \frac{n(n+1)}{2} and \sum_{i=1}^{n} i, we bound f(x) = O(n log n) where x \leq y and a \geq b.")
+        };
+        var mathResult = QuizLlmService.DetectContentModalities(mathPages, "Discrete Math");
+        Assert.True(mathResult.HasMath);
+
+        var diagramPages = new[]
+        {
+            new GroundedPdfPage(3, "Prelims", "Architecture", "Figure 1 shows the Flowchart of Client -> API Gateway -> Auth Service -> Database.")
+        };
+        var diagramResult = QuizLlmService.DetectContentModalities(diagramPages, "Systems Integration");
+        Assert.True(diagramResult.HasDiagrams);
+
+        var forcedProse = QuizLlmService.DetectContentModalities(codePages, "OOP", QuizContentModalityMode.StandardProseOnly);
+        Assert.False(forcedProse.HasCode);
+        Assert.False(forcedProse.HasMath);
+        Assert.False(forcedProse.HasDiagrams);
+    }
+
+    [Fact]
+    public async Task SaveAndLoadQuizSession_PreservesSpecializedModalityFields()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"scholarflow_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var session = new QuizSessionRecord
+            {
+                Id = "quiz-modality-1",
+                CourseFolder = "Algorithms",
+                CourseTitle = "Algorithms",
+                Term = "Midterms",
+                Title = "Modality Roundtrip",
+                Questions =
+                [
+                    new QuizQuestionRecord
+                    {
+                        Id = "q-1",
+                        QuizId = "quiz-modality-1",
+                        OrderIndex = 0,
+                        Kind = QuizQuestionKind.MultipleChoice,
+                        Prompt = "Evaluate the snippet and recurrence.",
+                        CodeSnippet = "public int Sum(int n) { return n * (n + 1) / 2; }",
+                        CodeLanguage = "csharp",
+                        MathLatex = @"\frac{n(n+1)}{2}",
+                        Diagram = "Input -> Sum() -> Output",
+                        Options = ["O(1)", "O(n)", "O(n^2)", "O(log n)"],
+                        CorrectAnswer = "O(1)"
+                    }
+                ]
+            };
+
+            await ScholarFlowDatabase.SaveQuizSessionAsync(tempRoot, session);
+            var loaded = await ScholarFlowDatabase.LoadQuizSessionsAsync(tempRoot, "Algorithms");
+
+            var loadedSession = Assert.Single(loaded);
+            var loadedQ = Assert.Single(loadedSession.Questions);
+            Assert.Equal("public int Sum(int n) { return n * (n + 1) / 2; }", loadedQ.CodeSnippet);
+            Assert.Equal("csharp", loadedQ.CodeLanguage);
+            Assert.Equal(@"\frac{n(n+1)}{2}", loadedQ.MathLatex);
+            Assert.Equal("Input -> Sum() -> Output", loadedQ.Diagram);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
 }

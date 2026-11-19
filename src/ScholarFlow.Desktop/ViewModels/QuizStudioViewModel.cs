@@ -57,6 +57,7 @@ public sealed class QuizStudioViewModel
     public string? AppendTargetQuizId { get; private set; }
     public string? AppendTargetQuizTitle { get; private set; }
     public string CustomPromptInstructions { get; private set; } = string.Empty;
+    public QuizContentModalityMode ModalityMode { get; private set; } = QuizContentModalityMode.AutoDetect;
 
     public IReadOnlyList<(int PageNumber, string SectionTitle, string? Term)> MatchedScopePages { get; private set; } = [];
     public int PreviewScopeIndex { get; private set; }
@@ -374,6 +375,16 @@ public sealed class QuizStudioViewModel
         SetCustomPromptInstructions(updated, notify: true);
     }
 
+    public void SetModalityMode(QuizContentModalityMode mode)
+    {
+        if (ModalityMode == mode)
+            return;
+
+        ModalityMode = mode;
+        RefreshLivePromptPreviewIfActive();
+        _mainVm.RequestUiRefresh();
+    }
+
     public void SetBuilderOutputMode(QuizBuilderOutputMode mode)
     {
         BuilderOutputMode = mode;
@@ -533,6 +544,10 @@ public sealed class QuizStudioViewModel
                     CorrectAnswer = orig.CorrectAnswer,
                     AcceptedAliases = [.. orig.AcceptedAliases],
                     Explanation = orig.Explanation,
+                    CodeSnippet = orig.CodeSnippet,
+                    CodeLanguage = orig.CodeLanguage,
+                    MathLatex = orig.MathLatex,
+                    Diagram = orig.Diagram,
                     SourcePdfPath = orig.SourcePdfPath,
                     SourcePage = orig.SourcePage,
                     SectionTitle = orig.SectionTitle,
@@ -906,6 +921,10 @@ public sealed class QuizStudioViewModel
                 Difficulty = orig.Difficulty,
                 TopicTag = orig.TopicTag,
                 Prompt = orig.Prompt,
+                CodeSnippet = orig.CodeSnippet,
+                CodeLanguage = orig.CodeLanguage,
+                MathLatex = orig.MathLatex,
+                Diagram = orig.Diagram,
                 Options = opts,
                 CorrectAnswer = orig.CorrectAnswer,
                 AcceptedAliases = [.. orig.AcceptedAliases],
@@ -1349,6 +1368,10 @@ public sealed class QuizStudioViewModel
         CorrectAnswer = orig.CorrectAnswer,
         AcceptedAliases = [.. orig.AcceptedAliases],
         Explanation = orig.Explanation,
+        CodeSnippet = orig.CodeSnippet,
+        CodeLanguage = orig.CodeLanguage,
+        MathLatex = orig.MathLatex,
+        Diagram = orig.Diagram,
         SourcePdfPath = orig.SourcePdfPath,
         SourcePage = orig.SourcePage,
         SectionTitle = orig.SectionTitle,
@@ -1576,6 +1599,7 @@ public sealed class QuizStudioViewModel
             Preset = SelectedPreset,
             AllocationMode = AllocationMode,
             KindAllocations = new Dictionary<QuizQuestionKind, int>(KindAllocations),
+            ModalityMode = ModalityMode,
             ExcludePromptsOrTopics = excludes,
             CustomInstructions = CustomPromptInstructions,
             AppendToQuizId = AppendTargetQuizId,
