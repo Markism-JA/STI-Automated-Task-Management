@@ -173,15 +173,23 @@ public static class ScholarFlowDatabase
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(ct);
 
-        try
+        foreach (var alterSql in new[]
+                 {
+                     "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;",
+                     "ALTER TABLE quizzes ADD COLUMN in_progress_index INTEGER NULL;",
+                     "ALTER TABLE quizzes ADD COLUMN in_progress_answers_json TEXT NULL;"
+                 })
         {
-            await using var alterCmd = conn.CreateCommand();
-            alterCmd.CommandText = "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;";
-            await alterCmd.ExecuteNonQueryAsync(ct);
-        }
-        catch
-        {
-            // Column already exists
+            try
+            {
+                await using var alterCmd = conn.CreateCommand();
+                alterCmd.CommandText = alterSql;
+                await alterCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch
+            {
+                // Column already exists
+            }
         }
     }
 
@@ -857,8 +865,8 @@ public static class ScholarFlowDatabase
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = string.IsNullOrWhiteSpace(courseFolder)
-                    ? "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks FROM quizzes ORDER BY created_at_utc DESC;"
-                    : "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks FROM quizzes WHERE course_folder = $cf ORDER BY created_at_utc DESC;";
+                    ? "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks, in_progress_index, in_progress_answers_json FROM quizzes ORDER BY created_at_utc DESC;"
+                    : "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks, in_progress_index, in_progress_answers_json FROM quizzes WHERE course_folder = $cf ORDER BY created_at_utc DESC;";
                 if (!string.IsNullOrWhiteSpace(courseFolder))
                     cmd.Parameters.AddWithValue("$cf", courseFolder);
 
@@ -877,7 +885,11 @@ public static class ScholarFlowDatabase
                         CreatedAtUtc = DateTimeOffset.TryParse(r.GetString(7), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) ? dt : DateTimeOffset.UtcNow,
                         AttemptCount = r.GetInt32(8),
                         LastScorePercent = r.IsDBNull(9) ? null : r.GetDouble(9),
-                        SourcePdfMtimeTicks = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetInt64(10) : null
+                        SourcePdfMtimeTicks = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetInt64(10) : null,
+                        InProgressQuestionIndex = r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetInt32(11) : null,
+                        InProgressAnswers = r.FieldCount > 12 && !r.IsDBNull(12)
+                            ? TryDeserializeDictionary<QuizInProgressAnswer>(r.GetString(12))
+                            : new Dictionary<string, QuizInProgressAnswer>(StringComparer.OrdinalIgnoreCase)
                     };
                     sessions.Add(s);
                     byId[s.Id] = s;
@@ -1036,6 +1048,90 @@ public static class ScholarFlowDatabase
         finally
         {
             DbLock.Release();
+        }
+    }
+
+    public static async Task SaveQuizInProgressAsync(
+        string basinRoot,
+        string quizId,
+        int currentQuestionIndex,
+        IReadOnlyDictionary<string, QuizInProgressAnswer> answers,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(basinRoot) || string.IsNullOrWhiteSpace(quizId) || quizId == "srs-deck")
+            return;
+
+        await DbLock.WaitAsync(ct);
+        try
+        {
+            await using var conn = new SqliteConnection(BuildConnectionString(basinRoot));
+            await conn.OpenAsync(ct);
+            await EnsureSchemaOnConnectionAsync(conn, ct);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE quizzes
+                SET in_progress_index = $idx,
+                    in_progress_answers_json = $json
+                WHERE id = $id;
+                """;
+            cmd.Parameters.AddWithValue("$idx", Math.Max(0, currentQuestionIndex));
+            cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(answers));
+            cmd.Parameters.AddWithValue("$id", quizId);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        finally
+        {
+            DbLock.Release();
+        }
+    }
+
+    public static async Task ClearQuizInProgressAsync(
+        string basinRoot,
+        string quizId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(basinRoot) || string.IsNullOrWhiteSpace(quizId) || quizId == "srs-deck")
+            return;
+
+        await DbLock.WaitAsync(ct);
+        try
+        {
+            await using var conn = new SqliteConnection(BuildConnectionString(basinRoot));
+            await conn.OpenAsync(ct);
+            await EnsureSchemaOnConnectionAsync(conn, ct);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE quizzes
+                SET in_progress_index = NULL,
+                    in_progress_answers_json = NULL
+                WHERE id = $id;
+                """;
+            cmd.Parameters.AddWithValue("$id", quizId);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        finally
+        {
+            DbLock.Release();
+        }
+    }
+
+    private static Dictionary<string, T> TryDeserializeDictionary<T>(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, T>>(json);
+            return parsed is not null
+                ? new Dictionary<string, T>(parsed, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
         }
     }
 

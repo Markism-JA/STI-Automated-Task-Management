@@ -1027,6 +1027,44 @@ public sealed class MainWindow : Window
         filterBar.Children.Add(groupPills);
         stack.Children.Add(filterBar);
 
+        // Per-Subject Filter Bar in Completed View
+        if (vm.ActiveSmartView == SmartViewKind.Completed && vm.ActiveMode == WorkspaceTabMode.TaskList)
+        {
+            var subjectWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            var allSubjectsBtn = UiBuilder.GhostButton(
+                "All Subjects",
+                string.IsNullOrWhiteSpace(vm.CompletedCourseFilter) ? MaterialIconKind.Check : null,
+                () => vm.SetCompletedCourseFilter(null),
+                isActive: string.IsNullOrWhiteSpace(vm.CompletedCourseFilter)
+            );
+            allSubjectsBtn.Margin = new Thickness(0, 0, 5, 4);
+            subjectWrap.Children.Add(allSubjectsBtn);
+
+            foreach (var c in vm.Courses.Where(x => !x.IsArchived))
+            {
+                var captured = c;
+                bool isCourseActive = string.Equals(
+                    vm.CompletedCourseFilter,
+                    c.FolderName,
+                    StringComparison.OrdinalIgnoreCase
+                );
+                int doneCount = vm.AllTasks.Count(t =>
+                    t.IsCompleted
+                    && string.Equals(t.CourseFolder, c.FolderName, StringComparison.OrdinalIgnoreCase)
+                );
+                var cBtn = UiBuilder.GhostButton(
+                    $"#{c.Alias} ({doneCount})",
+                    isCourseActive ? MaterialIconKind.Check : null,
+                    () => vm.SetCompletedCourseFilter(captured.FolderName),
+                    isActive: isCourseActive
+                );
+                cBtn.Margin = new Thickness(0, 0, 5, 4);
+                ToolTip.SetTip(cBtn, c.Title);
+                subjectWrap.Children.Add(cBtn);
+            }
+            stack.Children.Add(subjectWrap);
+        }
+
         // Unregistered Ongoing Files Banner (quiet, compact)
         var relevantUnregistered =
             vm.ActiveCourse is not null
@@ -1374,6 +1412,8 @@ public sealed class MainWindow : Window
         centerStack.Children.Add(titleBlock);
 
         var subParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(task.ParentTaskId))
+            subParts.Add("Subtask");
         if (!string.IsNullOrWhiteSpace(task.LmsScore))
             subParts.Add($"Score: {task.LmsScore}");
         else if (
@@ -2084,6 +2124,7 @@ public sealed class MainWindow : Window
             {
                 SearchResultKind.Course => MaterialIconKind.Pound,
                 SearchResultKind.PdfDocument => MaterialIconKind.FilePdfBox,
+                SearchResultKind.Quiz => MaterialIconKind.HeadLightbulbOutline,
                 _ => MaterialIconKind.CheckboxBlankCircleOutline,
             };
 
@@ -2091,6 +2132,7 @@ public sealed class MainWindow : Window
             {
                 SearchResultKind.PdfDocument => ThemeService.Brush(ThemeService.AccentPrimary),
                 SearchResultKind.Course => ThemeService.Brush(ThemeService.PriorityP3Fg),
+                SearchResultKind.Quiz => ThemeService.Brush(ThemeService.PriorityP2Fg),
                 _ => ThemeService.Brush(ThemeService.TextSecondary),
             };
 
@@ -2532,9 +2574,58 @@ public sealed class MainWindow : Window
             }
         }
 
-        // Skip single-key Vim shortcuts when typing inside any TextBox
+        // Skip single-key shortcuts when typing inside any TextBox
         if (FocusManager?.GetFocusedElement() is TextBox)
             return;
+
+        // Active Quiz Runner hotkeys (1-4 option/SRS pick, Left/P prev, Right/N next)
+        if (_vm.ActiveMode == WorkspaceTabMode.QuizStudio &&
+            _vm.QuizStudio.ActiveSession is not null &&
+            !_vm.QuizStudio.IsShowingResultsSummary &&
+            !_vm.IsSearchModalOpen)
+        {
+            var curQ = _vm.QuizStudio.CurrentQuestion;
+            if (e.Key is Key.D1 or Key.D2 or Key.D3 or Key.D4)
+            {
+                int slot = e.Key switch
+                {
+                    Key.D1 => 0,
+                    Key.D2 => 1,
+                    Key.D3 => 2,
+                    _ => 3
+                };
+
+                if (!_vm.QuizStudio.IsAnswerRevealed &&
+                    curQ is not null &&
+                    curQ.Kind is Core.Quiz.QuizQuestionKind.MultipleChoice or Core.Quiz.QuizQuestionKind.Situational or Core.Quiz.QuizQuestionKind.TrueFalse &&
+                    slot < curQ.Options.Count)
+                {
+                    e.Handled = true;
+                    await _vm.QuizStudio.SubmitAnswerAsync(curQ.Options[slot]);
+                    return;
+                }
+
+                if (_vm.QuizStudio.IsAnswerRevealed)
+                {
+                    e.Handled = true;
+                    int rating = slot switch { 0 => 1, 1 => 3, 2 => 4, _ => 5 };
+                    await _vm.QuizStudio.RateAndAdvanceAsync(rating);
+                    return;
+                }
+            }
+            else if (e.Key is Key.Left or Key.P)
+            {
+                e.Handled = true;
+                _vm.QuizStudio.PreviousQuestion();
+                return;
+            }
+            else if (e.Key is Key.Right or Key.N)
+            {
+                e.Handled = true;
+                await _vm.QuizStudio.AdvanceNextQuestionAsync();
+                return;
+            }
+        }
 
         switch (e.Key)
         {
@@ -2666,6 +2757,11 @@ public sealed class MainWindow : Window
             case Key.D5:
                 e.Handled = true;
                 _vm.SelectSmartView(SmartViewKind.Completed);
+                break;
+
+            case Key.D6:
+                e.Handled = true;
+                await _vm.SelectQuizStudioViewAsync();
                 break;
         }
     }

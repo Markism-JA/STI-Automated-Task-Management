@@ -34,7 +34,9 @@ public static class TaskQueryService
             SmartViewKind.Inbox => allTasks.Where(t => !t.IsCompleted && t.IsInbox),
             SmartViewKind.Today => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value <= today),
             SmartViewKind.Upcoming => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value > today),
-            SmartViewKind.Completed => allTasks.Where(t => t.IsCompleted),
+            SmartViewKind.Completed => string.IsNullOrWhiteSpace(targetValue)
+                ? allTasks.Where(t => t.IsCompleted)
+                : allTasks.Where(t => t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
             SmartViewKind.Course => allTasks.Where(t => !t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
             SmartViewKind.Label => allTasks.Where(t => !t.IsCompleted && t.Labels.Contains(targetValue ?? "", StringComparer.OrdinalIgnoreCase)),
             SmartViewKind.Term => allTasks.Where(t => !t.IsCompleted && MatchesTerm(t, targetValue)),

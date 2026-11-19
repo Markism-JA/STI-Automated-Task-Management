@@ -218,6 +218,8 @@ public sealed class QuizQuestionRecord
     }
 }
 
+public sealed record QuizInProgressAnswer(string Answer, bool IsCorrect);
+
 /// <summary>
 /// Persistent quiz session stored in SQLite (scholarflow.db).
 /// </summary>
@@ -234,7 +236,12 @@ public sealed class QuizSessionRecord
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public int AttemptCount { get; set; }
     public double? LastScorePercent { get; set; }
+    public int? InProgressQuestionIndex { get; set; }
+    public Dictionary<string, QuizInProgressAnswer> InProgressAnswers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<QuizQuestionRecord> Questions { get; set; } = [];
+
+    public bool HasInProgressAttempt =>
+        Questions.Count > 0 && (InProgressAnswers.Count > 0 || (InProgressQuestionIndex ?? 0) > 0);
 
     public bool IsSourcePdfStale()
     {

@@ -1588,14 +1588,35 @@ public static class QuizStudioViewBuilder
             );
         }
 
-        actions.Children.Add(
-            UiBuilder.GhostButton(
-                "Start",
-                MaterialIconKind.PlayOutline,
-                () => studio.StartQuizSession(quiz),
-                isActive: true
-            )
-        );
+        if (quiz.HasInProgressAttempt)
+        {
+            int resumeQ = Math.Clamp((quiz.InProgressQuestionIndex ?? 0) + 1, 1, quiz.Questions.Count);
+            actions.Children.Add(
+                UiBuilder.PrimaryButton(
+                    $"Continue (Q{resumeQ}/{quiz.Questions.Count})",
+                    MaterialIconKind.PlayOutline,
+                    () => studio.StartQuizSession(quiz, resumeSavedProgress: true)
+                )
+            );
+            actions.Children.Add(
+                UiBuilder.GhostButton(
+                    "Restart",
+                    MaterialIconKind.Restart,
+                    () => studio.StartQuizSession(quiz, resumeSavedProgress: false)
+                )
+            );
+        }
+        else
+        {
+            actions.Children.Add(
+                UiBuilder.GhostButton(
+                    "Start",
+                    MaterialIconKind.PlayOutline,
+                    () => studio.StartQuizSession(quiz, resumeSavedProgress: false),
+                    isActive: true
+                )
+            );
+        }
 
         var shuffleStartBtn = UiBuilder.GhostButton(
             "Shuffle",
@@ -2520,13 +2541,22 @@ public static class QuizStudioViewBuilder
             ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto"),
             ColumnSpacing = 12,
         };
-        topBar.Children.Add(
+        var topLeftActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        topLeftActions.Children.Add(
             UiBuilder.GhostButton(
                 "Exit to Studio",
                 MaterialIconKind.ArrowLeft,
                 () => studio.ExitActiveSession()
             )
         );
+        topLeftActions.Children.Add(
+            UiBuilder.GhostButton(
+                "Restart",
+                MaterialIconKind.Restart,
+                () => studio.StartQuizSession(session, resumeSavedProgress: false)
+            )
+        );
+        topBar.Children.Add(topLeftActions);
 
         var centerTitle = new TextBlock
         {

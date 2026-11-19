@@ -46,7 +46,8 @@ public enum SearchResultKind
 {
     Course,
     Task,
-    PdfDocument
+    PdfDocument,
+    Quiz
 }
 
 public sealed record SearchResultItem(
@@ -56,7 +57,8 @@ public sealed record SearchResultItem(
     string Badge,
     TaskItem? Task = null,
     BasinCourseEntry? Course = null,
-    string? PdfPath = null);
+    string? PdfPath = null,
+    Core.Quiz.QuizSessionRecord? Quiz = null);
 
 /// <summary>
 /// Central application ViewModel coordinating Basin state, Todoist smart views, Calendar,
@@ -87,6 +89,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
 
     public string? ActiveTermFilter { get; private set; }
     public string? ActiveLabelFilter { get; private set; }
+    public string? CompletedCourseFilter { get; private set; }
     public TaskGroupingMode ActiveGrouping { get; private set; } = TaskGroupingMode.Default;
 
     public IReadOnlyList<BasinCourseEntry> Courses { get; private set; } = [];
@@ -210,7 +213,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
                 .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(BasinRoot, Courses, AllTasks);
-            Calendar.UpdateTasks(AllTasks);
+            Calendar.UpdateTasks(EnumerateAllTaskNodes(AllTasks).ToList());
             await QuizStudio.RefreshAsync();
 
             RecomputeVisibleTasks();
@@ -291,7 +294,16 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     {
         ActiveMode = WorkspaceTabMode.Calendar;
         ActiveCourse = null;
-        Calendar.UpdateTasks(AllTasks);
+        Calendar.UpdateTasks(EnumerateAllTaskNodes(AllTasks).ToList());
+        NotifyStateChanged();
+    }
+
+    public void SetCompletedCourseFilter(string? courseFolder)
+    {
+        CompletedCourseFilter = string.Equals(CompletedCourseFilter, courseFolder, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : courseFolder;
+        RecomputeVisibleTasks();
         NotifyStateChanged();
     }
 
@@ -650,7 +662,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         }
     }
 
-    public void ExecuteSearchResult(SearchResultItem item)
+    public async void ExecuteSearchResult(SearchResultItem item)
     {
         IsSearchModalOpen = false;
         SearchQuery = string.Empty;
@@ -663,6 +675,12 @@ public sealed class MainWindowViewModel : IAsyncDisposable
 
             case SearchResultKind.PdfDocument when !string.IsNullOrWhiteSpace(item.PdfPath):
                 OpenPdfInReader(item.PdfPath);
+                break;
+
+            case SearchResultKind.Quiz when item.Quiz is not null:
+                var qCourse = Courses.FirstOrDefault(c => c.FolderName.Equals(item.Quiz.CourseFolder, StringComparison.OrdinalIgnoreCase));
+                await SelectQuizStudioViewAsync(qCourse, item.Quiz.SourcePdfPath);
+                QuizStudio.StartQuizSession(item.Quiz, resumeSavedProgress: item.Quiz.HasInProgressAttempt);
                 break;
 
             case SearchResultKind.Task when item.Task is not null:
@@ -795,6 +813,31 @@ public sealed class MainWindowViewModel : IAsyncDisposable
                         Course: c,
                         PdfPath: masterPdf));
                 }
+            }
+        }
+
+        // 4. Matching Test & Recall Quizzes (by title, term, course, or question prompt/tag)
+        foreach (var qz in QuizStudio.SavedQuizzes)
+        {
+            bool matchesQuiz = string.IsNullOrEmpty(q) ||
+                qz.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                qz.CourseTitle.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (qz.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true) ||
+                q.Contains("quiz", StringComparison.OrdinalIgnoreCase) ||
+                q.Contains("test", StringComparison.OrdinalIgnoreCase) ||
+                q.Contains("recall", StringComparison.OrdinalIgnoreCase) ||
+                qz.Questions.Any(qq => qq.Prompt.Contains(q, StringComparison.OrdinalIgnoreCase) || qq.TopicTag.Contains(q, StringComparison.OrdinalIgnoreCase));
+
+            if (matchesQuiz)
+            {
+                var sub = $"{qz.CourseTitle} · {qz.Questions.Count} items" +
+                          (qz.HasInProgressAttempt ? $" · In progress (Q{(qz.InProgressQuestionIndex ?? 0) + 1})" : "");
+                results.Add(new SearchResultItem(
+                    SearchResultKind.Quiz,
+                    qz.Title,
+                    sub,
+                    qz.Term ?? "Quiz",
+                    Quiz: qz));
             }
         }
 
@@ -1232,11 +1275,17 @@ public sealed class MainWindowViewModel : IAsyncDisposable
             SmartViewKind.Course => ActiveCourse?.FolderName,
             SmartViewKind.Label => ActiveLabelFilter,
             SmartViewKind.Term => ActiveTermFilter,
+            SmartViewKind.Completed => CompletedCourseFilter,
             _ => null
         };
 
+        // Include subtasks with due dates in Today & Upcoming views
+        var querySource = viewKind is SmartViewKind.Today or SmartViewKind.Upcoming
+            ? EnumerateAllTaskNodes(AllTasks)
+            : AllTasks;
+
         VisibleTasks = TaskQueryService.Filter(
-            AllTasks,
+            querySource,
             viewKind,
             targetValue: targetVal,
             searchQuery: IsSearchModalOpen ? null : SearchQuery,

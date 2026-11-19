@@ -1,5 +1,7 @@
 using ScholarFlow.Core.Database;
+using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Quiz;
+using ScholarFlow.Core.Tasks;
 
 namespace ScholarFlow.Core.Tests;
 
@@ -173,5 +175,104 @@ public class QuizStudioV2Tests
             if (Directory.Exists(tempRoot))
                 Directory.Delete(tempRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Database_PersistsAndClearsQuizInProgressState()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sf-quiz-prog-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var session = new QuizSessionRecord
+            {
+                CourseFolder = "Network_Technology",
+                CourseTitle = "Network Technology",
+                Title = "Midterms Quiz",
+                SourcePdfPath = "/tmp/net.pdf",
+                ModelUsed = "UnitTest",
+                Questions =
+                [
+                    new QuizQuestionRecord { Id = "q1", Prompt = "Q1", CorrectAnswer = "A" },
+                    new QuizQuestionRecord { Id = "q2", Prompt = "Q2", CorrectAnswer = "B" }
+                ]
+            };
+
+            await ScholarFlowDatabase.SaveQuizSessionAsync(tempRoot, session);
+            await ScholarFlowDatabase.SaveQuizInProgressAsync(
+                tempRoot,
+                session.Id,
+                1,
+                new Dictionary<string, QuizInProgressAnswer>
+                {
+                    ["q1"] = new("A", true)
+                });
+
+            var loaded = await ScholarFlowDatabase.LoadQuizSessionsAsync(tempRoot);
+            Assert.Single(loaded);
+            Assert.True(loaded[0].HasInProgressAttempt);
+            Assert.Equal(1, loaded[0].InProgressQuestionIndex);
+            Assert.True(loaded[0].InProgressAnswers["q1"].IsCorrect);
+
+            await ScholarFlowDatabase.ClearQuizInProgressAsync(tempRoot, session.Id);
+            var cleared = await ScholarFlowDatabase.LoadQuizSessionsAsync(tempRoot);
+            Assert.False(cleared[0].HasInProgressAttempt);
+            Assert.Null(cleared[0].InProgressQuestionIndex);
+            Assert.Empty(cleared[0].InProgressAnswers);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TaskQueryService_IncludesSubtasksInUpcomingAndFiltersCompletedByCourse()
+    {
+        var today = new DateOnly(2026, 11, 19);
+        var sub = new TaskItem
+        {
+            Id = "sub-1",
+            ParentTaskId = "parent-1",
+            Title = "Finish UML Diagram",
+            CourseFolder = "Software_Quality_Assurance",
+            DueDate = today.AddDays(2),
+            IsCompleted = false
+        };
+        var parent = new TaskItem
+        {
+            Id = "parent-1",
+            Title = "Capstone Deliverable",
+            CourseFolder = "Software_Quality_Assurance",
+            IsCompleted = false,
+            ChildTasks = [sub]
+        };
+        var doneSqa = new TaskItem
+        {
+            Id = "done-1",
+            Title = "SQA Quiz 1",
+            CourseFolder = "Software_Quality_Assurance",
+            IsCompleted = true
+        };
+        var doneIas = new TaskItem
+        {
+            Id = "done-2",
+            Title = "IAS Quiz 1",
+            CourseFolder = "Information_Assurance_And_Security",
+            IsCompleted = true
+        };
+
+        var flattened = new[] { parent, sub, doneSqa, doneIas };
+        var upcoming = TaskQueryService.Filter(flattened, SmartViewKind.Upcoming, todayOverride: today);
+        Assert.Contains(upcoming, t => t.Id == "sub-1");
+
+        var completedSqa = TaskQueryService.Filter(
+            [parent, doneSqa, doneIas],
+            SmartViewKind.Completed,
+            targetValue: "Software_Quality_Assurance",
+            todayOverride: today);
+        Assert.Single(completedSqa);
+        Assert.Equal("done-1", completedSqa[0].Id);
     }
 }
