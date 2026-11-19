@@ -166,7 +166,7 @@ public sealed class QuizLlmService
             return (p, parsed);
         }, ct);
 
-        return await BuildGroundAndPersistSessionAsync(request, dto, "Imported JSON (Gemini Pro)", pages, ct);
+        return await BuildGroundAndPersistSessionAsync(request, dto, "Imported Web AI JSON", pages, ct);
     }
 
     private static async Task<QuizSessionRecord> BuildGroundAndPersistSessionAsync(

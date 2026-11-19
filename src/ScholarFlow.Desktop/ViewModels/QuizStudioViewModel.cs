@@ -576,24 +576,121 @@ public sealed class QuizStudioViewModel
     {
         var settings = _mainVm.Settings;
         settings.AiProviderPreset = presetName;
+        settings.ActiveAiProfileId = null;
         switch (presetName)
         {
+            case "OpenAI":
+                settings.AiBaseUrl = "https://api.openai.com/v1/chat/completions";
+                settings.AiModelName = "gpt-4o-mini";
+                break;
+            case "OpenRouter":
+                settings.AiBaseUrl = "https://openrouter.ai/api/v1/chat/completions";
+                settings.AiModelName = "anthropic/claude-3.5-sonnet";
+                break;
             case "GeminiAiStudio":
                 settings.AiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
                 settings.AiModelName = "gemini-2.5-flash";
                 break;
+            case "DeepSeek":
+                settings.AiBaseUrl = "https://api.deepseek.com/v1/chat/completions";
+                settings.AiModelName = "deepseek-chat";
+                break;
+            case "Groq":
+                settings.AiBaseUrl = "https://api.groq.com/openai/v1/chat/completions";
+                settings.AiModelName = "llama-3.3-70b-versatile";
+                break;
             case "OllamaLocal":
                 settings.AiBaseUrl = "http://localhost:11434/v1/chat/completions";
                 settings.AiModelName = "qwen2.5:7b";
+                break;
+            case "LmStudio":
+                settings.AiBaseUrl = "http://localhost:1234/v1/chat/completions";
+                settings.AiModelName = "local-model";
                 break;
             case "OfflineSmart":
                 break;
         }
 
         await AppSettingsStore.SaveAsync(settings);
-        StatusMessage = $"Switched AI generator preset to {presetName}.";
+        StatusMessage = $"Switched AI provider preset to {presetName} ({settings.AiModelName}).";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
+    }
+
+    public async Task SelectSavedAiProfileAsync(AiProviderProfile profile)
+    {
+        var settings = _mainVm.Settings;
+        settings.ActiveAiProfileId = profile.Id;
+        settings.AiProviderPreset = profile.IsOffline ? "OfflineSmart" : "CustomProfile";
+        if (!profile.IsOffline)
+        {
+            settings.AiBaseUrl = profile.BaseUrl;
+            settings.AiModelName = profile.ModelName;
+            settings.AiApiKey = profile.ApiKey;
+        }
+
+        await AppSettingsStore.SaveAsync(settings);
+        StatusMessage = $"Active AI profile: {profile.Name} ({profile.ModelName}).";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task SaveAsNewAiProfileAsync(string profileName, string baseUrl, string modelName, string? apiKey)
+    {
+        var settings = _mainVm.Settings;
+        var cleanUrl = string.IsNullOrWhiteSpace(baseUrl) ? settings.AiBaseUrl : baseUrl.Trim();
+        var cleanModel = string.IsNullOrWhiteSpace(modelName) ? settings.AiModelName : modelName.Trim();
+        var cleanKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        var cleanName = string.IsNullOrWhiteSpace(profileName) ? cleanModel : profileName.Trim();
+
+        var existing = settings.SavedAiProfiles.FirstOrDefault(p =>
+            p.Name.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null)
+        {
+            existing.BaseUrl = cleanUrl;
+            existing.ModelName = cleanModel;
+            existing.ApiKey = cleanKey;
+            settings.ActiveAiProfileId = existing.Id;
+        }
+        else
+        {
+            var created = new AiProviderProfile
+            {
+                Name = cleanName,
+                BaseUrl = cleanUrl,
+                ModelName = cleanModel,
+                ApiKey = cleanKey
+            };
+            settings.SavedAiProfiles.Add(created);
+            settings.ActiveAiProfileId = created.Id;
+        }
+
+        settings.AiProviderPreset = "CustomProfile";
+        settings.AiBaseUrl = cleanUrl;
+        settings.AiModelName = cleanModel;
+        settings.AiApiKey = cleanKey;
+
+        await AppSettingsStore.SaveAsync(settings);
+        StatusMessage = $"Saved AI profile '{cleanName}' ({cleanModel}).";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task DeleteSavedAiProfileAsync(string profileId)
+    {
+        var settings = _mainVm.Settings;
+        var removed = settings.SavedAiProfiles.RemoveAll(p => string.Equals(p.Id, profileId, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            if (string.Equals(settings.ActiveAiProfileId, profileId, StringComparison.OrdinalIgnoreCase))
+                settings.ActiveAiProfileId = null;
+
+            await AppSettingsStore.SaveAsync(settings);
+            StatusMessage = "Removed saved AI profile.";
+            IsStatusError = false;
+            _mainVm.RequestUiRefresh();
+        }
     }
 
     public async Task SaveAiCredentialsAsync(string baseUrl, string modelName, string? apiKey)
@@ -605,8 +702,19 @@ public sealed class QuizStudioViewModel
             settings.AiModelName = modelName.Trim();
         settings.AiApiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
 
+        if (!string.IsNullOrWhiteSpace(settings.ActiveAiProfileId))
+        {
+            var active = settings.SavedAiProfiles.FirstOrDefault(p => p.Id == settings.ActiveAiProfileId);
+            if (active is not null)
+            {
+                active.BaseUrl = settings.AiBaseUrl;
+                active.ModelName = settings.AiModelName;
+                active.ApiKey = settings.AiApiKey;
+            }
+        }
+
         await AppSettingsStore.SaveAsync(settings);
-        StatusMessage = "Saved AI endpoint & credentials.";
+        StatusMessage = $"Saved AI endpoint ({settings.AiModelName}).";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
@@ -682,7 +790,7 @@ public sealed class QuizStudioViewModel
     {
         if (string.IsNullOrWhiteSpace(rawJson))
         {
-            StatusMessage = "Paste the JSON output from Gemini Pro before importing.";
+            StatusMessage = "Paste the JSON output from any AI chat before importing.";
             IsStatusError = true;
             _mainVm.RequestUiRefresh();
             return;
@@ -704,7 +812,7 @@ public sealed class QuizStudioViewModel
             ManualJsonInput = string.Empty;
             await RefreshAsync(SelectedCourse, SelectedPdfPath);
             StartQuizSession(session);
-            StatusMessage = $"Imported and PDF-grounded {session.Questions.Count} questions from Gemini JSON.";
+            StatusMessage = $"Imported and PDF-grounded {session.Questions.Count} questions from Web AI JSON.";
             IsStatusError = false;
         }
         catch (Exception ex)

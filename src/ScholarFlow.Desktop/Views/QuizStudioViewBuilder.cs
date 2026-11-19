@@ -110,7 +110,7 @@ public static class QuizStudioViewBuilder
 
         utilityRow.Children.Add(
             UiBuilder.GhostButton(
-                "Gemini Web JSON",
+                "Web AI JSON",
                 MaterialIconKind.CodeJson,
                 () => studio.OpenManualJsonBridge(),
                 isActive: studio.IsManualJsonModalOpen
@@ -948,7 +948,7 @@ public static class QuizStudioViewBuilder
                 (QuizBuilderOutputMode.AiApi, "AI Engine API", MaterialIconKind.AutoFix),
                 (
                     QuizBuilderOutputMode.WebJson,
-                    "Gemini Web JSON (Auto-Synced Prompt)",
+                    "Web AI JSON (Auto-Synced Prompt)",
                     MaterialIconKind.CodeJson
                 ),
                 (
@@ -2360,7 +2360,7 @@ public static class QuizStudioViewBuilder
         var cardStack = new StackPanel { Spacing = 8 };
 
         cardStack.Children.Add(
-            UiBuilder.SectionHeader("Unified OpenAI-Compatible AI Engine Configuration")
+            UiBuilder.SectionHeader("Unified OpenAI-Compatible AI Engine & Saved Model Profiles")
         );
 
         var presetRow = new WrapPanel { Orientation = Orientation.Horizontal };
@@ -2370,7 +2370,7 @@ public static class QuizStudioViewBuilder
                 settings.AiProviderPreset,
                 id,
                 StringComparison.OrdinalIgnoreCase
-            );
+            ) && string.IsNullOrWhiteSpace(settings.ActiveAiProfileId);
             var btn = UiBuilder.GhostButton(
                 label,
                 icon,
@@ -2381,54 +2381,87 @@ public static class QuizStudioViewBuilder
             presetRow.Children.Add(btn);
         }
 
-        AddProviderPreset(
-            "GeminiAiStudio",
-            "Google AI Studio (Gemini)",
-            MaterialIconKind.CreationOutline
-        );
-        AddProviderPreset(
-            "OllamaLocal",
-            "Local Ollama (localhost:11434)",
-            MaterialIconKind.ServerNetwork
-        );
-        AddProviderPreset(
-            "OfflineSmart",
-            "Offline Smart PDF Analyzer",
-            MaterialIconKind.FileSearchOutline
-        );
+        AddProviderPreset("OpenAI", "OpenAI", MaterialIconKind.CreationOutline);
+        AddProviderPreset("OpenRouter", "OpenRouter (Claude / Multi)", MaterialIconKind.SwapHorizontal);
+        AddProviderPreset("GeminiAiStudio", "Google AI Studio", MaterialIconKind.AutoFix);
+        AddProviderPreset("DeepSeek", "DeepSeek", MaterialIconKind.Brain);
+        AddProviderPreset("Groq", "Groq", MaterialIconKind.LightningBoltOutline);
+        AddProviderPreset("OllamaLocal", "Ollama (Local)", MaterialIconKind.ServerNetwork);
+        AddProviderPreset("LmStudio", "LM Studio / Custom", MaterialIconKind.DesktopClassic);
+        AddProviderPreset("OfflineSmart", "Offline PDF Analyzer", MaterialIconKind.FileSearchOutline);
         cardStack.Children.Add(presetRow);
+
+        // Saved Custom Model Profiles
+        if (settings.SavedAiProfiles.Count > 0)
+        {
+            var profilesWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var prof in settings.SavedAiProfiles)
+            {
+                var capturedProf = prof;
+                bool isActiveProf = string.Equals(settings.ActiveAiProfileId, prof.Id, StringComparison.OrdinalIgnoreCase);
+
+                var chipStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                var selectBtn = UiBuilder.GhostButton(
+                    $"{prof.Name} ({prof.ModelName})",
+                    isActiveProf ? MaterialIconKind.Check : MaterialIconKind.RobotOutline,
+                    async () => await studio.SelectSavedAiProfileAsync(capturedProf),
+                    isActive: isActiveProf
+                );
+                chipStack.Children.Add(selectBtn);
+
+                var delBtn = UiBuilder.IconButton(
+                    MaterialIconKind.Close,
+                    async () => await studio.DeleteSavedAiProfileAsync(capturedProf.Id),
+                    12.5,
+                    ThemeService.Brush(ThemeService.TextMuted)
+                );
+                chipStack.Children.Add(delBtn);
+
+                chipStack.Margin = new Thickness(0, 0, 8, 4);
+                profilesWrap.Children.Add(chipStack);
+            }
+            cardStack.Children.Add(profilesWrap);
+        }
 
         var fieldsGrid = new Grid
         {
-            ColumnDefinitions = ColumnDefinitions.Parse("2*,1.2*,1.5*,Auto"),
-            ColumnSpacing = 8,
+            ColumnDefinitions = ColumnDefinitions.Parse("1.1*,1.8*,1.2*,1.3*,Auto,Auto"),
+            ColumnSpacing = 6,
         };
+
+        var profileNameBox = new TextBox
+        {
+            Watermark = "Profile name (optional)",
+            FontSize = 12,
+        };
+        fieldsGrid.Children.Add(profileNameBox);
 
         var urlBox = new TextBox
         {
             Text = settings.AiBaseUrl,
-            Watermark = "OpenAI-compatible endpoint URL",
+            Watermark = "OpenAI-compatible /chat/completions URL",
             FontSize = 12,
         };
+        Grid.SetColumn(urlBox, 1);
         fieldsGrid.Children.Add(urlBox);
 
         var modelBox = new TextBox
         {
             Text = settings.AiModelName,
-            Watermark = "Model (e.g. gemini-2.5-flash)",
+            Watermark = "Model ID (e.g. gpt-4o-mini, claude-3.5-sonnet, qwen2.5:7b)",
             FontSize = 12,
         };
-        Grid.SetColumn(modelBox, 1);
+        Grid.SetColumn(modelBox, 2);
         fieldsGrid.Children.Add(modelBox);
 
         var keyBox = new TextBox
         {
             Text = settings.AiApiKey ?? string.Empty,
-            Watermark = "API Key (or GEMINI_API_KEY env)",
+            Watermark = "API Key (or env var)",
             PasswordChar = '•',
             FontSize = 12,
         };
-        Grid.SetColumn(keyBox, 2);
+        Grid.SetColumn(keyBox, 3);
         fieldsGrid.Children.Add(keyBox);
 
         var saveBtn = UiBuilder.PrimaryButton(
@@ -2441,8 +2474,22 @@ public static class QuizStudioViewBuilder
                     keyBox.Text
                 )
         );
-        Grid.SetColumn(saveBtn, 3);
+        Grid.SetColumn(saveBtn, 4);
         fieldsGrid.Children.Add(saveBtn);
+
+        var addProfileBtn = UiBuilder.GhostButton(
+            "+ Save Profile",
+            MaterialIconKind.BookmarkPlusOutline,
+            async () =>
+                await studio.SaveAsNewAiProfileAsync(
+                    profileNameBox.Text ?? "",
+                    urlBox.Text ?? "",
+                    modelBox.Text ?? "",
+                    keyBox.Text
+                )
+        );
+        Grid.SetColumn(addProfileBtn, 5);
+        fieldsGrid.Children.Add(addProfileBtn);
 
         cardStack.Children.Add(fieldsGrid);
         return UiBuilder.Card(cardStack, padding: new Thickness(12, 10));
@@ -2452,7 +2499,7 @@ public static class QuizStudioViewBuilder
     {
         var cardStack = new StackPanel { Spacing = 8 };
         cardStack.Children.Add(
-            UiBuilder.SectionHeader("Gemini Student Pro Web Bridge (Auto-Synced Grounded Prompt)")
+            UiBuilder.SectionHeader("Universal Web AI JSON Bridge (ChatGPT, Claude, Gemini, DeepSeek — Zero API Quota)")
         );
 
         var split = new Grid
@@ -2492,7 +2539,7 @@ public static class QuizStudioViewBuilder
 
         var jsonInputBox = new TextBox
         {
-            Watermark = "Paste Gemini's JSON response here...",
+            Watermark = "Paste the JSON response from any AI chat (ChatGPT, Claude, Gemini, DeepSeek...) here...",
             AcceptsReturn = true,
             MinHeight = 125,
             MaxHeight = 220,
