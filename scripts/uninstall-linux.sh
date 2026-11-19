@@ -2,6 +2,7 @@
 set -euo pipefail
 
 rm -f "$HOME/.local/bin/ScholarFlow"
+rm -rf "$HOME/.local/share/scholarflow"
 rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/scholarflow.svg"
 rm -f "$HOME/.local/share/applications/scholarflow.desktop"
 

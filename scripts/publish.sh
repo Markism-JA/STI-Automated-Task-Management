@@ -40,8 +40,11 @@ cp -f "$ROOT_DIR/scripts/install-windows.ps1" "$DIST_DIR/win-x64/install.ps1"
 cp -f "$ROOT_DIR/scripts/uninstall-windows.ps1" "$DIST_DIR/win-x64/uninstall.ps1"
 
 echo "==> Creating release archives..."
-tar -C "$DIST_DIR/linux-x64" -czf "$DIST_DIR/ScholarFlow-$VERSION-linux-x64.tar.gz" \
-  ScholarFlow scholarflow.svg install.sh uninstall.sh
+LINUX_ITEMS=(ScholarFlow scholarflow.svg install.sh uninstall.sh)
+if [ -d "$DIST_DIR/linux-x64/.playwright" ]; then
+  LINUX_ITEMS+=(.playwright)
+fi
+tar -C "$DIST_DIR/linux-x64" -czf "$DIST_DIR/ScholarFlow-$VERSION-linux-x64.tar.gz" "${LINUX_ITEMS[@]}"
 
 python3 - "$DIST_DIR/win-x64" "$DIST_DIR/ScholarFlow-$VERSION-win-x64.zip" <<'PY'
 import os, sys, zipfile
@@ -51,6 +54,13 @@ with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         p = os.path.join(src_dir, name)
         if os.path.exists(p):
             zf.write(p, arcname=name)
+    pw_dir = os.path.join(src_dir, ".playwright")
+    if os.path.isdir(pw_dir):
+        for root, _, files in os.walk(pw_dir):
+            for f in files:
+                full = os.path.join(root, f)
+                rel = os.path.relpath(full, src_dir)
+                zf.write(full, arcname=rel)
 PY
 
 echo "==> Done! Release artifacts:"

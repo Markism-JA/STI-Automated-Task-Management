@@ -7,22 +7,30 @@ REPO_DIST="$SCRIPT_DIR/../dist/linux-x64"
 if [ -f "$SCRIPT_DIR/ScholarFlow" ]; then
   BIN_SRC="$SCRIPT_DIR/ScholarFlow"
   ICON_SRC="$SCRIPT_DIR/scholarflow.svg"
+  PW_SRC="$SCRIPT_DIR/.playwright"
 elif [ -f "$REPO_DIST/ScholarFlow" ]; then
   BIN_SRC="$REPO_DIST/ScholarFlow"
   ICON_SRC="$SCRIPT_DIR/../assets/scholarflow.svg"
+  PW_SRC="$REPO_DIST/.playwright"
 else
   echo "Error: ScholarFlow binary not found. Run ./scripts/publish.sh first or run from the release archive." >&2
   exit 1
 fi
 
+APP_INSTALL_DIR="$HOME/.local/share/scholarflow"
 BIN_DIR="$HOME/.local/bin"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 APP_DIR="$HOME/.local/share/applications"
 
-mkdir -p "$BIN_DIR" "$ICON_DIR" "$APP_DIR"
+mkdir -p "$APP_INSTALL_DIR" "$BIN_DIR" "$ICON_DIR" "$APP_DIR"
 
-cp -f "$BIN_SRC" "$BIN_DIR/ScholarFlow"
-chmod +x "$BIN_DIR/ScholarFlow"
+cp -f "$BIN_SRC" "$APP_INSTALL_DIR/ScholarFlow"
+chmod +x "$APP_INSTALL_DIR/ScholarFlow"
+if [ -d "$PW_SRC" ]; then
+  rm -rf "$APP_INSTALL_DIR/.playwright"
+  cp -a "$PW_SRC" "$APP_INSTALL_DIR/.playwright"
+fi
+ln -sf "$APP_INSTALL_DIR/ScholarFlow" "$BIN_DIR/ScholarFlow"
 
 if [ -f "$ICON_SRC" ]; then
   cp -f "$ICON_SRC" "$ICON_DIR/scholarflow.svg"

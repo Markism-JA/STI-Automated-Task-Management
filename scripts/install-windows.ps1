@@ -14,6 +14,12 @@ $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\ScholarFlow"
 $InstalledExe = Join-Path $InstallDir "ScholarFlow.exe"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Force $ExeSrc $InstalledExe
+$PwSrc = Join-Path (Split-Path -Parent $ExeSrc) ".playwright"
+if (Test-Path $PwSrc) {
+    $PwDst = Join-Path $InstallDir ".playwright"
+    if (Test-Path $PwDst) { Remove-Item -Recurse -Force $PwDst }
+    Copy-Item -Recurse -Force $PwSrc $PwDst
+}
 
 # Add to User PATH if not already present
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
