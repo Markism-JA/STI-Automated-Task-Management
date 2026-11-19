@@ -39,6 +39,25 @@ dotnet publish "$PROJECT" \
 cp -f "$ROOT_DIR/scripts/install-windows.ps1" "$DIST_DIR/win-x64/install.ps1"
 cp -f "$ROOT_DIR/scripts/uninstall-windows.ps1" "$DIST_DIR/win-x64/uninstall.ps1"
 
+echo "==> Copying target-specific Playwright drivers..."
+PW_NUGET_DIR="$(find "${NUGET_PACKAGES:-$HOME/.nuget/packages}/microsoft.playwright" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -n1)"
+if [ -n "$PW_NUGET_DIR" ] && [ -d "$PW_NUGET_DIR/.playwright" ]; then
+  # Linux x64 driver
+  mkdir -p "$DIST_DIR/linux-x64/.playwright/node/linux-x64"
+  rm -rf "$DIST_DIR/linux-x64/.playwright/package"
+  cp -a "$PW_NUGET_DIR/.playwright/package" "$DIST_DIR/linux-x64/.playwright/package"
+  cp -f "$PW_NUGET_DIR/.playwright/node/LICENSE" "$DIST_DIR/linux-x64/.playwright/node/LICENSE"
+  cp -f "$PW_NUGET_DIR/.playwright/node/linux-x64/node" "$DIST_DIR/linux-x64/.playwright/node/linux-x64/node"
+  chmod +x "$DIST_DIR/linux-x64/.playwright/node/linux-x64/node"
+
+  # Windows x64 driver (remove any host linux-x64 binary copied by MSBuild on Linux)
+  rm -rf "$DIST_DIR/win-x64/.playwright/node" "$DIST_DIR/win-x64/.playwright/package"
+  mkdir -p "$DIST_DIR/win-x64/.playwright/node/win32_x64"
+  cp -a "$PW_NUGET_DIR/.playwright/package" "$DIST_DIR/win-x64/.playwright/package"
+  cp -f "$PW_NUGET_DIR/.playwright/node/LICENSE" "$DIST_DIR/win-x64/.playwright/node/LICENSE"
+  cp -f "$PW_NUGET_DIR/.playwright/node/win32_x64/node.exe" "$DIST_DIR/win-x64/.playwright/node/win32_x64/node.exe"
+fi
+
 echo "==> Creating release archives..."
 LINUX_ITEMS=(ScholarFlow scholarflow.svg install.sh uninstall.sh)
 if [ -d "$DIST_DIR/linux-x64/.playwright" ]; then
