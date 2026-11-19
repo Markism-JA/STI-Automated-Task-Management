@@ -268,7 +268,8 @@ public static class UiBuilder
         FontWeight = FontWeight.SemiBold,
         LetterSpacing = 0.7,
         Foreground = ThemeService.Brush(ThemeService.TextMuted),
-        Margin = new Thickness(6, 10, 4, 4)
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(2, 4, 4, 4)
     };
 
     public static Button PrimaryButton(string label, MaterialIconKind icon, Action onClick) =>
@@ -276,6 +277,51 @@ public static class UiBuilder
 
     public static Border PillBadge(string text, IBrush fg, IBrush bg) =>
         Pill(text, fg, bg);
+
+    private static readonly Dictionary<string, Vector> SavedScrollOffsets = new(StringComparer.Ordinal);
+
+    public static void ResetScrollOffset(string key)
+    {
+        SavedScrollOffsets.Remove(key);
+    }
+
+    /// <summary>
+    /// Creates a ScrollViewer whose scroll offset is preserved across full pure-C# UI rebuilds
+    /// (RequestUiRefresh), preventing scroll-to-top jumps when state changes.
+    /// </summary>
+    public static ScrollViewer PersistentScrollViewer(
+        string key,
+        Control content,
+        Avalonia.Controls.Primitives.ScrollBarVisibility horizontalVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        Avalonia.Controls.Primitives.ScrollBarVisibility verticalVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto)
+    {
+        var savedOffset = SavedScrollOffsets.GetValueOrDefault(key, Vector.Zero);
+        bool layoutRestored = false;
+
+        var scroll = new ScrollViewer
+        {
+            Content = content,
+            HorizontalScrollBarVisibility = horizontalVisibility,
+            VerticalScrollBarVisibility = verticalVisibility,
+            Offset = savedOffset
+        };
+
+        scroll.ScrollChanged += (_, _) =>
+        {
+            if (layoutRestored)
+                SavedScrollOffsets[key] = scroll.Offset;
+        };
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () =>
+            {
+                scroll.Offset = savedOffset;
+                layoutRestored = true;
+            },
+            Avalonia.Threading.DispatcherPriority.Loaded);
+
+        return scroll;
+    }
 
     public static Border Card(Control child, Thickness? padding = null) => new()
     {

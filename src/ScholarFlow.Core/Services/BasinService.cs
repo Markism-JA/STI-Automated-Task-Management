@@ -285,23 +285,70 @@ public sealed class BasinService
     public static Dictionary<string, List<string>> LoadCourseTermMap(string basinRoot, string courseFolder)
     {
         var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        var path = Path.Combine(basinRoot, courseFolder, "term.json");
-        if (!File.Exists(path))
-            return result;
-
-        try
+        var courseDir = Path.Combine(basinRoot, courseFolder);
+        var path = Path.Combine(courseDir, "term.json");
+        if (File.Exists(path))
         {
-            var json = File.ReadAllText(path);
-            var parsed = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
-            if (parsed is not null)
+            try
             {
-                foreach (var (k, v) in parsed)
-                    result[k] = v ?? [];
+                var json = File.ReadAllText(path);
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
+                if (parsed is not null)
+                {
+                    foreach (var (k, v) in parsed)
+                        result[k] = v ?? [];
+                }
+            }
+            catch
+            {
+                // Ignore malformed term.json
             }
         }
-        catch
+
+        if (Directory.Exists(courseDir))
         {
-            // Ignore malformed term.json
+            var assigned = result.Values.SelectMany(x => x).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool hasUnmappedLocalModules = Directory.EnumerateDirectories(courseDir)
+                .Select(Path.GetFileName)
+                .Any(n => n is not null && n.Length >= 3 && char.IsDigit(n[0]) && char.IsDigit(n[1]) && n[2] == '_' && !assigned.Contains(n[..2]));
+
+            if (!File.Exists(path) || hasUnmappedLocalModules)
+            {
+                var syllabusPdf = Pdf.SyllabusTermParser.FindSyllabusPdfPath(courseDir);
+                if (syllabusPdf is not null)
+                {
+                    var schedule = Pdf.SyllabusTermParser.ParseTermScheduleFromSyllabus(syllabusPdf, courseDir);
+                    bool enriched = false;
+                    foreach (var term in Pdf.SyllabusTermParser.TermOrder)
+                    {
+                        if (!result.ContainsKey(term))
+                            result[term] = [];
+
+                        if (!schedule.TermPrefixes.TryGetValue(term, out var mapped)) continue;
+                        foreach (var prefix in mapped)
+                        {
+                            if (assigned.Add(prefix))
+                            {
+                                result[term].Add(prefix);
+                                enriched = true;
+                            }
+                        }
+                    }
+
+                    if (enriched || !File.Exists(path))
+                    {
+                        try
+                        {
+                            var serialized = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+                            File.WriteAllText(path, serialized);
+                        }
+                        catch
+                        {
+                            // Non-fatal if term.json cannot be persisted
+                        }
+                    }
+                }
+            }
         }
 
         return result;
@@ -396,8 +443,17 @@ public sealed class BasinService
     {
         bool changed = false;
         termMap ??= LoadCourseTermMap(basinRoot, course.FolderName);
+        var courseDir = Path.Combine(basinRoot, course.FolderName);
 
-        var resolvedTerm = ResolveAcademicTerm(termMap, task.Term, task.Title, task.Section);
+        var resolvedTerm = ResolveAcademicTerm(termMap, null, task.Title, task.Section)
+                           ?? TaskItem.NormalizeTerm(task.Term);
+        if (resolvedTerm is null)
+        {
+            var syllabusPdf = Pdf.SyllabusTermParser.FindSyllabusPdfPath(courseDir);
+            if (syllabusPdf is not null)
+                resolvedTerm = Pdf.SyllabusTermParser.InferTaskTermFromSyllabus(syllabusPdf, courseDir, task.Title, task.Section);
+        }
+
         if (resolvedTerm is not null && !string.Equals(task.Term, resolvedTerm, StringComparison.OrdinalIgnoreCase))
         {
             task.Term = resolvedTerm;
@@ -414,7 +470,6 @@ public sealed class BasinService
             }
         }
 
-        var courseDir = Path.Combine(basinRoot, course.FolderName);
         if (!Directory.Exists(courseDir))
             return changed;
 

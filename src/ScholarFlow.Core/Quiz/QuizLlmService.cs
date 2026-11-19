@@ -48,14 +48,14 @@ public sealed class QuizLlmService
         QuizGenerationRequest request,
         CancellationToken ct = default)
     {
-        var pages = PdfQuizGrounder.ExtractGroundedPages(
+        var pages = await Task.Run(() => PdfQuizGrounder.ExtractGroundedPages(
             request.SourcePdfPath,
             request.Term,
             request.SectionFilter,
             request.StartPage,
             request.EndPage,
             request.SelectedRanges,
-            maxPages: 150);
+            maxPages: 150), ct);
 
         if (pages.Count == 0)
             throw new InvalidOperationException("No readable text pages were found in the selected PDF scope.");
@@ -75,7 +75,7 @@ public sealed class QuizLlmService
 
         if (request.UseOfflineHeuristicFallback || (!isLocalEndpoint && string.IsNullOrWhiteSpace(effectiveKey)))
         {
-            dto = GenerateOfflineGroundedDto(request, pages, desiredCount);
+            dto = await Task.Run(() => GenerateOfflineGroundedDto(request, pages, desiredCount), ct);
             modelLabel = "ScholarFlow Smart PDF Analyzer (Offline)";
         }
         else
@@ -152,15 +152,20 @@ public sealed class QuizLlmService
         if (string.IsNullOrWhiteSpace(rawJson))
             throw new ArgumentException("JSON input cannot be empty.", nameof(rawJson));
 
-        var pages = PdfQuizGrounder.ExtractGroundedPages(
-            request.SourcePdfPath,
-            request.Term,
-            request.SectionFilter,
-            request.StartPage,
-            request.EndPage,
-            maxPages: 45);
+        var (pages, dto) = await Task.Run(() =>
+        {
+            var p = PdfQuizGrounder.ExtractGroundedPages(
+                request.SourcePdfPath,
+                request.Term,
+                request.SectionFilter,
+                request.StartPage,
+                request.EndPage,
+                request.SelectedRanges,
+                maxPages: 120);
+            var parsed = ParseQuizResponseJson(rawJson);
+            return (p, parsed);
+        }, ct);
 
-        var dto = ParseQuizResponseJson(rawJson);
         return await BuildGroundAndPersistSessionAsync(request, dto, "Imported JSON (Gemini Pro)", pages, ct);
     }
 
@@ -186,6 +191,9 @@ public sealed class QuizLlmService
             Term = inferredTerm,
             Title = defaultTitle,
             SourcePdfPath = request.SourcePdfPath,
+            SourcePdfMtimeTicks = !string.IsNullOrWhiteSpace(request.SourcePdfPath) && File.Exists(request.SourcePdfPath)
+                ? File.GetLastWriteTimeUtc(request.SourcePdfPath).Ticks
+                : null,
             ModelUsed = modelLabel,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
@@ -209,6 +217,10 @@ public sealed class QuizLlmService
             if (kind == QuizQuestionKind.TrueFalse && options.Count == 0)
                 options = ["True", "False"];
 
+            var correctAnswer = (qDto.CorrectAnswer ?? string.Empty).Trim();
+            if (kind == QuizQuestionKind.Ordering && string.IsNullOrWhiteSpace(correctAnswer) && options.Count >= 2)
+                correctAnswer = string.Join(" -> ", options);
+
             var qRecord = new QuizQuestionRecord
             {
                 QuizId = session.Id,
@@ -219,7 +231,7 @@ public sealed class QuizLlmService
                 TopicTag = string.IsNullOrWhiteSpace(qDto.TopicTag) ? "general" : qDto.TopicTag.Trim().ToLowerInvariant().TrimStart('@', '#'),
                 Prompt = qDto.Prompt.Trim(),
                 Options = options,
-                CorrectAnswer = (qDto.CorrectAnswer ?? string.Empty).Trim(),
+                CorrectAnswer = correctAnswer,
                 AcceptedAliases = qDto.AcceptedAliases?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToList() ?? [],
                 Explanation = (qDto.Explanation ?? string.Empty).Trim(),
                 SourcePdfPath = request.SourcePdfPath,
@@ -235,11 +247,29 @@ public sealed class QuizLlmService
         if (session.Questions.Count == 0)
             throw new InvalidOperationException("No valid questions were produced from the response.");
 
-        // Deterministically ground every question's verbatim quote into normalized [0..1] PDF highlight boxes
-        PdfQuizGrounder.GroundQuestionsToPdf(request.SourcePdfPath, session.Questions);
+        // Deterministically ground every question's verbatim quote into normalized [0..1] PDF highlight boxes off the UI thread
+        await Task.Run(() => PdfQuizGrounder.GroundQuestionsToPdf(request.SourcePdfPath, session.Questions), ct);
 
         if (!string.IsNullOrWhiteSpace(request.BasinRoot))
         {
+            if (!string.IsNullOrWhiteSpace(request.AppendToQuizId))
+            {
+                var existingList = await ScholarFlowDatabase.LoadQuizSessionsAsync(request.BasinRoot, ct: ct);
+                var existing = existingList.FirstOrDefault(x => string.Equals(x.Id, request.AppendToQuizId, StringComparison.OrdinalIgnoreCase));
+                if (existing is not null)
+                {
+                    foreach (var nq in session.Questions)
+                    {
+                        nq.QuizId = existing.Id;
+                        nq.OrderIndex = existing.Questions.Count;
+                        existing.Questions.Add(nq);
+                    }
+                    existing.SourcePdfMtimeTicks ??= session.SourcePdfMtimeTicks;
+                    await ScholarFlowDatabase.SaveQuizSessionAsync(request.BasinRoot, existing, ct);
+                    return existing;
+                }
+            }
+
             await ScholarFlowDatabase.SaveQuizSessionAsync(request.BasinRoot, session, ct);
         }
 
@@ -368,19 +398,28 @@ public sealed class QuizLlmService
 
     private static string BuildSystemInstructions(QuizGenerationRequest req, IReadOnlyList<string> weakTopics)
     {
-        var mixRule = req.Preset switch
-        {
-            QuizPresetMode.QuickReview =>
-                "Pedagogical Mix: 50% MultipleChoice, 30% Identification, 20% TrueFalse. Focus on core definitions, classifications, and key distinctions.",
-            QuizPresetMode.WeakTopicDrill when weakTopics.Count > 0 =>
-                $"Pedagogical Mix: Focus heavily on previously missed/weak topics ({string.Join(", ", weakTopics)}). Use 45% Situational/Application MultipleChoice, 35% Identification, 20% FillInTheBlank.",
-            _ =>
-                "Pedagogical Mix (STI College Exam Simulator): 40% Situational/Application MultipleChoice, 30% Identification, 15% TrueFalse, 15% FillInTheBlank. Test deep understanding, troubleshooting, and real-world application rather than shallow trivia."
-        };
+        var exactCounts = req.ResolveExactKindCounts();
+        var activeKindSpecs = exactCounts
+            .Where(kv => kv.Value > 0)
+            .Select(kv => $"{kv.Value} {kv.Key}")
+            .ToList();
+        var disabledKinds = exactCounts
+            .Where(kv => kv.Value <= 0)
+            .Select(kv => kv.Key.ToString())
+            .ToList();
+
+        var distributionSpec = activeKindSpecs.Count > 0
+            ? $"Exact Question-Type Breakdown Required: {string.Join(", ", activeKindSpecs)}."
+              + (disabledKinds.Count > 0 ? $" Do NOT generate any of: {string.Join(", ", disabledKinds)}." : "")
+            : "Generate a balanced academic assessment across requested question types.";
+
+        var weakNote = req.Preset == QuizPresetMode.WeakTopicDrill && weakTopics.Count > 0
+            ? $"\nFocus heavily on previously missed/weak topics: {string.Join(", ", weakTopics)}."
+            : string.Empty;
 
         return $$"""
             You are an expert university computer science examiner creating an evidence-grounded academic assessment from a course Master PDF.
-            {{mixRule}}
+            {{distributionSpec}}{{weakNote}}
 
             CRITICAL RULES:
             1. Return ONLY a valid JSON object matching the exact schema below. Do not include commentary outside the JSON.
@@ -389,14 +428,24 @@ public sealed class QuizLlmService
                - "sectionTitle": the exact section title from that page header.
                - "verbatimQuote": an exact 8 to 28 word substring copied WORD-FOR-WORD from that page's text so our PDF highlighter can locate its pixel bounding box.
             3. For MultipleChoice and Situational questions:
-               - Provide exactly 4 options in "options" (plain text without "A)" prefixes).
-               - "correctAnswer" MUST exactly match one of the 4 strings in "options".
+               - Provide 4 options in "options" (plain text without "A)" prefixes).
+               - "correctAnswer" MUST exactly match one of the strings in "options".
                - Distractors must be plausible sibling concepts from the same handout.
-            4. For Identification and FillInTheBlank:
+            4. For Identification:
                - "options" must be an empty array [].
                - "correctAnswer" must be the concise canonical term (1-4 words).
                - "acceptedAliases" should list valid synonyms, acronyms, or alternate spellings.
-            5. Ignore syllabus boilerplate, headers/footers ("STI College", copyright lines, table of contents).
+            5. For FillInTheBlank:
+               - "prompt" MUST include "_____" where the missing key term or phrase belongs.
+               - "options" must be an empty array [].
+               - "correctAnswer" must be the exact missing word/phrase that fills "_____".
+            6. For Ordering:
+               - "prompt" asks the student to arrange steps, phases, layers, or lifecycle stages in the proper sequence.
+               - "options" MUST contain 3 to 5 distinct steps listed IN THEIR CORRECT CHRONOLOGICAL/LOGICAL ORDER (the app shuffles them at runtime).
+               - "correctAnswer" MUST be those steps joined by " -> " in the exact correct order.
+            7. For TrueFalse:
+               - "options" must be ["True", "False"] and "correctAnswer" must be "True" or "False".
+            8. Ignore syllabus boilerplate, headers/footers ("STI College", copyright lines, table of contents).
 
             REQUIRED JSON SCHEMA:
             {
@@ -405,11 +454,11 @@ public sealed class QuizLlmService
               "keyConceptsCovered": ["concept 1", "concept 2"],
               "questions": [
                 {
-                  "kind": "MultipleChoice | Situational | Identification | TrueFalse | FillInTheBlank",
+                  "kind": "MultipleChoice | Situational | Identification | TrueFalse | FillInTheBlank | Ordering",
                   "cognitiveLevel": "Recall | Comprehension | Application | Analysis",
                   "difficulty": 3,
                   "topicTag": "short-kebab-tag",
-                  "prompt": "Clear question stem or scenario...",
+                  "prompt": "Clear question stem, scenario, or sentence containing _____...",
                   "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
                   "correctAnswer": "Option 1",
                   "acceptedAliases": [],
@@ -433,11 +482,19 @@ public sealed class QuizLlmService
         int totalBatches = 1)
     {
         var batchNote = totalBatches > 1 ? $" (Batch {batchNumber} of {totalBatches} — ensure unique questions covering these pages)" : string.Empty;
+        var exactCounts = req.ResolveExactKindCounts(count);
+        var breakdown = string.Join(", ", exactCounts.Where(kv => kv.Value > 0).Select(kv => $"{kv.Value} {kv.Key}"));
+
+        var excludeBlock = req.ExcludePromptsOrTopics.Count > 0
+            ? $"\nDo NOT repeat or duplicate any of these existing questions/topics:\n- {string.Join("\n- ", req.ExcludePromptsOrTopics.Take(25))}\n"
+            : string.Empty;
+
         return $"""
             Course: {req.CourseTitle}
             Target Term: {req.Term ?? "All Covered Terms"}
             Section Scope: {req.SectionFilter ?? "All Sections in Scope"}
-            Generate exactly {Math.Clamp(count, 1, 150)} high-quality, evidence-grounded questions{batchNote} from the following grounded PDF pages:
+            Required Question Breakdown ({Math.Clamp(count, 1, 150)} total): {breakdown}{excludeBlock}
+            Generate high-quality, evidence-grounded questions{batchNote} strictly matching the required question breakdown from the following grounded PDF pages:
 
             {groundedContent}
             """;
@@ -505,6 +562,17 @@ public sealed class QuizLlmService
         int targetCount = Math.Min(desired, Math.Max(1, distinctCandidates.Count));
         var allTermNames = distinctCandidates.Select(c => c.TermName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+        // Build exact requested kind queue from req.ResolveExactKindCounts(targetCount)
+        var exactKindCounts = req.ResolveExactKindCounts(targetCount);
+        var kindQueue = new List<QuizQuestionKind>();
+        foreach (var (kind, cnt) in exactKindCounts)
+        {
+            for (int k = 0; k < cnt; k++)
+                kindQueue.Add(kind);
+        }
+        if (kindQueue.Count == 0)
+            kindQueue.Add(QuizQuestionKind.MultipleChoice);
+
         var questions = new List<GeneratedQuestionDto>();
         for (int i = 0; i < Math.Min(targetCount, distinctCandidates.Count); i++)
         {
@@ -513,10 +581,10 @@ public sealed class QuizLlmService
             if (string.IsNullOrEmpty(topicTag))
                 topicTag = "concept";
 
-            int mode = i % 3;
-            if (mode == 0 && allTermNames.Count >= 4)
+            var requestedKind = kindQueue[i % kindQueue.Count];
+
+            if (requestedKind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational)
             {
-                // Multiple Choice
                 var distractors = allTermNames
                     .Where(t => !t.Equals(c.TermName, StringComparison.OrdinalIgnoreCase))
                     .Skip(i % Math.Max(1, allTermNames.Count - 3))
@@ -526,16 +594,21 @@ public sealed class QuizLlmService
                     distractors.Add($"Alternative Concept {distractors.Count + 1}");
 
                 var opts = new List<string>(distractors) { c.TermName };
-                // Deterministic shuffle by index
                 opts = opts.OrderBy(o => (o.GetHashCode() ^ i) & 0x7FFFFFFF).ToList();
+
+                var promptText = requestedKind == QuizQuestionKind.Situational
+                    ? $"Scenario ({c.Page.SectionBreadcrumb}, Page {c.Page.PageNumber}): A team needs to apply the concept that \"{c.Predicate}\". Which concept should they use?"
+                    : $"According to {c.Page.SectionBreadcrumb} (Page {c.Page.PageNumber}), which concept best matches the following statement?\n\n\"...{c.Predicate}\"";
 
                 questions.Add(new GeneratedQuestionDto
                 {
-                    Kind = nameof(QuizQuestionKind.MultipleChoice),
-                    CognitiveLevel = nameof(CognitiveLevel.Comprehension),
-                    Difficulty = 3,
+                    Kind = requestedKind.ToString(),
+                    CognitiveLevel = requestedKind == QuizQuestionKind.Situational
+                        ? nameof(CognitiveLevel.Application)
+                        : nameof(CognitiveLevel.Comprehension),
+                    Difficulty = requestedKind == QuizQuestionKind.Situational ? 4 : 3,
                     TopicTag = topicTag,
-                    Prompt = $"According to {c.Page.SectionBreadcrumb} (Page {c.Page.PageNumber}), which concept best matches the following statement?\n\n\"...{c.Predicate}\"",
+                    Prompt = promptText,
                     Options = opts,
                     CorrectAnswer = c.TermName,
                     Explanation = $"Grounded on Page {c.Page.PageNumber} ({c.Page.SectionBreadcrumb}): \"{c.FullSentence}\"",
@@ -547,20 +620,19 @@ public sealed class QuizLlmService
                     }
                 });
             }
-            else if (mode == 1)
+            else if (requestedKind == QuizQuestionKind.FillInTheBlank)
             {
-                // Fill-in-the-blank / Identification
-                var blanked = c.FullSentence.Replace(c.TermName, "________", StringComparison.OrdinalIgnoreCase);
+                var blanked = c.FullSentence.Replace(c.TermName, "_____", StringComparison.OrdinalIgnoreCase);
                 if (blanked == c.FullSentence)
-                    blanked = $"________ {c.Predicate}";
+                    blanked = $"_____ {c.Predicate}";
 
                 questions.Add(new GeneratedQuestionDto
                 {
-                    Kind = nameof(QuizQuestionKind.Identification),
+                    Kind = nameof(QuizQuestionKind.FillInTheBlank),
                     CognitiveLevel = nameof(CognitiveLevel.Recall),
                     Difficulty = 3,
                     TopicTag = topicTag,
-                    Prompt = $"Identify the missing term or concept from {c.Page.SectionBreadcrumb}:\n\n\"{blanked}\"",
+                    Prompt = $"Fill in the blank ({c.Page.SectionBreadcrumb}):\n\n\"{blanked}\"",
                     Options = [],
                     CorrectAnswer = c.TermName,
                     Explanation = $"Full statement on Page {c.Page.PageNumber}: \"{c.FullSentence}\"",
@@ -572,9 +644,57 @@ public sealed class QuizLlmService
                     }
                 });
             }
+            else if (requestedKind == QuizQuestionKind.Identification)
+            {
+                questions.Add(new GeneratedQuestionDto
+                {
+                    Kind = nameof(QuizQuestionKind.Identification),
+                    CognitiveLevel = nameof(CognitiveLevel.Recall),
+                    Difficulty = 3,
+                    TopicTag = topicTag,
+                    Prompt = $"Identify the term or concept defined in {c.Page.SectionBreadcrumb} (Page {c.Page.PageNumber}) as:\n\n\"{c.Predicate}\"",
+                    Options = [],
+                    CorrectAnswer = c.TermName,
+                    Explanation = $"Full statement on Page {c.Page.PageNumber}: \"{c.FullSentence}\"",
+                    Evidence = new EvidenceAnchorDto
+                    {
+                        PageNumber = c.Page.PageNumber,
+                        SectionTitle = c.Page.SectionBreadcrumb,
+                        VerbatimQuote = c.FullSentence
+                    }
+                });
+            }
+            else if (requestedKind == QuizQuestionKind.Ordering)
+            {
+                var seqPeers = distinctCandidates
+                    .Skip(Math.Max(0, Math.Min(i, Math.Max(0, distinctCandidates.Count - 4))))
+                    .Take(4)
+                    .Select(x => x.TermName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                while (seqPeers.Count < 3)
+                    seqPeers.Add($"Phase {seqPeers.Count + 1}");
+
+                questions.Add(new GeneratedQuestionDto
+                {
+                    Kind = nameof(QuizQuestionKind.Ordering),
+                    CognitiveLevel = nameof(CognitiveLevel.Analysis),
+                    Difficulty = 4,
+                    TopicTag = topicTag,
+                    Prompt = $"Arrange the following concepts in the chronological order they are introduced in {c.Page.SectionBreadcrumb}:",
+                    Options = seqPeers,
+                    CorrectAnswer = string.Join(" -> ", seqPeers),
+                    Explanation = $"Appears in sequence starting at Page {c.Page.PageNumber} ({c.Page.SectionBreadcrumb}).",
+                    Evidence = new EvidenceAnchorDto
+                    {
+                        PageNumber = c.Page.PageNumber,
+                        SectionTitle = c.Page.SectionBreadcrumb,
+                        VerbatimQuote = c.FullSentence
+                    }
+                });
+            }
             else
             {
-                // True / False
                 questions.Add(new GeneratedQuestionDto
                 {
                     Kind = nameof(QuizQuestionKind.TrueFalse),

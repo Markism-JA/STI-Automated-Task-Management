@@ -248,7 +248,7 @@ public static class PdfReaderViewBuilder
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(6),
-                Child = new ScrollViewer { Content = outlineStack }
+                Child = UiBuilder.PersistentScrollViewer($"pdf-reader-outline:{reader.CurrentFilePath}", outlineStack)
             });
         }
 

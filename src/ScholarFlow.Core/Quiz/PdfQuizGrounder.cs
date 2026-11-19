@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using ScholarFlow.Core.Models;
 using UglyToad.PdfPig;
@@ -18,6 +19,14 @@ public sealed record GroundedPdfPage(
 /// </summary>
 public static class PdfQuizGrounder
 {
+    private sealed record CachedPdfTextData(
+        long LastWriteTicks,
+        int TotalPages,
+        (string? Term, string SectionBreadcrumb)[] PageSections,
+        string?[] PageTexts);
+
+    private static readonly ConcurrentDictionary<string, CachedPdfTextData> PdfTextCache =
+        new(StringComparer.OrdinalIgnoreCase);
     public static IReadOnlyList<PdfOutlineSectionInfo> InspectOutlineSections(string pdfPath, out int totalPages)
     {
         totalPages = 0;
@@ -207,12 +216,33 @@ public static class PdfQuizGrounder
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
             return [];
 
-        using var doc = PdfDocument.Open(pdfPath);
-        int totalPages = doc.NumberOfPages;
+        long currentTicks = File.GetLastWriteTimeUtc(pdfPath).Ticks;
+        if (!PdfTextCache.TryGetValue(pdfPath, out var cached) || cached.LastWriteTicks != currentTicks)
+        {
+            using var doc = PdfDocument.Open(pdfPath);
+            int docPages = doc.NumberOfPages;
+            if (docPages == 0)
+                return [];
+
+            var sections = BuildPageSectionMap(doc);
+            var texts = new string?[docPages + 1];
+            for (int p = 1; p <= docPages; p++)
+            {
+                texts[p] = ExtractCleanPageText(doc.GetPage(p));
+            }
+
+            if (PdfTextCache.Count >= 8)
+                PdfTextCache.Clear();
+
+            cached = new CachedPdfTextData(currentTicks, docPages, sections, texts);
+            PdfTextCache[pdfPath] = cached;
+        }
+
+        int totalPages = cached.TotalPages;
         if (totalPages == 0)
             return [];
 
-        var pageSections = BuildPageSectionMap(doc);
+        var pageSections = cached.PageSections;
         var normalizedTerm = TaskItem.NormalizeTerm(termFilter);
         bool hasAnyTermBookmarks = pageSections.Any(ps => !string.IsNullOrWhiteSpace(ps.Term));
         bool hasNonSyllabusPages = pageSections.Any(ps =>
@@ -255,8 +285,7 @@ public static class PdfQuizGrounder
                 continue;
             }
 
-            var page = doc.GetPage(p);
-            var text = ExtractCleanPageText(page);
+            var text = cached.PageTexts[p] ?? string.Empty;
 
             // Skip cover pages, term divider pages, table of contents, or nearly empty pages
             if (text.Length < 180 ||
@@ -281,8 +310,7 @@ public static class PdfQuizGrounder
         {
             for (int p = minP; p <= maxP && results.Count < maxPages; p++)
             {
-                var page = doc.GetPage(p);
-                var text = ExtractCleanPageText(page);
+                var text = cached.PageTexts[p] ?? string.Empty;
                 if (text.Length < 55)
                     continue;
 
@@ -318,7 +346,7 @@ public static class PdfQuizGrounder
     /// Grounds every question in the list against the source PDF, snapping SourcePage if off by 1-2 pages
     /// and computing exact normalized [0..1] highlight bounding boxes for the VerbatimQuote.
     /// </summary>
-    public static void GroundQuestionsToPdf(string pdfPath, IEnumerable<QuizQuestionRecord> questions)
+    public static void GroundQuestionsToPdf(string pdfPath, IEnumerable<QuizQuestionRecord> questions, bool forceUpdateSection = false)
     {
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
             return;
@@ -338,9 +366,11 @@ public static class PdfQuizGrounder
                 q.SourcePage = Math.Clamp(resolvedPage, 1, doc.NumberOfPages);
                 q.HighlightRects = rects;
 
-                if (string.IsNullOrWhiteSpace(q.SectionTitle))
+                if (forceUpdateSection || string.IsNullOrWhiteSpace(q.SectionTitle))
                 {
-                    q.SectionTitle = pageSections[q.SourcePage].SectionBreadcrumb;
+                    var sec = pageSections[q.SourcePage].SectionBreadcrumb;
+                    if (!string.IsNullOrWhiteSpace(sec))
+                        q.SectionTitle = sec;
                 }
             }
         }
@@ -348,6 +378,20 @@ public static class PdfQuizGrounder
         {
             // Keep questions usable even if PDF grounding encounters an unexpected structure
         }
+    }
+
+    /// <summary>
+    /// Re-grounds every question in an existing quiz session against its current SourcePdfPath
+    /// (for example after a Master PDF recompiles and page numbers shift) and updates SourcePdfMtimeTicks.
+    /// </summary>
+    public static int RegroundSessionToPdf(QuizSessionRecord session)
+    {
+        if (session is null || string.IsNullOrWhiteSpace(session.SourcePdfPath) || !File.Exists(session.SourcePdfPath))
+            return 0;
+
+        GroundQuestionsToPdf(session.SourcePdfPath, session.Questions, forceUpdateSection: true);
+        session.SourcePdfMtimeTicks = File.GetLastWriteTimeUtc(session.SourcePdfPath).Ticks;
+        return session.Questions.Count(q => q.HighlightRects.Count > 0);
     }
 
     public static List<NormalizedHighlightRect> ComputeHighlightRects(

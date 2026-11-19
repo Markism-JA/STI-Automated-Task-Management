@@ -687,6 +687,47 @@ public sealed class MasterPdfService
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var unassigned = numberedPrefixes.Where(p => !assignedPrefixes.Contains(p)).ToList();
+        if (unassigned.Count > 0)
+        {
+            var courseDir = Path.GetDirectoryName(termJsonPath);
+            var syllabusPdf = courseDir is not null ? SyllabusTermParser.FindSyllabusPdfPath(courseDir) : null;
+            if (syllabusPdf is not null && courseDir is not null)
+            {
+                var schedule = SyllabusTermParser.ParseTermScheduleFromSyllabus(syllabusPdf, courseDir);
+                bool enriched = false;
+                foreach (var term in SyllabusTermParser.TermOrder)
+                {
+                    if (!schedule.TermPrefixes.TryGetValue(term, out var mapped)) continue;
+                    foreach (var prefix in mapped)
+                    {
+                        if (assignedPrefixes.Contains(prefix)) continue;
+                        if (!config.TryGetValue(term, out var list))
+                        {
+                            list = [];
+                            config[term] = list;
+                        }
+                        list.Add(prefix);
+                        assignedPrefixes.Add(prefix);
+                        enriched = true;
+                    }
+                }
+
+                if (enriched)
+                {
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+                        File.WriteAllText(termJsonPath, json);
+                    }
+                    catch
+                    {
+                        // Non-fatal if term.json cannot be persisted
+                    }
+                }
+            }
+        }
+
         foreach (var prefix in numberedPrefixes)
         {
             if (assignedPrefixes.Contains(prefix))

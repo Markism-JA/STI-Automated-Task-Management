@@ -249,6 +249,6 @@ public static class CourseWorkspaceViewBuilder
             stack.Children.Add(sectionStack);
         }
 
-        return new ScrollViewer { Content = stack };
+        return UiBuilder.PersistentScrollViewer($"course-workspace:{vm.ActiveCourse?.FolderName}", stack);
     }
 }

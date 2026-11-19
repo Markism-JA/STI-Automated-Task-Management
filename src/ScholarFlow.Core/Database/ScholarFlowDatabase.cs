@@ -125,7 +125,8 @@ public static class ScholarFlowDatabase
                 model_used TEXT NOT NULL,
                 created_at_utc TEXT NOT NULL,
                 attempt_count INTEGER NOT NULL DEFAULT 0,
-                last_score_percent REAL NULL
+                last_score_percent REAL NULL,
+                source_pdf_mtime_ticks INTEGER NULL
             );
 
             CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -171,6 +172,17 @@ public static class ScholarFlowDatabase
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(ct);
+
+        try
+        {
+            await using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;";
+            await alterCmd.ExecuteNonQueryAsync(ct);
+        }
+        catch
+        {
+            // Column already exists
+        }
     }
 
     /// <summary>
@@ -216,11 +228,13 @@ public static class ScholarFlowDatabase
                     continue;
 
                 activeSourcePaths.Add(tasksPath);
-                var currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks;
+                var termMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
+                var termJsonPath = Path.Combine(basinRoot, course.FolderName, "term.json");
+                long termTicks = File.Exists(termJsonPath) ? File.GetLastWriteTimeUtc(termJsonPath).Ticks : 0L;
+                var currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks ^ termTicks;
                 if (!indexedTicks.TryGetValue(tasksPath, out var savedTicks) || savedTicks != currentTicks)
                 {
                     var courseTasks = (await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct)).ToList();
-                    var termMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
                     bool anyEnriched = false;
 
                     foreach (var t in courseTasks)
@@ -235,7 +249,7 @@ public static class ScholarFlowDatabase
                     {
                         BasinWatcher.SuppressGlobal(TimeSpan.FromMilliseconds(750));
                         await MarkdownTaskCodec.SaveDocumentAsync(tasksPath, courseTasks, course.Title, ct, syncToDb: false);
-                        currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks;
+                        currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks ^ termTicks;
                     }
 
                     await ReplaceFileTasksInConnectionAsync(conn, basinRoot, tasksPath, course.FolderName, courseTasks, currentTicks, ct);
@@ -739,10 +753,10 @@ public static class ScholarFlowDatabase
                 qCmd.CommandText = """
                     INSERT OR REPLACE INTO quizzes (
                         id, course_folder, course_title, term, title,
-                        source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent
+                        source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks
                     ) VALUES (
                         $id, $course_folder, $course_title, $term, $title,
-                        $source_pdf_path, $model_used, $created_at_utc, $attempt_count, $last_score_percent
+                        $source_pdf_path, $model_used, $created_at_utc, $attempt_count, $last_score_percent, $source_pdf_mtime_ticks
                     );
                     """;
                 qCmd.Parameters.AddWithValue("$id", quiz.Id);
@@ -755,6 +769,7 @@ public static class ScholarFlowDatabase
                 qCmd.Parameters.AddWithValue("$created_at_utc", quiz.CreatedAtUtc.ToString("O", CultureInfo.InvariantCulture));
                 qCmd.Parameters.AddWithValue("$attempt_count", quiz.AttemptCount);
                 qCmd.Parameters.AddWithValue("$last_score_percent", quiz.LastScorePercent.HasValue ? quiz.LastScorePercent.Value : DBNull.Value);
+                qCmd.Parameters.AddWithValue("$source_pdf_mtime_ticks", quiz.SourcePdfMtimeTicks.HasValue ? quiz.SourcePdfMtimeTicks.Value : DBNull.Value);
                 await qCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -842,8 +857,8 @@ public static class ScholarFlowDatabase
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = string.IsNullOrWhiteSpace(courseFolder)
-                    ? "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent FROM quizzes ORDER BY created_at_utc DESC;"
-                    : "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent FROM quizzes WHERE course_folder = $cf ORDER BY created_at_utc DESC;";
+                    ? "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks FROM quizzes ORDER BY created_at_utc DESC;"
+                    : "SELECT id, course_folder, course_title, term, title, source_pdf_path, model_used, created_at_utc, attempt_count, last_score_percent, source_pdf_mtime_ticks FROM quizzes WHERE course_folder = $cf ORDER BY created_at_utc DESC;";
                 if (!string.IsNullOrWhiteSpace(courseFolder))
                     cmd.Parameters.AddWithValue("$cf", courseFolder);
 
@@ -861,7 +876,8 @@ public static class ScholarFlowDatabase
                         ModelUsed = r.GetString(6),
                         CreatedAtUtc = DateTimeOffset.TryParse(r.GetString(7), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) ? dt : DateTimeOffset.UtcNow,
                         AttemptCount = r.GetInt32(8),
-                        LastScorePercent = r.IsDBNull(9) ? null : r.GetDouble(9)
+                        LastScorePercent = r.IsDBNull(9) ? null : r.GetDouble(9),
+                        SourcePdfMtimeTicks = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetInt64(10) : null
                     };
                     sessions.Add(s);
                     byId[s.Id] = s;

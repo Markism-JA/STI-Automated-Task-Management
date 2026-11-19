@@ -24,7 +24,14 @@ public enum QuizPresetMode
 {
     ExamSimulator,
     QuickReview,
-    WeakTopicDrill
+    WeakTopicDrill,
+    Custom
+}
+
+public enum QuestionAllocationMode
+{
+    Percentages,
+    ExactCounts
 }
 
 /// <summary>
@@ -149,6 +156,24 @@ public sealed class QuizQuestionRecord
         if (string.Equals(cleanUser, cleanCorrect, StringComparison.OrdinalIgnoreCase))
             return true;
 
+        if (Kind == QuizQuestionKind.Ordering)
+        {
+            var expectedOrder = Options.Count >= 2
+                ? string.Join(" -> ", Options.Select(NormalizeAnswerToken))
+                : cleanCorrect;
+            var userParts = userAnswer
+                .Split(["->", "|", "\n", ";"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(NormalizeAnswerToken)
+                .Where(s => s.Length > 0)
+                .ToList();
+            if (userParts.Count >= 2)
+            {
+                var normalizedUserOrder = string.Join(" -> ", userParts);
+                if (string.Equals(normalizedUserOrder, expectedOrder, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+
         // If MCQ option starts with "A) ..." or user passed option text matching CorrectAnswer
         if (Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational)
         {
@@ -204,11 +229,25 @@ public sealed class QuizSessionRecord
     public string? Term { get; set; }
     public string Title { get; set; } = string.Empty;
     public string SourcePdfPath { get; set; } = string.Empty;
+    public long? SourcePdfMtimeTicks { get; set; }
     public string ModelUsed { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public int AttemptCount { get; set; }
     public double? LastScorePercent { get; set; }
     public List<QuizQuestionRecord> Questions { get; set; } = [];
+
+    public bool IsSourcePdfStale()
+    {
+        if (string.IsNullOrWhiteSpace(SourcePdfPath) || !File.Exists(SourcePdfPath))
+            return false;
+
+        var currentTicks = File.GetLastWriteTimeUtc(SourcePdfPath).Ticks;
+        if (SourcePdfMtimeTicks.HasValue)
+            return SourcePdfMtimeTicks.Value != currentTicks;
+
+        // For legacy sessions without SourcePdfMtimeTicks, compare PDF write time vs quiz creation time
+        return File.GetLastWriteTimeUtc(SourcePdfPath) > CreatedAtUtc.UtcDateTime.AddSeconds(5);
+    }
 }
 
 public sealed record PdfPageRange(int StartPage, int EndPage)
@@ -239,8 +278,161 @@ public sealed class QuizGenerationRequest
     public List<PdfPageRange> SelectedRanges { get; set; } = [];
     public int QuestionCount { get; set; } = 10;
     public QuizPresetMode Preset { get; set; } = QuizPresetMode.ExamSimulator;
+    public QuestionAllocationMode AllocationMode { get; set; } = QuestionAllocationMode.Percentages;
+    public Dictionary<QuizQuestionKind, int> KindAllocations { get; set; } = GetDefaultAllocationsForPreset(QuizPresetMode.ExamSimulator);
+    public List<string> ExcludePromptsOrTopics { get; set; } = [];
+    public string? AppendToQuizId { get; set; }
     public string ProviderBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
     public string? ApiKey { get; set; }
     public string ModelName { get; set; } = "gemini-2.5-flash";
     public bool UseOfflineHeuristicFallback { get; set; }
+
+    public static Dictionary<QuizQuestionKind, int> GetDefaultAllocationsForPreset(
+        QuizPresetMode preset,
+        QuestionAllocationMode mode = QuestionAllocationMode.Percentages)
+    {
+        if (mode == QuestionAllocationMode.ExactCounts)
+        {
+            return preset switch
+            {
+                QuizPresetMode.QuickReview => new()
+                {
+                    [QuizQuestionKind.MultipleChoice] = 5,
+                    [QuizQuestionKind.Situational] = 0,
+                    [QuizQuestionKind.Identification] = 3,
+                    [QuizQuestionKind.TrueFalse] = 2,
+                    [QuizQuestionKind.FillInTheBlank] = 0,
+                    [QuizQuestionKind.Ordering] = 0
+                },
+                QuizPresetMode.WeakTopicDrill => new()
+                {
+                    [QuizQuestionKind.MultipleChoice] = 2,
+                    [QuizQuestionKind.Situational] = 3,
+                    [QuizQuestionKind.Identification] = 3,
+                    [QuizQuestionKind.TrueFalse] = 0,
+                    [QuizQuestionKind.FillInTheBlank] = 2,
+                    [QuizQuestionKind.Ordering] = 0
+                },
+                _ => new()
+                {
+                    [QuizQuestionKind.MultipleChoice] = 3,
+                    [QuizQuestionKind.Situational] = 2,
+                    [QuizQuestionKind.Identification] = 2,
+                    [QuizQuestionKind.TrueFalse] = 1,
+                    [QuizQuestionKind.FillInTheBlank] = 1,
+                    [QuizQuestionKind.Ordering] = 1
+                }
+            };
+        }
+
+        return preset switch
+        {
+            QuizPresetMode.QuickReview => new()
+            {
+                [QuizQuestionKind.MultipleChoice] = 50,
+                [QuizQuestionKind.Situational] = 0,
+                [QuizQuestionKind.Identification] = 30,
+                [QuizQuestionKind.TrueFalse] = 20,
+                [QuizQuestionKind.FillInTheBlank] = 0,
+                [QuizQuestionKind.Ordering] = 0
+            },
+            QuizPresetMode.WeakTopicDrill => new()
+            {
+                [QuizQuestionKind.MultipleChoice] = 20,
+                [QuizQuestionKind.Situational] = 30,
+                [QuizQuestionKind.Identification] = 30,
+                [QuizQuestionKind.TrueFalse] = 0,
+                [QuizQuestionKind.FillInTheBlank] = 20,
+                [QuizQuestionKind.Ordering] = 0
+            },
+            _ => new()
+            {
+                [QuizQuestionKind.MultipleChoice] = 30,
+                [QuizQuestionKind.Situational] = 20,
+                [QuizQuestionKind.Identification] = 20,
+                [QuizQuestionKind.TrueFalse] = 10,
+                [QuizQuestionKind.FillInTheBlank] = 10,
+                [QuizQuestionKind.Ordering] = 10
+            }
+        };
+    }
+
+    /// <summary>
+    /// Resolves either exact counts or percentage weights into deterministic per-kind item counts summing to totalCount.
+    /// </summary>
+    public Dictionary<QuizQuestionKind, int> ResolveExactKindCounts(int? targetTotalOverride = null)
+    {
+        var allKinds = Enum.GetValues<QuizQuestionKind>();
+        var result = allKinds.ToDictionary(k => k, _ => 0);
+
+        if (AllocationMode == QuestionAllocationMode.ExactCounts)
+        {
+            int explicitSum = 0;
+            foreach (var k in allKinds)
+            {
+                int val = Math.Max(0, KindAllocations.GetValueOrDefault(k, 0));
+                result[k] = val;
+                explicitSum += val;
+            }
+
+            if (explicitSum == 0)
+            {
+                int fallbackTotal = Math.Clamp(targetTotalOverride ?? QuestionCount, 1, 150);
+                result[QuizQuestionKind.MultipleChoice] = fallbackTotal;
+                return result;
+            }
+
+            if (targetTotalOverride.HasValue && targetTotalOverride.Value > 0 && targetTotalOverride.Value != explicitSum)
+            {
+                return ScaleAllocationsToTarget(result, targetTotalOverride.Value);
+            }
+
+            return result;
+        }
+
+        int targetTotal = Math.Clamp(targetTotalOverride ?? QuestionCount, 1, 150);
+        return ScaleAllocationsToTarget(KindAllocations, targetTotal);
+    }
+
+    private static Dictionary<QuizQuestionKind, int> ScaleAllocationsToTarget(
+        IReadOnlyDictionary<QuizQuestionKind, int> weights,
+        int targetTotal)
+    {
+        var allKinds = Enum.GetValues<QuizQuestionKind>();
+        var result = allKinds.ToDictionary(k => k, _ => 0);
+
+        int weightSum = allKinds.Sum(k => Math.Max(0, weights.GetValueOrDefault(k, 0)));
+        if (weightSum <= 0)
+        {
+            result[QuizQuestionKind.MultipleChoice] = targetTotal;
+            return result;
+        }
+
+        var remainders = new List<(QuizQuestionKind Kind, double Remainder, int Weight)>();
+        int allocated = 0;
+
+        foreach (var k in allKinds)
+        {
+            int w = Math.Max(0, weights.GetValueOrDefault(k, 0));
+            if (w == 0) continue;
+
+            double exact = (double)w * targetTotal / weightSum;
+            int floor = (int)Math.Floor(exact);
+            result[k] = floor;
+            allocated += floor;
+            remainders.Add((k, exact - floor, w));
+        }
+
+        int leftover = targetTotal - allocated;
+        foreach (var item in remainders
+                     .OrderByDescending(r => r.Remainder)
+                     .ThenByDescending(r => r.Weight)
+                     .ThenBy(r => (int)r.Kind)
+                     .Take(Math.Max(0, leftover)))
+        {
+            result[item.Kind]++;
+        }
+
+        return result;
+    }
 }

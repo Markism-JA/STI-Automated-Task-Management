@@ -542,7 +542,7 @@ public static class InspectorPaneBuilder
             });
         }
 
-        var scroll = new ScrollViewer { Content = stack };
+        var scroll = UiBuilder.PersistentScrollViewer($"inspector:{vm.SelectedTask?.Id}", stack);
         Grid.SetRow(scroll, 1);
         rootGrid.Children.Add(scroll);
 

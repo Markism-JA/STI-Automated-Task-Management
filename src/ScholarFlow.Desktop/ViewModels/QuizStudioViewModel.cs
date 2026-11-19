@@ -10,7 +10,15 @@ namespace ScholarFlow.Desktop.ViewModels;
 public enum QuizStudioSubTab
 {
     Builder,
-    Catalog
+    Catalog,
+    Organizer
+}
+
+public enum QuizBuilderOutputMode
+{
+    AiApi,
+    WebJson,
+    OfflineSmart
 }
 
 /// <summary>
@@ -42,6 +50,12 @@ public sealed class QuizStudioViewModel
     public int? EndPage { get; set; }
     public int QuestionCount { get; private set; } = 10;
     public QuizPresetMode SelectedPreset { get; private set; } = QuizPresetMode.ExamSimulator;
+    public QuestionAllocationMode AllocationMode { get; private set; } = QuestionAllocationMode.Percentages;
+    public Dictionary<QuizQuestionKind, int> KindAllocations { get; private set; } =
+        QuizGenerationRequest.GetDefaultAllocationsForPreset(QuizPresetMode.ExamSimulator, QuestionAllocationMode.Percentages);
+    public QuizBuilderOutputMode BuilderOutputMode { get; private set; } = QuizBuilderOutputMode.AiApi;
+    public string? AppendTargetQuizId { get; private set; }
+    public string? AppendTargetQuizTitle { get; private set; }
 
     public IReadOnlyList<(int PageNumber, string SectionTitle, string? Term)> MatchedScopePages { get; private set; } = [];
     public int PreviewScopeIndex { get; private set; }
@@ -56,7 +70,15 @@ public sealed class QuizStudioViewModel
             : (string.IsNullOrWhiteSpace(SelectedPdfPath) ? "No PDF Selected" : Path.GetFileNameWithoutExtension(SelectedPdfPath));
 
     public bool CatalogShowAllCourses { get; private set; }
+    public string? CatalogTermFilter { get; private set; }
     public HashSet<string> SelectedQuizIdsForMerge { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool ShuffleQuestionsOnStart { get; private set; }
+    public bool ShuffleOptionsOnStart { get; private set; } = true;
+
+    // Deck Organizer State (Single & Multi-Quiz Reorganization)
+    public QuizSessionRecord? OrganizerQuiz { get; private set; }
+    public QuizQuestionKind? OrganizerKindFilter { get; private set; }
+    public string? EditingQuestionId { get; private set; }
 
     public bool IsAiSettingsOpen { get; private set; }
     public bool IsManualJsonModalOpen { get; private set; }
@@ -64,6 +86,12 @@ public sealed class QuizStudioViewModel
     public string GeneratedPromptPreview { get; private set; } = string.Empty;
 
     public bool IsGenerating { get; private set; }
+    public bool IsInspectingPdf { get; private set; }
+    public bool IsBuildingPrompt { get; private set; }
+    public bool IsLoadingPreviewPage { get; private set; }
+    public bool IsBusy => IsGenerating || IsInspectingPdf || IsBuildingPrompt;
+    private CancellationTokenSource? _promptBuildCts;
+    private readonly HashSet<(string Path, int Page)> _pendingPreviewRenders = [];
     public string StatusMessage { get; private set; } = "Select a course & PDF to generate an evidence-grounded assessment.";
     public bool IsStatusError { get; private set; }
 
@@ -84,6 +112,7 @@ public sealed class QuizStudioViewModel
     public bool IsShowingResultsSummary { get; private set; }
 
     public Dictionary<string, (string Answer, bool IsCorrect)> SessionResults { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, List<string>> OrderingDrafts { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public QuizStudioViewModel(MainWindowViewModel mainVm)
     {
@@ -248,13 +277,192 @@ public sealed class QuizStudioViewModel
     public void SetQuestionCount(int count, bool notify = true)
     {
         QuestionCount = Math.Clamp(count, 1, 150);
+        if (AllocationMode == QuestionAllocationMode.ExactCounts)
+        {
+            var scaled = BuildCurrentRequest().ResolveExactKindCounts(QuestionCount);
+            KindAllocations = scaled;
+        }
+        RefreshLivePromptPreviewIfActive();
         if (notify)
             _mainVm.RequestUiRefresh();
+    }
+
+    public void SetAllocationMode(QuestionAllocationMode mode)
+    {
+        if (AllocationMode == mode)
+            return;
+
+        if (mode == QuestionAllocationMode.ExactCounts)
+        {
+            var resolved = BuildCurrentRequest().ResolveExactKindCounts(QuestionCount);
+            AllocationMode = QuestionAllocationMode.ExactCounts;
+            KindAllocations = resolved;
+            QuestionCount = Math.Clamp(KindAllocations.Values.Sum(), 1, 150);
+        }
+        else
+        {
+            int sum = Math.Max(1, KindAllocations.Values.Sum());
+            var pcts = new Dictionary<QuizQuestionKind, int>();
+            foreach (var k in Enum.GetValues<QuizQuestionKind>())
+            {
+                pcts[k] = (int)Math.Round(100.0 * KindAllocations.GetValueOrDefault(k, 0) / sum);
+            }
+            AllocationMode = QuestionAllocationMode.Percentages;
+            KindAllocations = pcts;
+        }
+
+        RefreshLivePromptPreviewIfActive();
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetKindAllocation(QuizQuestionKind kind, int value, bool notify = true)
+    {
+        int clamped = Math.Clamp(value, 0, 150);
+        KindAllocations[kind] = clamped;
+        SelectedPreset = QuizPresetMode.Custom;
+
+        if (AllocationMode == QuestionAllocationMode.ExactCounts)
+        {
+            int sum = KindAllocations.Values.Sum();
+            if (sum > 0)
+                QuestionCount = Math.Clamp(sum, 1, 150);
+        }
+
+        RefreshLivePromptPreviewIfActive();
+        if (notify)
+            _mainVm.RequestUiRefresh();
+    }
+
+    public void StepKindAllocation(QuizQuestionKind kind, int delta)
+    {
+        int step = AllocationMode == QuestionAllocationMode.Percentages ? (delta * 5) : delta;
+        int current = KindAllocations.GetValueOrDefault(kind, 0);
+        SetKindAllocation(kind, Math.Max(0, current + step), notify: true);
+    }
+
+    public Dictionary<QuizQuestionKind, int> GetResolvedExactKindCounts()
+    {
+        return BuildCurrentRequest().ResolveExactKindCounts(QuestionCount);
+    }
+
+    public void SetBuilderOutputMode(QuizBuilderOutputMode mode)
+    {
+        BuilderOutputMode = mode;
+        if (mode == QuizBuilderOutputMode.WebJson)
+            RefreshLivePromptPreviewIfActive(force: true);
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void RefreshLivePromptPreviewIfActive(bool force = false)
+    {
+        if (!force && !IsManualJsonModalOpen && BuilderOutputMode != QuizBuilderOutputMode.WebJson)
+            return;
+
+        var req = BuildCurrentRequest();
+        if (string.IsNullOrWhiteSpace(req.SourcePdfPath) || !File.Exists(req.SourcePdfPath))
+        {
+            GeneratedPromptPreview = string.Empty;
+            return;
+        }
+
+        _ = RebuildPromptPreviewAsync(req, updateStatus: force);
+    }
+
+    private async Task RebuildPromptPreviewAsync(QuizGenerationRequest req, bool updateStatus)
+    {
+        _promptBuildCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _promptBuildCts = cts;
+        var token = cts.Token;
+
+        IsBuildingPrompt = true;
+        try
+        {
+            var (prompt, pageCount) = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                var text = _llmService.BuildPromptForManualCopy(req, out var pages);
+                return (text, pages.Count);
+            }, token);
+
+            if (token.IsCancellationRequested)
+                return;
+
+            GeneratedPromptPreview = prompt;
+            if (updateStatus)
+            {
+                StatusMessage = $"Live grounded prompt ready across {pageCount} PDF page(s) ({req.QuestionCount} items).";
+                IsStatusError = false;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer scope/allocation change
+        }
+        catch (Exception ex)
+        {
+            if (!token.IsCancellationRequested)
+            {
+                StatusMessage = $"Prompt preview error: {ex.Message}";
+                IsStatusError = true;
+            }
+        }
+        finally
+        {
+            if (_promptBuildCts == cts)
+            {
+                IsBuildingPrompt = false;
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
+            }
+        }
+    }
+
+    public void StartAppendToQuiz(QuizSessionRecord quiz)
+    {
+        AppendTargetQuizId = quiz.Id;
+        AppendTargetQuizTitle = quiz.Title;
+        var course = _mainVm.Courses.FirstOrDefault(c => string.Equals(c.FolderName, quiz.CourseFolder, StringComparison.OrdinalIgnoreCase));
+        if (course is not null)
+            SelectedCourse = course;
+        RebuildAvailablePdfsForCourse(quiz.SourcePdfPath);
+        if (!string.IsNullOrWhiteSpace(quiz.Term))
+            SelectedTerm = quiz.Term;
+        RecomputeScopePreview();
+        ActiveSubTab = QuizStudioSubTab.Builder;
+        StatusMessage = $"Appending new non-duplicate questions to '{quiz.Title}'. Configure count/types and generate.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ClearAppendTarget()
+    {
+        AppendTargetQuizId = null;
+        AppendTargetQuizTitle = null;
+        RefreshLivePromptPreviewIfActive();
+        _mainVm.RequestUiRefresh();
     }
 
     public void ToggleCatalogShowAllCourses()
     {
         CatalogShowAllCourses = !CatalogShowAllCourses;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetCatalogTermFilter(string? term)
+    {
+        CatalogTermFilter = string.Equals(CatalogTermFilter, term, StringComparison.OrdinalIgnoreCase) ? null : term;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleShuffleQuestionsOnStart()
+    {
+        ShuffleQuestionsOnStart = !ShuffleQuestionsOnStart;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleShuffleOptionsOnStart()
+    {
+        ShuffleOptionsOnStart = !ShuffleOptionsOnStart;
         _mainVm.RequestUiRefresh();
     }
 
@@ -348,6 +556,13 @@ public sealed class QuizStudioViewModel
     public void SetPreset(QuizPresetMode preset)
     {
         SelectedPreset = preset;
+        if (preset != QuizPresetMode.Custom)
+        {
+            KindAllocations = QuizGenerationRequest.GetDefaultAllocationsForPreset(preset, AllocationMode);
+            if (AllocationMode == QuestionAllocationMode.ExactCounts)
+                QuestionCount = Math.Clamp(KindAllocations.Values.Sum(), 1, 150);
+        }
+        RefreshLivePromptPreviewIfActive();
         _mainVm.RequestUiRefresh();
     }
 
@@ -407,10 +622,13 @@ public sealed class QuizStudioViewModel
             return;
         }
 
-        GeneratedPromptPreview = _llmService.BuildPromptForManualCopy(req, out var pages);
         IsManualJsonModalOpen = !IsManualJsonModalOpen;
-        StatusMessage = $"Prepared grounded prompt across {pages.Count} PDF page(s) for Gemini Pro web.";
-        IsStatusError = false;
+        if (IsManualJsonModalOpen)
+        {
+            StatusMessage = "Building grounded prompt from selected PDF scope...";
+            IsStatusError = false;
+            _ = RebuildPromptPreviewAsync(req, updateStatus: true);
+        }
         _mainVm.RequestUiRefresh();
     }
 
@@ -437,10 +655,13 @@ public sealed class QuizStudioViewModel
             ? $"Analyzing {Path.GetFileName(req.SourcePdfPath)} and grounding statements..."
             : $"Requesting {req.QuestionCount} grounded questions from {req.ModelName}...";
         _mainVm.RequestUiRefresh();
+        await Task.Yield();
 
         try
         {
             var session = await _llmService.GenerateQuizAsync(req);
+            AppendTargetQuizId = null;
+            AppendTargetQuizTitle = null;
             await RefreshAsync(SelectedCourse, SelectedPdfPath);
             StartQuizSession(session);
             StatusMessage = $"Generated '{session.Title}' ({session.Questions.Count} grounded questions).";
@@ -468,9 +689,17 @@ public sealed class QuizStudioViewModel
         }
 
         var req = BuildCurrentRequest();
+        IsGenerating = true;
+        IsStatusError = false;
+        StatusMessage = "Parsing JSON and grounding quotes to PDF pages...";
+        _mainVm.RequestUiRefresh();
+        await Task.Yield();
+
         try
         {
             var session = await _llmService.ImportQuizFromJsonAsync(req, rawJson);
+            AppendTargetQuizId = null;
+            AppendTargetQuizTitle = null;
             IsManualJsonModalOpen = false;
             ManualJsonInput = string.Empty;
             await RefreshAsync(SelectedCourse, SelectedPdfPath);
@@ -483,19 +712,136 @@ public sealed class QuizStudioViewModel
             StatusMessage = $"JSON Import error: {ex.Message}";
             IsStatusError = true;
         }
+        finally
+        {
+            IsGenerating = false;
+        }
 
         _mainVm.RequestUiRefresh();
     }
 
-    public void StartQuizSession(QuizSessionRecord session)
+    public void StartQuizSession(
+        QuizSessionRecord session,
+        bool? shuffleQuestionsOverride = null,
+        bool? shuffleOptionsOverride = null,
+        bool missedOnly = false)
     {
-        ActiveSession = session;
+        bool doShuffleQ = shuffleQuestionsOverride ?? ShuffleQuestionsOnStart;
+        bool doShuffleOpt = shuffleOptionsOverride ?? ShuffleOptionsOnStart;
+        var rng = new Random();
+
+        var sourceQuestions = missedOnly
+            ? session.Questions.Where(q => q.LastAnsweredCorrect == false).ToList()
+            : [.. session.Questions];
+        if (sourceQuestions.Count == 0)
+            sourceQuestions = [.. session.Questions];
+
+        if (doShuffleQ && sourceQuestions.Count > 1)
+            sourceQuestions = sourceQuestions.OrderBy(_ => rng.Next()).ToList();
+
+        OrderingDrafts.Clear();
+        var playbackQuestions = new List<QuizQuestionRecord>(sourceQuestions.Count);
+        foreach (var orig in sourceQuestions)
+        {
+            var opts = new List<string>(orig.Options);
+            if (doShuffleOpt && orig.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational && opts.Count > 1)
+            {
+                opts = opts.OrderBy(_ => rng.Next()).ToList();
+            }
+
+            if (orig.Kind == QuizQuestionKind.Ordering && orig.Options.Count >= 2)
+            {
+                var shuffledSteps = orig.Options.OrderBy(_ => rng.Next()).ToList();
+                // Ensure ordering steps don't start already in exact canonical order when possible
+                if (shuffledSteps.SequenceEqual(orig.Options, StringComparer.OrdinalIgnoreCase) && shuffledSteps.Count >= 2)
+                    (shuffledSteps[0], shuffledSteps[^1]) = (shuffledSteps[^1], shuffledSteps[0]);
+                OrderingDrafts[orig.Id] = shuffledSteps;
+            }
+
+            playbackQuestions.Add(new QuizQuestionRecord
+            {
+                Id = orig.Id,
+                QuizId = orig.QuizId,
+                OrderIndex = orig.OrderIndex,
+                Kind = orig.Kind,
+                CognitiveLevel = orig.CognitiveLevel,
+                Difficulty = orig.Difficulty,
+                TopicTag = orig.TopicTag,
+                Prompt = orig.Prompt,
+                Options = opts,
+                CorrectAnswer = orig.CorrectAnswer,
+                AcceptedAliases = [.. orig.AcceptedAliases],
+                Explanation = orig.Explanation,
+                SourcePdfPath = orig.SourcePdfPath,
+                SourcePage = orig.SourcePage,
+                SectionTitle = orig.SectionTitle,
+                VerbatimQuote = orig.VerbatimQuote,
+                HighlightRects = [.. orig.HighlightRects],
+                SrsIntervalDays = orig.SrsIntervalDays,
+                SrsEaseFactor = orig.SrsEaseFactor,
+                SrsDueDate = orig.SrsDueDate,
+                SrsReps = orig.SrsReps,
+                SrsLapses = orig.SrsLapses,
+                LastAnsweredCorrect = orig.LastAnsweredCorrect
+            });
+        }
+
+        ActiveSession = new QuizSessionRecord
+        {
+            Id = session.Id,
+            CourseFolder = session.CourseFolder,
+            CourseTitle = session.CourseTitle,
+            Term = session.Term,
+            Title = session.Title,
+            SourcePdfPath = session.SourcePdfPath,
+            SourcePdfMtimeTicks = session.SourcePdfMtimeTicks,
+            ModelUsed = session.ModelUsed,
+            CreatedAtUtc = session.CreatedAtUtc,
+            AttemptCount = session.AttemptCount,
+            LastScorePercent = session.LastScorePercent,
+            Questions = playbackQuestions
+        };
         CurrentQuestionIndex = 0;
-        CurrentAnswerDraft = string.Empty;
+        CurrentAnswerDraft = playbackQuestions.FirstOrDefault() is { Kind: QuizQuestionKind.Ordering } firstOrd &&
+                             OrderingDrafts.TryGetValue(firstOrd.Id, out var initSteps)
+            ? string.Join(" -> ", initSteps)
+            : string.Empty;
         IsAnswerRevealed = false;
         IsCurrentAnswerCorrect = false;
         IsShowingResultsSummary = false;
         SessionResults.Clear();
+        _mainVm.RequestUiRefresh();
+    }
+
+    public IReadOnlyList<string> GetOrderingItemsForQuestion(QuizQuestionRecord q)
+    {
+        if (OrderingDrafts.TryGetValue(q.Id, out var steps) && steps.Count > 0)
+            return steps;
+
+        var rng = new Random();
+        var list = q.Options.Count >= 2
+            ? q.Options.OrderBy(_ => rng.Next()).ToList()
+            : q.CorrectAnswer.Split("->", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (list.SequenceEqual(q.Options, StringComparer.OrdinalIgnoreCase) && list.Count >= 2)
+            (list[0], list[^1]) = (list[^1], list[0]);
+
+        OrderingDrafts[q.Id] = list;
+        return list;
+    }
+
+    public void MoveOrderingStep(QuizQuestionRecord q, int index, int delta)
+    {
+        if (IsAnswerRevealed)
+            return;
+
+        var list = GetOrderingItemsForQuestion(q).ToList();
+        int target = index + delta;
+        if (index < 0 || index >= list.Count || target < 0 || target >= list.Count)
+            return;
+
+        (list[index], list[target]) = (list[target], list[index]);
+        OrderingDrafts[q.Id] = list;
+        CurrentAnswerDraft = string.Join(" -> ", list);
         _mainVm.RequestUiRefresh();
     }
 
@@ -595,7 +941,10 @@ public sealed class QuizStudioViewModel
             }
             else
             {
-                CurrentAnswerDraft = string.Empty;
+                CurrentAnswerDraft = nextQ is { Kind: QuizQuestionKind.Ordering } &&
+                                     OrderingDrafts.TryGetValue(nextQ.Id, out var steps)
+                    ? string.Join(" -> ", steps)
+                    : string.Empty;
                 IsCurrentAnswerCorrect = false;
                 IsAnswerRevealed = false;
             }
@@ -637,6 +986,31 @@ public sealed class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
+    public void JumpToQuestion(int index)
+    {
+        if (ActiveSession is null || index < 0 || index >= ActiveSession.Questions.Count)
+            return;
+
+        CurrentQuestionIndex = index;
+        var q = CurrentQuestion;
+        if (q is not null && SessionResults.TryGetValue(q.Id, out var prev))
+        {
+            CurrentAnswerDraft = prev.Answer;
+            IsCurrentAnswerCorrect = prev.IsCorrect;
+            IsAnswerRevealed = true;
+        }
+        else
+        {
+            CurrentAnswerDraft = q is { Kind: QuizQuestionKind.Ordering } &&
+                                 OrderingDrafts.TryGetValue(q.Id, out var steps)
+                ? string.Join(" -> ", steps)
+                : string.Empty;
+            IsCurrentAnswerCorrect = false;
+            IsAnswerRevealed = false;
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
     public async Task DeleteQuizAsync(QuizSessionRecord quiz)
     {
         await ScholarFlowDatabase.DeleteQuizSessionAsync(_mainVm.BasinRoot, quiz.Id);
@@ -645,6 +1019,298 @@ public sealed class QuizStudioViewModel
         await RefreshAsync(SelectedCourse, SelectedPdfPath);
         StatusMessage = $"Deleted quiz '{quiz.Title}'.";
         _mainVm.RequestUiRefresh();
+    }
+
+    public async Task RegroundQuizAsync(QuizSessionRecord quiz)
+    {
+        if (string.IsNullOrWhiteSpace(quiz.SourcePdfPath) || !File.Exists(quiz.SourcePdfPath))
+        {
+            StatusMessage = $"Cannot re-ground: PDF not found at {quiz.SourcePdfPath}";
+            IsStatusError = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        IsGenerating = true;
+        IsStatusError = false;
+        StatusMessage = $"Re-grounding '{quiz.Title}' against {Path.GetFileName(quiz.SourcePdfPath)}...";
+        _mainVm.RequestUiRefresh();
+        await Task.Yield();
+
+        try
+        {
+            int matched = await Task.Run(() => PdfQuizGrounder.RegroundSessionToPdf(quiz));
+            await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, quiz);
+            SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
+            if (OrganizerQuiz?.Id == quiz.Id)
+                OrganizerQuiz = SavedQuizzes.FirstOrDefault(x => x.Id == quiz.Id) ?? quiz;
+
+            StatusMessage = $"Re-grounded '{quiz.Title}' against updated PDF ({matched}/{quiz.Questions.Count} statements anchored).";
+            IsStatusError = false;
+        }
+        finally
+        {
+            IsGenerating = false;
+            _mainVm.RequestUiRefresh();
+        }
+    }
+
+    // =========================================================================
+    // DECK ORGANIZER (SINGLE & MULTI-QUIZ QUESTION REORGANIZATION)
+    // =========================================================================
+
+    public void OpenQuizInOrganizer(QuizSessionRecord quiz)
+    {
+        OrganizerQuiz = new QuizSessionRecord
+        {
+            Id = quiz.Id,
+            CourseFolder = quiz.CourseFolder,
+            CourseTitle = quiz.CourseTitle,
+            Term = quiz.Term,
+            Title = quiz.Title,
+            SourcePdfPath = quiz.SourcePdfPath,
+            SourcePdfMtimeTicks = quiz.SourcePdfMtimeTicks,
+            ModelUsed = quiz.ModelUsed,
+            CreatedAtUtc = quiz.CreatedAtUtc,
+            AttemptCount = quiz.AttemptCount,
+            LastScorePercent = quiz.LastScorePercent,
+            Questions = quiz.Questions.Select(CloneQuestionForEdit).ToList()
+        };
+        OrganizerKindFilter = null;
+        EditingQuestionId = null;
+        ActiveSubTab = QuizStudioSubTab.Organizer;
+        StatusMessage = $"Organizing '{quiz.Title}' ({quiz.Questions.Count} items). Reorder, filter by kind, edit, or shuffle.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void OpenSelectedQuizzesInOrganizer(string? customTitle = null)
+    {
+        var selected = SavedQuizzes.Where(q => SelectedQuizIdsForMerge.Contains(q.Id)).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "Select 1 or more quizzes in the catalog to open in the Deck Organizer.";
+            IsStatusError = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        if (selected.Count == 1)
+        {
+            OpenQuizInOrganizer(selected[0]);
+            return;
+        }
+
+        var first = selected[0];
+        var distinctTerms = selected.Select(q => q.Term).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var mergedQuestions = new List<QuizQuestionRecord>();
+        foreach (var qz in selected)
+        {
+            foreach (var orig in qz.Questions)
+            {
+                var copy = CloneQuestionForEdit(orig);
+                copy.Id = Guid.NewGuid().ToString("N")[..12];
+                copy.OrderIndex = mergedQuestions.Count;
+                mergedQuestions.Add(copy);
+            }
+        }
+
+        OrganizerQuiz = new QuizSessionRecord
+        {
+            CourseFolder = selected.All(q => q.CourseFolder == first.CourseFolder) ? first.CourseFolder : (SelectedCourse?.FolderName ?? first.CourseFolder),
+            CourseTitle = selected.All(q => q.CourseTitle == first.CourseTitle) ? first.CourseTitle : "Combined Multi-Subject Assessment",
+            Term = distinctTerms.Count == 1 ? distinctTerms[0] : "Combined",
+            Title = !string.IsNullOrWhiteSpace(customTitle)
+                ? customTitle.Trim()
+                : $"Combined Deck ({string.Join(" + ", selected.Select(q => q.Term ?? q.Title).Take(3))})",
+            SourcePdfPath = first.SourcePdfPath,
+            SourcePdfMtimeTicks = first.SourcePdfMtimeTicks,
+            ModelUsed = "Curated Multi-Deck",
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            Questions = mergedQuestions
+        };
+        OrganizerKindFilter = null;
+        EditingQuestionId = null;
+        ActiveSubTab = QuizStudioSubTab.Organizer;
+        StatusMessage = $"Curating combined deck from {selected.Count} quizzes ({mergedQuestions.Count} items). Customize and click Save Deck.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    private static QuizQuestionRecord CloneQuestionForEdit(QuizQuestionRecord orig) => new()
+    {
+        Id = orig.Id,
+        QuizId = orig.QuizId,
+        OrderIndex = orig.OrderIndex,
+        Kind = orig.Kind,
+        CognitiveLevel = orig.CognitiveLevel,
+        Difficulty = orig.Difficulty,
+        TopicTag = orig.TopicTag,
+        Prompt = orig.Prompt,
+        Options = [.. orig.Options],
+        CorrectAnswer = orig.CorrectAnswer,
+        AcceptedAliases = [.. orig.AcceptedAliases],
+        Explanation = orig.Explanation,
+        SourcePdfPath = orig.SourcePdfPath,
+        SourcePage = orig.SourcePage,
+        SectionTitle = orig.SectionTitle,
+        VerbatimQuote = orig.VerbatimQuote,
+        HighlightRects = [.. orig.HighlightRects],
+        SrsIntervalDays = orig.SrsIntervalDays,
+        SrsEaseFactor = orig.SrsEaseFactor,
+        SrsDueDate = orig.SrsDueDate,
+        SrsReps = orig.SrsReps,
+        SrsLapses = orig.SrsLapses,
+        LastAnsweredCorrect = orig.LastAnsweredCorrect
+    };
+
+    public void SetOrganizerKindFilter(QuizQuestionKind? kind)
+    {
+        OrganizerKindFilter = OrganizerKindFilter == kind ? null : kind;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleEditQuestion(string questionId)
+    {
+        EditingQuestionId = string.Equals(EditingQuestionId, questionId, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : questionId;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void MoveOrganizerQuestion(QuizQuestionRecord q, int delta)
+    {
+        if (OrganizerQuiz is null) return;
+        int idx = OrganizerQuiz.Questions.IndexOf(q);
+        int target = idx + delta;
+        if (idx < 0 || target < 0 || target >= OrganizerQuiz.Questions.Count) return;
+
+        (OrganizerQuiz.Questions[idx], OrganizerQuiz.Questions[target]) =
+            (OrganizerQuiz.Questions[target], OrganizerQuiz.Questions[idx]);
+        ReindexOrganizerQuestions();
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ShuffleOrganizerQuestions(QuizQuestionKind? onlyKind = null)
+    {
+        if (OrganizerQuiz is null || OrganizerQuiz.Questions.Count <= 1) return;
+        var rng = new Random();
+
+        if (onlyKind.HasValue)
+        {
+            var indices = new List<int>();
+            var items = new List<QuizQuestionRecord>();
+            for (int i = 0; i < OrganizerQuiz.Questions.Count; i++)
+            {
+                if (OrganizerQuiz.Questions[i].Kind == onlyKind.Value)
+                {
+                    indices.Add(i);
+                    items.Add(OrganizerQuiz.Questions[i]);
+                }
+            }
+            var shuffled = items.OrderBy(_ => rng.Next()).ToList();
+            for (int i = 0; i < indices.Count; i++)
+                OrganizerQuiz.Questions[indices[i]] = shuffled[i];
+            StatusMessage = $"Shuffled {items.Count} {onlyKind.Value} question(s) in place.";
+        }
+        else
+        {
+            OrganizerQuiz.Questions = OrganizerQuiz.Questions.OrderBy(_ => rng.Next()).ToList();
+            StatusMessage = $"Shuffled all {OrganizerQuiz.Questions.Count} questions in deck.";
+        }
+
+        ReindexOrganizerQuestions();
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SortOrganizerQuestionsByKind()
+    {
+        if (OrganizerQuiz is null) return;
+        OrganizerQuiz.Questions = OrganizerQuiz.Questions
+            .OrderBy(q => (int)q.Kind)
+            .ThenBy(q => q.SourcePage)
+            .ToList();
+        ReindexOrganizerQuestions();
+        StatusMessage = "Grouped and ordered deck questions by Question Kind.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SortOrganizerQuestionsByPage()
+    {
+        if (OrganizerQuiz is null) return;
+        OrganizerQuiz.Questions = OrganizerQuiz.Questions
+            .OrderBy(q => q.SourcePage)
+            .ThenBy(q => q.OrderIndex)
+            .ToList();
+        ReindexOrganizerQuestions();
+        StatusMessage = "Ordered deck questions chronologically by PDF Page.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void DeleteOrganizerQuestion(QuizQuestionRecord q)
+    {
+        if (OrganizerQuiz is null) return;
+        OrganizerQuiz.Questions.Remove(q);
+        ReindexOrganizerQuestions();
+        if (EditingQuestionId == q.Id)
+            EditingQuestionId = null;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void AddBlankOrganizerQuestion(QuizQuestionKind kind)
+    {
+        if (OrganizerQuiz is null) return;
+        var q = new QuizQuestionRecord
+        {
+            QuizId = OrganizerQuiz.Id,
+            OrderIndex = OrganizerQuiz.Questions.Count,
+            Kind = kind,
+            Prompt = kind == QuizQuestionKind.FillInTheBlank
+                ? "Enter statement with _____ for the missing concept..."
+                : "Enter question prompt...",
+            Options = kind switch
+            {
+                QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational => ["Option A", "Option B", "Option C", "Option D"],
+                QuizQuestionKind.TrueFalse => ["True", "False"],
+                QuizQuestionKind.Ordering => ["Step 1", "Step 2", "Step 3"],
+                _ => []
+            },
+            CorrectAnswer = kind switch
+            {
+                QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational => "Option A",
+                QuizQuestionKind.TrueFalse => "True",
+                QuizQuestionKind.Ordering => "Step 1 -> Step 2 -> Step 3",
+                _ => "Answer"
+            },
+            SourcePdfPath = OrganizerQuiz.SourcePdfPath,
+            SourcePage = 1,
+            SrsDueDate = DateOnly.FromDateTime(DateTime.Today)
+        };
+        OrganizerQuiz.Questions.Add(q);
+        EditingQuestionId = q.Id;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task SaveOrganizerDeckAsync()
+    {
+        if (OrganizerQuiz is null) return;
+        ReindexOrganizerQuestions();
+        await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, OrganizerQuiz);
+        SelectedQuizIdsForMerge.Clear();
+        SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
+        StatusMessage = $"Saved deck '{OrganizerQuiz.Title}' ({OrganizerQuiz.Questions.Count} questions).";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    private void ReindexOrganizerQuestions()
+    {
+        if (OrganizerQuiz is null) return;
+        for (int i = 0; i < OrganizerQuiz.Questions.Count; i++)
+        {
+            OrganizerQuiz.Questions[i].QuizId = OrganizerQuiz.Id;
+            OrganizerQuiz.Questions[i].OrderIndex = i;
+        }
     }
 
     public void OpenQuestionEvidenceInPdfReader(QuizQuestionRecord question)
@@ -657,10 +1323,13 @@ public sealed class QuizStudioViewModel
             return;
         }
 
-        // Re-compute highlight rects on-the-fly if empty
-        if (question.HighlightRects.Count == 0 && !string.IsNullOrWhiteSpace(question.VerbatimQuote))
+        var parentQuiz = SavedQuizzes.FirstOrDefault(qz => string.Equals(qz.Id, question.QuizId, StringComparison.OrdinalIgnoreCase));
+        bool isStale = parentQuiz?.IsSourcePdfStale() == true;
+
+        // Re-compute highlight rects on-the-fly if empty or if the source Master PDF was recompiled
+        if ((isStale || question.HighlightRects.Count == 0) && !string.IsNullOrWhiteSpace(question.VerbatimQuote))
         {
-            PdfQuizGrounder.GroundQuestionsToPdf(question.SourcePdfPath, [question]);
+            PdfQuizGrounder.GroundQuestionsToPdf(question.SourcePdfPath, [question], forceUpdateSection: true);
         }
 
         _mainVm.OpenPdfWithQuizEvidence(
@@ -687,6 +1356,14 @@ public sealed class QuizStudioViewModel
         var course = SelectedCourse ?? _mainVm.Courses.FirstOrDefault(c => !c.IsArchived);
         var settings = _mainVm.Settings;
 
+        var excludes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(AppendTargetQuizId))
+        {
+            var targetQuiz = SavedQuizzes.FirstOrDefault(q => string.Equals(q.Id, AppendTargetQuizId, StringComparison.OrdinalIgnoreCase));
+            if (targetQuiz is not null)
+                excludes.AddRange(targetQuiz.Questions.Select(q => q.Prompt));
+        }
+
         return new QuizGenerationRequest
         {
             BasinRoot = _mainVm.BasinRoot,
@@ -699,10 +1376,15 @@ public sealed class QuizStudioViewModel
             SelectedRanges = GetSelectedPageRanges(),
             QuestionCount = QuestionCount,
             Preset = SelectedPreset,
+            AllocationMode = AllocationMode,
+            KindAllocations = new Dictionary<QuizQuestionKind, int>(KindAllocations),
+            ExcludePromptsOrTopics = excludes,
+            AppendToQuizId = AppendTargetQuizId,
             ProviderBaseUrl = settings.AiBaseUrl,
             ApiKey = settings.AiApiKey,
             ModelName = settings.AiModelName,
-            UseOfflineHeuristicFallback = string.Equals(settings.AiProviderPreset, "OfflineSmart", StringComparison.OrdinalIgnoreCase)
+            UseOfflineHeuristicFallback = BuilderOutputMode == QuizBuilderOutputMode.OfflineSmart ||
+                                          string.Equals(settings.AiProviderPreset, "OfflineSmart", StringComparison.OrdinalIgnoreCase)
         };
     }
 
@@ -716,23 +1398,44 @@ public sealed class QuizStudioViewModel
         if (_previewBitmapCache.TryGetValue(key, out var cached))
             return cached;
 
+        _ = LoadPreviewBitmapInBackgroundAsync(SelectedPdfPath, pageOneBased);
+        return null;
+    }
+
+    private async Task LoadPreviewBitmapInBackgroundAsync(string pdfPath, int pageOneBased)
+    {
+        var key = (pdfPath, pageOneBased);
+        if (!_pendingPreviewRenders.Add(key))
+            return;
+
+        IsLoadingPreviewPage = true;
         try
         {
-            if (!string.Equals(_cachedBytesPath, SelectedPdfPath, StringComparison.OrdinalIgnoreCase) || _cachedPdfBytes is null)
+            var pngBytes = await Task.Run(() =>
             {
-                _cachedPdfBytes = File.ReadAllBytes(SelectedPdfPath);
-                _cachedBytesPath = SelectedPdfPath;
-            }
+                byte[] pdfBytes;
+                lock (_pendingPreviewRenders)
+                {
+                    if (!string.Equals(_cachedBytesPath, pdfPath, StringComparison.OrdinalIgnoreCase) || _cachedPdfBytes is null)
+                    {
+                        _cachedPdfBytes = File.ReadAllBytes(pdfPath);
+                        _cachedBytesPath = pdfPath;
+                    }
+                    pdfBytes = _cachedPdfBytes;
+                }
 
-            using var ms = new MemoryStream();
+                using var ms = new MemoryStream();
 #pragma warning disable CA1416
-            var renderOpts = new PDFtoImage.RenderOptions(
-                Dpi: 135,
-                BackgroundColor: SkiaSharp.SKColors.White);
-            PDFtoImage.Conversion.SavePng(ms, _cachedPdfBytes, page: (Index)(pageOneBased - 1), options: renderOpts);
+                var renderOpts = new PDFtoImage.RenderOptions(
+                    Dpi: 135,
+                    BackgroundColor: SkiaSharp.SKColors.White);
+                PDFtoImage.Conversion.SavePng(ms, pdfBytes, page: (Index)(pageOneBased - 1), options: renderOpts);
 #pragma warning restore CA1416
-            ms.Position = 0;
-            var bmp = new Bitmap(ms);
+                return ms.ToArray();
+            });
+
+            using var bmpStream = new MemoryStream(pngBytes);
+            var bmp = new Bitmap(bmpStream);
 
             if (_previewBitmapCache.Count >= 18)
             {
@@ -742,11 +1445,16 @@ public sealed class QuizStudioViewModel
             }
 
             _previewBitmapCache[key] = bmp;
-            return bmp;
         }
         catch
         {
-            return null;
+            // Non-fatal preview error
+        }
+        finally
+        {
+            _pendingPreviewRenders.Remove(key);
+            IsLoadingPreviewPage = _pendingPreviewRenders.Count > 0;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
         }
     }
 
@@ -819,15 +1527,38 @@ public sealed class QuizStudioViewModel
         {
             PdfTotalPages = cached.TotalPages;
             OutlineSections = cached.Sections;
+            RecomputeScopePreview();
         }
         else
         {
-            OutlineSections = PdfQuizGrounder.InspectOutlineSections(SelectedPdfPath, out int totalPages);
-            PdfTotalPages = totalPages;
-            _outlineCache[SelectedPdfPath] = (totalPages, OutlineSections);
+            _ = InspectOutlineInBackgroundAsync(SelectedPdfPath);
         }
+    }
 
-        RecomputeScopePreview();
+    private async Task InspectOutlineInBackgroundAsync(string pdfPath)
+    {
+        IsInspectingPdf = true;
+        try
+        {
+            var (sections, totalPages) = await Task.Run(() =>
+            {
+                var secs = PdfQuizGrounder.InspectOutlineSections(pdfPath, out int pages);
+                return (secs, pages);
+            });
+
+            _outlineCache[pdfPath] = (totalPages, sections);
+            if (string.Equals(SelectedPdfPath, pdfPath, StringComparison.OrdinalIgnoreCase))
+            {
+                PdfTotalPages = totalPages;
+                OutlineSections = sections;
+                RecomputeScopePreview();
+            }
+        }
+        finally
+        {
+            IsInspectingPdf = false;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
+        }
     }
 
     private void RecomputeScopePreview()
@@ -849,5 +1580,7 @@ public sealed class QuizStudioViewModel
 
         if (PreviewScopeIndex >= MatchedScopePages.Count)
             PreviewScopeIndex = 0;
+
+        RefreshLivePromptPreviewIfActive();
     }
 }

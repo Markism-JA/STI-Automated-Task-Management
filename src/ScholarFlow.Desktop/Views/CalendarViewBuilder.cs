@@ -402,7 +402,7 @@ public static class CalendarViewBuilder
             }
         }
 
-        var scroll = new ScrollViewer { Content = listStack };
+        var scroll = UiBuilder.PersistentScrollViewer("calendar-day-list", listStack);
         Grid.SetRow(scroll, 1);
         panel.Children.Add(scroll);
 

@@ -207,6 +207,8 @@ public sealed class ElmsBasinSyncService
         var tasksPath = BasinService.GetCourseTasksPath(basinRoot, course.FolderName);
         var existingTasks = await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct);
         var courseTermMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
+        var courseDir = Path.Combine(basinRoot, course.FolderName);
+        var syllabusPdfPath = Pdf.SyllabusTermParser.FindSyllabusPdfPath(courseDir);
 
         var incomingTasks = new List<TaskItem>();
         foreach (var a in assignments)
@@ -254,6 +256,14 @@ public sealed class ElmsBasinSyncService
                 a.TermHeader,
                 a.Title,
                 a.ParentModuleTitle);
+            if (resolvedTerm is null && syllabusPdfPath is not null)
+            {
+                resolvedTerm = Pdf.SyllabusTermParser.InferTaskTermFromSyllabus(
+                    syllabusPdfPath,
+                    courseDir,
+                    a.Title,
+                    a.ParentModuleTitle);
+            }
 
             var inferredTags = BasinService.InferAcademicTags(a.Title, resolvedTerm, a.Kind.ToString());
 
