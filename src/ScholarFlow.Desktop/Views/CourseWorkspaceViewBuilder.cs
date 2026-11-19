@@ -91,6 +91,33 @@ public static class CourseWorkspaceViewBuilder
         addBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(addBtn);
 
+        var importPdfBtn = UiBuilder.GhostButton(
+            "Import PDFs",
+            MaterialIconKind.FilePlusOutline,
+            async () =>
+            {
+                var top = TopLevel.GetTopLevel(actionWrap);
+                if (top?.StorageProvider is null) return;
+                var files = await top.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+                {
+                    Title = $"Import Study PDFs into {course.Title}",
+                    AllowMultiple = true,
+                    FileTypeFilter =
+                    [
+                        new Avalonia.Platform.Storage.FilePickerFileType("PDF Documents") { Patterns = ["*.pdf"] }
+                    ]
+                });
+                var paths = files
+                    .Select(f => Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f))
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Cast<string>()
+                    .ToList();
+                if (paths.Count > 0)
+                    await vm.ImportPdfsToCourseAsync(course, paths);
+            });
+        importPdfBtn.Margin = new Thickness(0, 0, 6, 6);
+        actionWrap.Children.Add(importPdfBtn);
+
         if (hasMasterPdf)
         {
             var viewPdfBtn = UiBuilder.GhostButton(

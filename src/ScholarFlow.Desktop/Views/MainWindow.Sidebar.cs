@@ -250,9 +250,24 @@ public sealed partial class MainWindow
         // Courses Section
         var coursesStack = new StackPanel { Spacing = 2, Margin = new Thickness(0, 8, 0, 0) };
         if (!compact)
-            coursesStack.Children.Add(UiBuilder.SectionHeader("Courses"));
+        {
+            var coursesHeader = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
+            coursesHeader.Children.Add(UiBuilder.SectionHeader("Courses"));
+            var addCourseBtn = UiBuilder.IconButton(
+                MaterialIconKind.Plus,
+                () => _vm.ToggleAddCourseModal(),
+                14,
+                ThemeService.Brush(ThemeService.TextSecondary)
+            );
+            ToolTip.SetTip(addCourseBtn, "Create a new local course / subject workspace");
+            Grid.SetColumn(addCourseBtn, 1);
+            coursesHeader.Children.Add(addCourseBtn);
+            coursesStack.Children.Add(coursesHeader);
+        }
         else
+        {
             coursesStack.Children.Add(UiBuilder.HairlineDivider(new Thickness(4, 6)));
+        }
 
         foreach (var course in _vm.Courses.Where(c => !c.IsArchived))
         {
@@ -388,22 +403,31 @@ public sealed partial class MainWindow
             {
                 ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto,Auto"),
             };
-            var syncBtn = UiBuilder.GhostButton(
-                _vm.IsSyncing ? "Syncing..." : "Sync eLMS",
-                MaterialIconKind.CloudSyncOutline,
-                async () => await _vm.RunFullSyncAsync()
-            );
+            var syncBtn = _vm.Settings.EnableElmsIntegration
+                ? UiBuilder.GhostButton(
+                    _vm.IsSyncing ? "Syncing..." : "Sync eLMS",
+                    MaterialIconKind.CloudSyncOutline,
+                    async () => await _vm.RunFullSyncAsync()
+                )
+                : UiBuilder.GhostButton(
+                    "Add Course",
+                    MaterialIconKind.FolderPlusOutline,
+                    () => _vm.ToggleAddCourseModal()
+                );
             syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
             bottomRow.Children.Add(syncBtn);
 
-            var pollBtn = UiBuilder.IconButton(
-                MaterialIconKind.Refresh,
-                async () => await _vm.RunFastPollAsync(),
-                14.5
-            );
-            pollBtn.Margin = new Thickness(4, 0, 0, 0);
-            Grid.SetColumn(pollBtn, 1);
-            bottomRow.Children.Add(pollBtn);
+            if (_vm.Settings.EnableElmsIntegration)
+            {
+                var pollBtn = UiBuilder.IconButton(
+                    MaterialIconKind.Refresh,
+                    async () => await _vm.RunFastPollAsync(),
+                    14.5
+                );
+                pollBtn.Margin = new Thickness(4, 0, 0, 0);
+                Grid.SetColumn(pollBtn, 1);
+                bottomRow.Children.Add(pollBtn);
+            }
 
             var themeBtn = UiBuilder.IconButton(
                 ThemeService.CurrentTheme == ThemeMode.Dark

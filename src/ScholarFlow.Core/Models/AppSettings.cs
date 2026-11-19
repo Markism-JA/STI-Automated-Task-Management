@@ -25,9 +25,10 @@ public sealed class AppSettings
     public string? AiApiKey { get; set; }
     public string AiModelName { get; set; } = "gemini-2.5-flash";
 
-    // Desktop Tray, Notifications, Startup & Onboarding
+    // Desktop Tray, Notifications, Startup, Onboarding & eLMS Integration
     public bool MinimizeToTrayOnClose { get; set; } = true;
     public bool EnableDesktopNotifications { get; set; } = true;
     public bool LaunchOnStartup { get; set; }
     public bool HasCompletedOnboarding { get; set; }
+    public bool EnableElmsIntegration { get; set; } = true;
 }

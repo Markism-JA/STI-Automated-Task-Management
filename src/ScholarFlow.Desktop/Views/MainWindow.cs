@@ -345,6 +345,7 @@ public sealed partial class MainWindow : Window
     {
         string targetKind =
             _vm.IsOnboardingOpen ? "Onboarding"
+            : _vm.IsAddCourseModalOpen ? "AddCourse"
             : _vm.IsSettingsModalOpen ? "Settings"
             : _vm.IsQuickAddModalOpen ? "QuickAdd"
             : _vm.IsSearchModalOpen ? "Search"
@@ -398,6 +399,14 @@ public sealed partial class MainWindow : Window
         if (_vm.IsOnboardingOpen)
         {
             backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildOnboardingModal(this, _vm);
+            _modalOverlayContainer.Child = backdrop;
+            _modalOverlayContainer.IsVisible = true;
+            return;
+        }
+
+        if (_vm.IsAddCourseModalOpen)
+        {
+            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildAddCourseModal(_vm);
             _modalOverlayContainer.Child = backdrop;
             _modalOverlayContainer.IsVisible = true;
             return;

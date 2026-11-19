@@ -418,7 +418,7 @@ public sealed class QuizLlmService
             : string.Empty;
 
         return $$"""
-            You are an expert university computer science examiner creating an evidence-grounded academic assessment from a course Master PDF.
+            You are an expert academic examiner creating an evidence-grounded assessment from a course study PDF.
             {{distributionSpec}}{{weakNote}}
 
             CRITICAL RULES:

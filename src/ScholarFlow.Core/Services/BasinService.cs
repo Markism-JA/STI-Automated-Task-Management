@@ -276,6 +276,60 @@ public sealed class BasinService
         return existing;
     }
 
+    /// <summary>
+    /// Creates a local/offline course workspace in courses.json without requiring STI eLMS integration.
+    /// </summary>
+    public async Task<BasinCourseEntry> CreateLocalCourseAsync(
+        string basinRoot,
+        string title,
+        string? customAlias = null,
+        string? courseCode = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Course title cannot be empty.", nameof(title));
+
+        var existing = await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
+        var usedAliases = existing.Select(c => c.Alias).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+
+        var sanitizedFolder = ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(title.Trim(), "").TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(sanitizedFolder))
+            sanitizedFolder = $"Course_{Guid.NewGuid().ToString("N")[..6]}";
+
+        var uniqueFolder = sanitizedFolder;
+        int suffix = 2;
+        while (existing.Any(c => c.FolderName.Equals(uniqueFolder, StringComparison.OrdinalIgnoreCase)))
+        {
+            uniqueFolder = $"{sanitizedFolder}_{suffix++}";
+        }
+
+        var alias = !string.IsNullOrWhiteSpace(customAlias)
+            ? customAlias.Trim().TrimStart('#').ToLowerInvariant()
+            : CourseAliasGenerator.Generate(title.Trim(), usedAliases);
+
+        var entry = new BasinCourseEntry
+        {
+            CourseId = $"local-{Guid.NewGuid():N}"[..14],
+            Title = title.Trim(),
+            FolderName = uniqueFolder,
+            Alias = alias,
+            CourseCode = string.IsNullOrWhiteSpace(courseCode) ? null : courseCode.Trim()
+        };
+
+        existing.Add(entry);
+
+        var courseDir = Path.Combine(basinRoot, entry.FolderName);
+        Directory.CreateDirectory(Path.Combine(courseDir, "ongoing"));
+        Directory.CreateDirectory(Path.Combine(courseDir, "completed"));
+
+        var tasksPath = GetCourseTasksPath(basinRoot, entry.FolderName);
+        if (!File.Exists(tasksPath))
+            await File.WriteAllTextAsync(tasksPath, $"# {entry.Title}\n\n", ct);
+
+        await SaveCoursesAsync(basinRoot, existing, ct);
+        return entry;
+    }
+
     public async Task<IReadOnlyList<TaskItem>> LoadAllTasksAsync(string basinRoot, CancellationToken ct = default)
     {
         var courses = await LoadCoursesAsync(basinRoot, ct);

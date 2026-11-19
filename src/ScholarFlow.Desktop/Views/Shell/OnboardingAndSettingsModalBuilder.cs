@@ -199,6 +199,12 @@ public static class OnboardingAndSettingsModalBuilder
         }
 
         stack.Children.Add(BuildToggleRow(
+            "STI eLMS Integration & Background Sync",
+            "Enable automatic STI eLMS assignment polling and handout syncing. Turn off for a pure offline/local study vault.",
+            vm.Settings.EnableElmsIntegration,
+            () => vm.ToggleElmsIntegrationAsync()));
+
+        stack.Children.Add(BuildToggleRow(
             "Minimize to System Tray on Close",
             "Keep ScholarFlow running in the background when closing the window so eLMS polling and reminders stay active.",
             vm.Settings.MinimizeToTrayOnClose,
@@ -250,6 +256,80 @@ public static class OnboardingAndSettingsModalBuilder
         return new Border
         {
             Width = 540,
+            Background = ThemeService.Brush(ThemeService.BgElevated),
+            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(20, 18),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = stack
+        };
+    }
+
+    public static Control BuildAddCourseModal(MainWindowViewModel vm)
+    {
+        var stack = new StackPanel { Spacing = 12 };
+
+        var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
+        header.Children.Add(new TextBlock
+        {
+            Text = "Create Local Course / Subject",
+            FontSize = 16,
+            FontWeight = FontWeight.Bold,
+            Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        var closeBtn = UiBuilder.IconButton(MaterialIconKind.Close, () => vm.ToggleAddCourseModal(), 16);
+        Grid.SetColumn(closeBtn, 1);
+        header.Children.Add(closeBtn);
+        stack.Children.Add(header);
+        stack.Children.Add(UiBuilder.HairlineDivider());
+
+        var titleBox = new TextBox
+        {
+            Watermark = "Course Title (e.g. Linear Algebra, Organic Chemistry, Ethics)",
+            FontSize = 13
+        };
+        stack.Children.Add(titleBox);
+
+        var row2 = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,*"), ColumnSpacing = 8 };
+        var aliasBox = new TextBox
+        {
+            Watermark = "Short #alias (optional, e.g. math)",
+            FontSize = 12.5
+        };
+        row2.Children.Add(aliasBox);
+
+        var codeBox = new TextBox
+        {
+            Watermark = "Course Code (optional, e.g. MATH101)",
+            FontSize = 12.5
+        };
+        Grid.SetColumn(codeBox, 1);
+        row2.Children.Add(codeBox);
+        stack.Children.Add(row2);
+
+        var actions = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto"), ColumnSpacing = 8 };
+        var cancelBtn = UiBuilder.GhostButton("Cancel", null, () => vm.ToggleAddCourseModal());
+        Grid.SetColumn(cancelBtn, 1);
+        actions.Children.Add(cancelBtn);
+
+        var createBtn = UiBuilder.PrimaryButton(
+            "Create Course",
+            MaterialIconKind.Plus,
+            async () =>
+            {
+                if (!string.IsNullOrWhiteSpace(titleBox.Text))
+                    await vm.CreateLocalCourseAsync(titleBox.Text, aliasBox.Text, codeBox.Text);
+            });
+        Grid.SetColumn(createBtn, 2);
+        actions.Children.Add(createBtn);
+        stack.Children.Add(actions);
+
+        return new Border
+        {
+            Width = 480,
             Background = ThemeService.Brush(ThemeService.BgElevated),
             BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
             BorderThickness = new Thickness(1),

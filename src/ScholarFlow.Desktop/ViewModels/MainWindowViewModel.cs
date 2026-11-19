@@ -117,6 +117,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     public bool IsShortcutsModalOpen { get; private set; }
     public bool IsSettingsModalOpen { get; private set; }
     public bool IsOnboardingOpen { get; private set; }
+    public bool IsAddCourseModalOpen { get; private set; }
     public string OnboardingVaultPath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "Documents",
@@ -196,12 +197,82 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         var resolvedPath = string.IsNullOrWhiteSpace(vaultPath) ? OnboardingVaultPath : vaultPath.Trim();
         IsOnboardingOpen = false;
         Settings.HasCompletedOnboarding = true;
+        Settings.EnableElmsIntegration = runElmsAuth || runInitialSync;
         await AppSettingsStore.SaveAsync(Settings);
 
         await OpenBasinAsync(resolvedPath);
 
         if (runElmsAuth || runInitialSync)
             await RunFullSyncAsync();
+    }
+
+    public void ToggleAddCourseModal()
+    {
+        IsAddCourseModalOpen = !IsAddCourseModalOpen;
+        IsSettingsModalOpen = false;
+        IsSearchModalOpen = false;
+        IsShortcutsModalOpen = false;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public async Task CreateLocalCourseAsync(string title, string? alias, string? courseCode)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(title))
+            return;
+
+        var created = await _basinService.CreateLocalCourseAsync(BasinRoot, title, alias, courseCode);
+        IsAddCourseModalOpen = false;
+        await ReloadBasinDataAsync();
+        SelectCourse(created, showMaterials: true);
+        StatusText = $"Created local course '{created.Title}' (#{created.Alias})";
+        NotifyStateChanged();
+    }
+
+    public async Task ImportPdfsToCourseAsync(BasinCourseEntry course, IReadOnlyList<string> sourcePdfPaths)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || sourcePdfPaths.Count == 0)
+            return;
+
+        var courseDir = Path.Combine(BasinRoot, course.FolderName);
+        Directory.CreateDirectory(courseDir);
+
+        int existingModules = Directory.GetDirectories(courseDir)
+            .Select(Path.GetFileName)
+            .Count(n => n is not null && n.Length >= 3 && char.IsDigit(n[0]) && char.IsDigit(n[1]) && n[2] == '_');
+
+        int copied = 0;
+        foreach (var src in sourcePdfPaths)
+        {
+            if (string.IsNullOrWhiteSpace(src) || !File.Exists(src))
+                continue;
+
+            existingModules++;
+            var stem = Path.GetFileNameWithoutExtension(src);
+            var folderName = $"{existingModules:00}_{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(stem, "").TrimEnd('.')}";
+            var destDir = Path.Combine(courseDir, folderName);
+            Directory.CreateDirectory(destDir);
+            var destPath = Path.Combine(destDir, Path.GetFileName(src));
+            File.Copy(src, destPath, overwrite: true);
+            copied++;
+        }
+
+        if (copied > 0)
+        {
+            await ReloadBasinDataAsync();
+            StatusText = $"Imported {copied} PDF(s) into {course.Title}";
+            NotifyStateChanged();
+        }
+    }
+
+    public async Task ToggleElmsIntegrationAsync()
+    {
+        Settings.EnableElmsIntegration = !Settings.EnableElmsIntegration;
+        await AppSettingsStore.SaveAsync(Settings);
+        if (Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(BasinRoot))
+            _pollingService.Start(BasinRoot, BasinConfig);
+        else
+            _pollingService.Stop();
+        NotifyStateChanged();
     }
 
     public void ToggleSettingsModal()
@@ -270,7 +341,10 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         _watcher.BasinChanged += (_, _) =>
             Dispatcher.UIThread.Post(async () => await ReloadBasinDataAsync());
 
-        _pollingService.Start(BasinRoot, BasinConfig);
+        if (Settings.EnableElmsIntegration)
+            _pollingService.Start(BasinRoot, BasinConfig);
+        else
+            _pollingService.Stop();
     }
 
     public async Task ReloadBasinDataAsync()
@@ -608,6 +682,12 @@ public sealed class MainWindowViewModel : IAsyncDisposable
 
     public bool CloseTopOverlayOrDrawer()
     {
+        if (IsAddCourseModalOpen)
+        {
+            IsAddCourseModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
         if (IsSettingsModalOpen)
         {
             IsSettingsModalOpen = false;
@@ -629,6 +709,12 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         if (IsSearchModalOpen)
         {
             IsSearchModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
+        if (IsAddCourseModalOpen)
+        {
+            IsAddCourseModalOpen = false;
             NotifyStateChanged(UiChangeKind.OverlayOnly);
             return true;
         }
