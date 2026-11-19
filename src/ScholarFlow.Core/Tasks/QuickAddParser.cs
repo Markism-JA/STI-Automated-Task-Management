@@ -40,6 +40,9 @@ public static partial class QuickAddParser
     [GeneratedRegex(@"(?<!\S)(today|tod|tomorrow|tom|tmrw|next\s+week|\+\d+d|next\s+(?:mon|monday|tue|tuesday|wed|wednesday|thu|thursday|fri|friday|sat|saturday|sun|sunday))(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex RelativeDateRegex();
 
+    [GeneratedRegex(@"(?<!\S)(?:at\s+)?((?:[01]?\d|2[0-3]):[0-5]\d(?:\s?[ap]m)?|(?:1[0-2]|[1-9])\s?[ap]m)(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex TimeTokenRegex();
+
     public static ParsedQuickAddResult Parse(
         string input,
         IReadOnlyList<BasinCourseEntry>? courses = null,
@@ -156,6 +159,31 @@ public static partial class QuickAddParser
             });
         }
 
+        TimeOnly? dueTime = null;
+        working = TimeTokenRegex().Replace(working, m =>
+        {
+            if (dueTime is not null)
+                return m.Value;
+
+            if (TryParseTimeToken(m.Groups[1].Value, out var parsedTime))
+            {
+                dueTime = parsedTime;
+                chips.Add(new QuickAddChip("Time", parsedTime.ToString("h:mm tt")));
+                return string.Empty;
+            }
+            return m.Value;
+        });
+
+        if (dueTime.HasValue && !dueDate.HasValue)
+        {
+            dueDate = today;
+            chips.Add(new QuickAddChip("Due", dueDate.Value.ToString("MMM d")));
+        }
+        else if (dueDate.HasValue && !dueTime.HasValue)
+        {
+            dueTime = new TimeOnly(0, 0);
+        }
+
         var cleanTitle = string.Join(' ', working.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
 
         var task = new TaskItem
@@ -164,6 +192,7 @@ public static partial class QuickAddParser
             Priority = priority,
             Difficulty = difficulty,
             DueDate = dueDate,
+            DueTime = dueTime,
             CourseFolder = courseFolder,
             CourseAlias = courseAlias,
             Term = term,
@@ -172,6 +201,21 @@ public static partial class QuickAddParser
         };
 
         return new ParsedQuickAddResult(task, chips);
+    }
+
+    private static bool TryParseTimeToken(string raw, out TimeOnly time)
+    {
+        var normalized = raw.Trim().ToUpperInvariant();
+        if (normalized.EndsWith("AM", StringComparison.Ordinal) || normalized.EndsWith("PM", StringComparison.Ordinal))
+        {
+            // Normalize "2pm" -> "2 PM", "11:59pm" -> "11:59 PM"
+            var suffix = normalized[^2..];
+            var body = normalized[..^2].Trim();
+            normalized = $"{body} {suffix}";
+        }
+
+        string[] formats = ["h:mm tt", "hh:mm tt", "h tt", "hh tt", "HH:mm", "H:mm"];
+        return TimeOnly.TryParseExact(normalized, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out time);
     }
 
     private static BasinCourseEntry? MatchCourse(string tag, IReadOnlyList<BasinCourseEntry>? courses)

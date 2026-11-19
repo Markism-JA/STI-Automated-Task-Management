@@ -94,6 +94,12 @@ public sealed partial class MainWindow
         AddTokenBtn("Tomorrow", MaterialIconKind.CalendarArrowRight, "tomorrow", dateRegex);
         AddTokenBtn("Next week", MaterialIconKind.CalendarWeek, "+7d", dateRegex);
 
+        var timeRegex = @"\b(?:at\s+)?(?:(?:[01]?\d|2[0-3]):[0-5]\d(?:\s?[ap]m)?|(?:1[0-2]|[1-9])\s?[ap]m)\b";
+        AddTokenBtn("12:00 AM", MaterialIconKind.ClockOutline, "12:00am", timeRegex);
+        AddTokenBtn("12:00 PM", MaterialIconKind.ClockOutline, "12:00pm", timeRegex);
+        AddTokenBtn("5:00 PM", MaterialIconKind.ClockOutline, "5:00pm", timeRegex);
+        AddTokenBtn("11:59 PM", MaterialIconKind.ClockOutline, "11:59pm", timeRegex);
+
         var termRegex = @"\b@?(prelims?|midterms?|pre-?finals?|finals?)\b";
         foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
         {

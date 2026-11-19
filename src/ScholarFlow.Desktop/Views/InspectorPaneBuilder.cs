@@ -222,18 +222,29 @@ public static class InspectorPaneBuilder
             VerticalAlignment = VerticalAlignment.Center
         };
 
+        bool suppressTimeEvent = false;
         async Task ApplyTimeInputAsync()
         {
-            var raw = timeBox.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                await vm.SetTaskDueTimeAsync(task, null);
+            if (suppressTimeEvent)
                 return;
-            }
-            if (TimeOnly.TryParse(raw, System.Globalization.CultureInfo.CurrentCulture, out var parsed) ||
-                TimeOnly.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+            suppressTimeEvent = true;
+            try
             {
-                await vm.SetTaskDueTimeAsync(task, parsed);
+                var raw = timeBox.Text?.Trim();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    await vm.SetTaskDueTimeAsync(task, null);
+                    return;
+                }
+                if (TimeOnly.TryParse(raw, System.Globalization.CultureInfo.CurrentCulture, out var parsed) ||
+                    TimeOnly.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+                {
+                    await vm.SetTaskDueTimeAsync(task, parsed);
+                }
+            }
+            finally
+            {
+                suppressTimeEvent = false;
             }
         }
 
@@ -255,8 +266,16 @@ public static class InspectorPaneBuilder
                 null,
                 async () =>
                 {
-                    timeBox.Text = targetTime?.ToString("h:mm tt") ?? string.Empty;
-                    await vm.SetTaskDueTimeAsync(task, targetTime);
+                    suppressTimeEvent = true;
+                    try
+                    {
+                        timeBox.Text = targetTime?.ToString("h:mm tt") ?? string.Empty;
+                        await vm.SetTaskDueTimeAsync(task, targetTime);
+                    }
+                    finally
+                    {
+                        suppressTimeEvent = false;
+                    }
                 },
                 isActive: task.DueTime == targetTime && targetTime.HasValue);
             btn.Margin = new Thickness(0, 0, 4, 4);

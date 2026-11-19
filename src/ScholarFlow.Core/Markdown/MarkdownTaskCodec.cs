@@ -12,6 +12,7 @@ namespace ScholarFlow.Core.Markdown;
 /// </summary>
 public static partial class MarkdownTaskCodec
 {
+    private static readonly SemaphoreSlim FileMutationLock = new(1, 1);
     private static readonly string[] OrderedTerms = ["Prelims", "Midterms", "Prefinals", "Finals"];
 
     [GeneratedRegex(@"^(\s*)- \[([ xX])\]\s+(.*)$", RegexOptions.Compiled)]
@@ -334,7 +335,8 @@ public static partial class MarkdownTaskCodec
             if (basinRoot is not null)
             {
                 var courseFolder = list.FirstOrDefault()?.CourseFolder;
-                await Database.ScholarFlowDatabase.SyncMarkdownFileToDbAsync(basinRoot, filePath, courseFolder, list, ct);
+                var reparsedWithLineNumbers = Parse(content, filePath, courseFolder);
+                await Database.ScholarFlowDatabase.SyncMarkdownFileToDbAsync(basinRoot, filePath, courseFolder, reparsedWithLineNumbers, ct);
             }
         }
     }
@@ -369,24 +371,32 @@ public static partial class MarkdownTaskCodec
         TaskItem updatedTask,
         CancellationToken ct = default)
     {
-        updatedTask.EnsureChildTasksSynced();
-
-        var sourcePath = !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
-            ? updatedTask.SourceMarkdownPath
-            : string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
-                ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
-                : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
-
-        var tasks = (await LoadFileAsync(sourcePath, updatedTask.CourseFolder, ct)).ToList();
-        if (!TryReplaceTaskRecursive(tasks, updatedTask))
+        await FileMutationLock.WaitAsync(ct);
+        try
         {
-            tasks.Add(updatedTask);
-        }
+            updatedTask.EnsureChildTasksSynced();
 
-        var header = string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
-            ? "Inbox"
-            : updatedTask.CourseFolder.Replace('_', ' ');
-        await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+            var sourcePath = !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
+                ? updatedTask.SourceMarkdownPath
+                : string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
+                    ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
+                    : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
+
+            var tasks = (await LoadFileAsync(sourcePath, updatedTask.CourseFolder, ct)).ToList();
+            if (!TryReplaceTaskRecursive(tasks, updatedTask))
+            {
+                tasks.Add(updatedTask);
+            }
+
+            var header = string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
+                ? "Inbox"
+                : updatedTask.CourseFolder.Replace('_', ' ');
+            await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+        }
+        finally
+        {
+            FileMutationLock.Release();
+        }
     }
 
     private static bool TryReplaceTaskRecursive(List<TaskItem> nodes, TaskItem updatedTask)
@@ -403,6 +413,20 @@ public static partial class MarkdownTaskCodec
             {
                 nodes[i].EnsureChildTasksSynced();
                 return true;
+            }
+        }
+
+        // Fallback for non-LMS tasks whose in-memory/SQLite Guid Id differs from file-parsed line Id
+        if (string.IsNullOrWhiteSpace(updatedTask.LmsId) && string.IsNullOrWhiteSpace(updatedTask.ParentTaskId))
+        {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(nodes[i].LmsId) &&
+                    string.Equals(nodes[i].Title.Trim(), updatedTask.Title.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    nodes[i] = updatedTask;
+                    return true;
+                }
             }
         }
 
@@ -453,10 +477,10 @@ public static partial class MarkdownTaskCodec
         if (string.Equals(candidate.Id, target.Id, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // Also match when one ID is prefixed with CourseFolder: (from SQLite) and the other is file-local
-        if (!string.IsNullOrWhiteSpace(target.CourseFolder) &&
-            (string.Equals($"{target.CourseFolder}:{candidate.Id}", target.Id, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(candidate.Id, $"{target.CourseFolder}:{target.Id}", StringComparison.OrdinalIgnoreCase)))
+        // Also match when one ID is prefixed with CourseFolder: or inbox: (from SQLite) and the other is file-local
+        var prefix = string.IsNullOrWhiteSpace(target.CourseFolder) ? "inbox" : target.CourseFolder;
+        if (string.Equals($"{prefix}:{candidate.Id}", target.Id, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(candidate.Id, $"{prefix}:{target.Id}", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
