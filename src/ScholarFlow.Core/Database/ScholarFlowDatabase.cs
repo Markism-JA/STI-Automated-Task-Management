@@ -18,6 +18,11 @@ public static class ScholarFlowDatabase
 {
     private static readonly SemaphoreSlim DbLock = new(1, 1);
 
+    static ScholarFlowDatabase()
+    {
+        SQLitePCL.Batteries_V2.Init();
+    }
+
     public static string GetDatabasePath(string basinRoot) =>
         Path.Combine(BasinService.GetMetaDir(basinRoot), "scholarflow.db");
 
