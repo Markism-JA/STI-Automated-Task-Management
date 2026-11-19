@@ -2,10 +2,12 @@ namespace ScholarFlow.Core.Services;
 
 /// <summary>
 /// Watches a Basin directory for external edits to Markdown task files and ongoing/completed folders,
-/// debouncing rapid filesystem bursts into a single change notification.
+/// debouncing rapid filesystem bursts into a single change notification while ignoring self-writes and SQLite WAL files.
 /// </summary>
 public sealed class BasinWatcher : IDisposable
 {
+    private static long _globalSuppressUntilTicks;
+
     private readonly FileSystemWatcher _watcher;
     private readonly Timer _debounceTimer;
     private readonly object _gate = new();
@@ -13,7 +15,19 @@ public sealed class BasinWatcher : IDisposable
 
     public event EventHandler? BasinChanged;
 
-    public BasinWatcher(string basinRoot, int debounceMs = 150)
+    /// <summary>
+    /// Temporarily suppresses BasinWatcher notifications across the process during app-initiated saves.
+    /// </summary>
+    public static void SuppressGlobal(TimeSpan duration)
+    {
+        var until = DateTime.UtcNow.Add(duration).Ticks;
+        Interlocked.Exchange(ref _globalSuppressUntilTicks, until);
+    }
+
+    public static bool IsSuppressed =>
+        DateTime.UtcNow.Ticks < Interlocked.Read(ref _globalSuppressUntilTicks);
+
+    public BasinWatcher(string basinRoot, int debounceMs = 200)
     {
         if (!Directory.Exists(basinRoot))
             throw new DirectoryNotFoundException($"Basin directory does not exist: {basinRoot}");
@@ -35,8 +49,16 @@ public sealed class BasinWatcher : IDisposable
 
     private void ScheduleIfRelevant(string fullPath, int debounceMs)
     {
+        if (IsSuppressed)
+            return;
+
         if (fullPath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-            fullPath.Contains(".tmp.", StringComparison.OrdinalIgnoreCase))
+            fullPath.Contains(".tmp.", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".db", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".db-wal", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".db-shm", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".db-journal", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith("poll_state.json", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -50,7 +72,7 @@ public sealed class BasinWatcher : IDisposable
 
     private void OnDebounceElapsed()
     {
-        if (!_disposed)
+        if (!_disposed && !IsSuppressed)
             BasinChanged?.Invoke(this, EventArgs.Empty);
     }
 

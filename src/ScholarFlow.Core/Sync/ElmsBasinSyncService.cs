@@ -114,7 +114,7 @@ public sealed class ElmsBasinSyncService
                         elmsCourse.CourseUrl));
                 }
 
-                var upserted = await UpsertCourseAssignmentsAsync(basinRoot, courseEntry, snapshot.Assignments, pollState, notifications, ct);
+                var upserted = await UpsertCourseAssignmentsAsync(basinRoot, courseEntry, snapshot.Assignments, pollState, notifications, ct, snapshot.Lessons);
                 tasksUpserted += upserted;
 
                 if (compileMasterPdfs && config.AutoCompileMasterPdf)
@@ -201,10 +201,12 @@ public sealed class ElmsBasinSyncService
         IReadOnlyList<ElmsAssignment> assignments,
         PollState pollState,
         List<AppNotification> notifications,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<ElmsLesson>? lessons = null)
     {
         var tasksPath = BasinService.GetCourseTasksPath(basinRoot, course.FolderName);
         var existingTasks = await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct);
+        var courseTermMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
 
         var incomingTasks = new List<TaskItem>();
         foreach (var a in assignments)
@@ -212,11 +214,48 @@ public sealed class ElmsBasinSyncService
             var isDone = a.Status is AssignmentStatus.Submitted or AssignmentStatus.Graded;
             var noteSubfolder = isDone ? "completed" : "ongoing";
             var noteFileName = FilenameSanitizer.SanitizeFileName(a.Title, ".md");
+            var assignmentStem = FilenameSanitizer.SanitizeFileName(a.Title, "").TrimEnd('.');
 
-            var linkedFiles = a.AllResources
-                .Where(r => r.Kind is ElmsResourceKind.AssignmentAttachment or ElmsResourceKind.SubmittedArtifact)
+            var instructionFiles = a.Attachments
+                .Where(r => r.Kind == ElmsResourceKind.AssignmentAttachment)
                 .Select(r => r.RelativeTargetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            if (lessons is not null && !string.IsNullOrWhiteSpace(assignmentStem))
+            {
+                foreach (var lesson in lessons)
+                {
+                    bool lessonMatches = lesson.Title.Equals(a.Title, StringComparison.OrdinalIgnoreCase) ||
+                                         lesson.SanitizedFolderName.Equals(assignmentStem, StringComparison.OrdinalIgnoreCase);
+
+                    foreach (var res in lesson.Resources)
+                    {
+                        var resStem = Path.GetFileNameWithoutExtension(res.RelativeTargetPath).TrimEnd('_');
+                        if (lessonMatches || resStem.Equals(assignmentStem, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!instructionFiles.Contains(res.RelativeTargetPath, StringComparer.OrdinalIgnoreCase))
+                                instructionFiles.Add(res.RelativeTargetPath);
+                        }
+                    }
+                }
+            }
+
+            var submissionFiles = a.SubmissionInfo.SubmittedFiles
+                .Where(r => r.Kind == ElmsResourceKind.SubmittedArtifact)
+                .Select(r => r.RelativeTargetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var linkedFiles = new List<string>();
+
+            var resolvedTerm = BasinService.ResolveAcademicTerm(
+                courseTermMap,
+                a.TermHeader,
+                a.Title,
+                a.ParentModuleTitle);
+
+            var inferredTags = BasinService.InferAcademicTags(a.Title, resolvedTerm, a.Kind.ToString());
 
             var priority = ComputeInitialPriority(a);
             var task = new TaskItem
@@ -230,7 +269,13 @@ public sealed class ElmsBasinSyncService
                 Priority = priority,
                 CourseFolder = course.FolderName,
                 CourseAlias = course.Alias,
-                Labels = [a.Kind.ToString().ToLowerInvariant()],
+                Term = resolvedTerm,
+                Section = a.ParentModuleTitle,
+                LmsKind = a.Kind != ElmsAssignmentKind.Unknown ? a.Kind.ToString() : null,
+                WeightPercent = a.WeightPercent,
+                Labels = inferredTags,
+                InstructionFiles = instructionFiles,
+                SubmissionFiles = submissionFiles,
                 LinkedFiles = linkedFiles,
                 NotePath = $"{noteSubfolder}/{noteFileName}",
                 LmsId = a.LmsId,
@@ -245,6 +290,10 @@ public sealed class ElmsBasinSyncService
         }
 
         var merged = MarkdownTaskCodec.MergeLmsTasks(existingTasks, incomingTasks);
+        foreach (var t in merged)
+        {
+            BasinService.EnrichTaskMetadataAndFiles(basinRoot, course, t, courseTermMap);
+        }
         await MarkdownTaskCodec.SaveDocumentAsync(tasksPath, merged, course.Title, ct);
         return incomingTasks.Count;
     }

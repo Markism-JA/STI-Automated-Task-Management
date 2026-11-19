@@ -7,13 +7,18 @@ namespace ScholarFlow.Core.Markdown;
 
 /// <summary>
 /// Losslessly parses and serializes Obsidian-compatible Markdown task lists (tasks.md and inbox.md),
-/// using clean, emoji-free Dataview inline fields ([due::], [done::], [p::], [diff::], [file::], [lms_id::])
-/// while retaining backward-compatible parsing for legacy emoji markers.
+/// using clean, emoji-free Dataview inline fields ([due::], [done::], [p::], [diff::], [term::], [section::],
+/// [attachment::], [submission::], [file::], [lms_id::]) and Term subheadings (### Prelims, ### Midterms, etc.).
 /// </summary>
 public static partial class MarkdownTaskCodec
 {
+    private static readonly string[] OrderedTerms = ["Prelims", "Midterms", "Prefinals", "Finals"];
+
     [GeneratedRegex(@"^(\s*)- \[([ xX])\]\s+(.*)$", RegexOptions.Compiled)]
     private static partial Regex TaskLineRegex();
+
+    [GeneratedRegex(@"^###\s+(.+)$", RegexOptions.Compiled)]
+    private static partial Regex SubheadingRegex();
 
     [GeneratedRegex(@"📅\s*(\d{4}-\d{2}-\d{2})", RegexOptions.Compiled)]
     private static partial Regex LegacyDueDateRegex();
@@ -40,15 +45,46 @@ public static partial class MarkdownTaskCodec
             return tasks;
 
         var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        TaskItem? currentParent = null;
+        var parentStack = new List<(int Indent, TaskItem Task)>();
+        string? currentHeadingTerm = null;
+        string? currentHeadingSection = null;
 
         for (int i = 0; i < lines.Length; i++)
         {
-            var match = TaskLineRegex().Match(lines[i]);
+            var rawLine = lines[i];
+            var trimLine = rawLine.Trim();
+
+            if (trimLine.StartsWith("## ", StringComparison.Ordinal))
+            {
+                parentStack.Clear();
+                currentHeadingTerm = null;
+                currentHeadingSection = null;
+                continue;
+            }
+
+            var subheadingMatch = SubheadingRegex().Match(trimLine);
+            if (subheadingMatch.Success)
+            {
+                parentStack.Clear();
+                var headingText = subheadingMatch.Groups[1].Value.Trim();
+                var normalizedTerm = TaskItem.NormalizeTerm(headingText);
+                if (normalizedTerm is not null)
+                {
+                    currentHeadingTerm = normalizedTerm;
+                    currentHeadingSection = null;
+                }
+                else
+                {
+                    currentHeadingSection = headingText;
+                }
+                continue;
+            }
+
+            var match = TaskLineRegex().Match(rawLine);
             if (!match.Success)
             {
-                if (!string.IsNullOrWhiteSpace(lines[i]))
-                    currentParent = null;
+                if (!string.IsNullOrWhiteSpace(rawLine))
+                    parentStack.Clear();
                 continue;
             }
 
@@ -56,17 +92,37 @@ public static partial class MarkdownTaskCodec
             var isCompleted = match.Groups[2].Value is "x" or "X";
             var body = match.Groups[3].Value.Trim();
 
-            if (indent >= 2 && currentParent is not null)
+            var task = ParseTaskBody(body, isCompleted, sourcePath, i + 1, defaultCourseFolder);
+
+            while (parentStack.Count > 0 && parentStack[^1].Indent >= indent)
+                parentStack.RemoveAt(parentStack.Count - 1);
+
+            if (indent >= 2 && parentStack.Count > 0)
             {
-                var subCompletedDate = ExtractCompletedDate(body, out var cleanSub);
-                currentParent.SubTasks.Add(new TaskSubItem(cleanSub.Trim(), isCompleted, subCompletedDate));
+                var parent = parentStack[^1].Task;
+                task.ParentTaskId = parent.Id;
+                task.CourseFolder ??= parent.CourseFolder;
+                task.CourseAlias ??= parent.CourseAlias;
+                task.Term ??= parent.Term ?? currentHeadingTerm;
+                task.Section ??= parent.Section ?? currentHeadingSection;
+                if (task.Id.StartsWith($"{Path.GetFileName(sourcePath)}:", StringComparison.OrdinalIgnoreCase))
+                    task.Id = $"{parent.Id}:sub-{parent.ChildTasks.Count + 1}";
+
+                parent.ChildTasks.Add(task);
+                parent.SubTasks.Add(new TaskSubItem(task.Title, task.IsCompleted, task.CompletedDate));
+                parentStack.Add((indent, task));
                 continue;
             }
 
-            var task = ParseTaskBody(body, isCompleted, sourcePath, i + 1, defaultCourseFolder);
+            task.Term ??= currentHeadingTerm;
+            task.Section ??= currentHeadingSection;
             tasks.Add(task);
-            currentParent = task;
+            parentStack.Clear();
+            parentStack.Add((indent, task));
         }
+
+        foreach (var root in tasks)
+            root.EnsureChildTasksSynced();
 
         return tasks;
     }
@@ -83,9 +139,14 @@ public static partial class MarkdownTaskCodec
         return Parse(text, filePath, defaultCourseFolder);
     }
 
-    public static string SerializeTask(TaskItem task)
+    public static string SerializeTask(TaskItem task, int indentLevel = 0, TaskItem? parentTask = null)
     {
+        task.EnsureChildTasksSynced();
+
         var sb = new StringBuilder();
+        if (indentLevel > 0)
+            sb.Append(' ', indentLevel * 2);
+
         sb.Append(task.IsCompleted ? "- [x] " : "- [ ] ");
         sb.Append(task.Title.Trim());
 
@@ -104,14 +165,54 @@ public static partial class MarkdownTaskCodec
         if (task.Difficulty is > 1 and <= 5)
             sb.Append($" [diff:: {task.Difficulty}]");
 
-        if (!string.IsNullOrWhiteSpace(task.CourseAlias))
+        var normTerm = TaskItem.NormalizeTerm(task.Term) ?? task.Term?.Trim();
+        var parentTerm = TaskItem.NormalizeTerm(parentTask?.Term) ?? parentTask?.Term?.Trim();
+        if (!string.IsNullOrWhiteSpace(normTerm) &&
+            (parentTask is null || !string.Equals(normTerm, parentTerm, StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.Append($" [term:: {normTerm}]");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.Section) &&
+            (parentTask is null || !string.Equals(task.Section.Trim(), parentTask.Section?.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.Append($" [section:: {task.Section.Trim()}]");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.LmsKind))
+            sb.Append($" [kind:: {task.LmsKind.Trim()}]");
+
+        if (task.WeightPercent.HasValue && task.WeightPercent.Value > 0)
+            sb.Append($" [weight:: {task.WeightPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}]");
+
+        if (!string.IsNullOrWhiteSpace(task.CourseAlias) &&
+            (parentTask is null || !string.Equals(task.CourseAlias.Trim(), parentTask.CourseAlias?.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
             sb.Append($" #{task.CourseAlias.Trim().TrimStart('#')}");
+        }
 
         foreach (var label in task.Labels.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.OrdinalIgnoreCase))
             sb.Append($" @{label.Trim().TrimStart('@')}");
 
+        var emittedAttachments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var att in task.InstructionFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            sb.Append($" [attachment:: {att}]");
+            emittedAttachments.Add(att);
+        }
+
+        var emittedSubmissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var subFile in task.SubmissionFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            sb.Append($" [submission:: {subFile}]");
+            emittedSubmissions.Add(subFile);
+        }
+
         foreach (var file in task.LinkedFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
-            sb.Append($" [file:: {file}]");
+        {
+            if (!emittedAttachments.Contains(file) && !emittedSubmissions.Contains(file))
+                sb.Append($" [file:: {file}]");
+        }
 
         if (!string.IsNullOrWhiteSpace(task.NotePath))
             sb.Append($" [note:: {task.NotePath}]");
@@ -128,13 +229,10 @@ public static partial class MarkdownTaskCodec
         if (!string.IsNullOrWhiteSpace(task.LmsUrl))
             sb.Append($" [lms_url:: {task.LmsUrl}]");
 
-        foreach (var sub in task.SubTasks)
+        foreach (var child in task.ChildTasks)
         {
             sb.AppendLine();
-            sb.Append(sub.IsCompleted ? "  - [x] " : "  - [ ] ");
-            sb.Append(sub.Title.Trim());
-            if (sub.IsCompleted && sub.CompletedDate.HasValue)
-                sb.Append($" [done:: {sub.CompletedDate.Value:yyyy-MM-dd}]");
+            sb.Append(SerializeTask(child, indentLevel + 1, task));
         }
 
         return sb.ToString();
@@ -155,35 +253,115 @@ public static partial class MarkdownTaskCodec
 
         sb.AppendLine("## Ongoing");
         sb.AppendLine();
-        foreach (var task in ongoing)
-            sb.AppendLine(SerializeTask(task));
+        AppendTasksGroupedByTerm(sb, ongoing);
 
         if (completed.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("## Completed");
             sb.AppendLine();
-            foreach (var task in completed)
-                sb.AppendLine(SerializeTask(task));
+            AppendTasksGroupedByTerm(sb, completed);
         }
 
         return sb.ToString().TrimEnd() + "\n";
+    }
+
+    private static void AppendTasksGroupedByTerm(StringBuilder sb, List<TaskItem> items)
+    {
+        bool anyHasTerm = items.Any(t => !string.IsNullOrWhiteSpace(t.Term));
+        if (!anyHasTerm)
+        {
+            foreach (var task in items)
+                sb.AppendLine(SerializeTask(task));
+            return;
+        }
+
+        foreach (var term in OrderedTerms)
+        {
+            var termTasks = items
+                .Where(t => string.Equals(TaskItem.NormalizeTerm(t.Term), term, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (termTasks.Count == 0)
+                continue;
+
+            sb.AppendLine($"### {term}");
+            sb.AppendLine();
+            foreach (var t in termTasks)
+                sb.AppendLine(SerializeTask(t));
+            sb.AppendLine();
+        }
+
+        var uncategorized = items
+            .Where(t => string.IsNullOrWhiteSpace(TaskItem.NormalizeTerm(t.Term)))
+            .ToList();
+        if (uncategorized.Count > 0)
+        {
+            if (items.Count > uncategorized.Count)
+            {
+                sb.AppendLine("### General");
+                sb.AppendLine();
+            }
+            foreach (var t in uncategorized)
+                sb.AppendLine(SerializeTask(t));
+        }
     }
 
     public static async Task SaveDocumentAsync(
         string filePath,
         IEnumerable<TaskItem> tasks,
         string? headerTitle = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool syncToDb = true)
     {
+        var list = tasks.ToList();
+        foreach (var t in list)
+            t.EnsureChildTasksSynced();
+
         var dir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        var content = RenderDocument(tasks, headerTitle);
+        Services.BasinWatcher.SuppressGlobal(TimeSpan.FromMilliseconds(750));
+
+        var content = RenderDocument(list, headerTitle);
         var temp = $"{filePath}.tmp.{Guid.NewGuid():N}";
         await File.WriteAllTextAsync(temp, content, ct);
         File.Move(temp, filePath, overwrite: true);
+
+        if (syncToDb)
+        {
+            var basinRoot = TryResolveBasinRootFromMarkdownPath(filePath);
+            if (basinRoot is not null)
+            {
+                var courseFolder = list.FirstOrDefault()?.CourseFolder;
+                await Database.ScholarFlowDatabase.SyncMarkdownFileToDbAsync(basinRoot, filePath, courseFolder, list, ct);
+            }
+        }
+    }
+
+    private static string? TryResolveBasinRootFromMarkdownPath(string filePath)
+    {
+        try
+        {
+            var full = Path.GetFullPath(filePath);
+            var dir = Path.GetDirectoryName(full);
+            if (string.IsNullOrEmpty(dir))
+                return null;
+
+            var dirName = Path.GetFileName(dir);
+            if (dirName.Equals(".scholarflow", StringComparison.OrdinalIgnoreCase))
+                return Path.GetDirectoryName(dir);
+
+            var parent = Path.GetDirectoryName(dir);
+            if (!string.IsNullOrEmpty(parent) && Directory.Exists(Path.Combine(parent, ".scholarflow")))
+                return parent;
+        }
+        catch
+        {
+            // Ignore path resolution errors
+        }
+
+        return null;
     }
 
     public static async Task UpdateTaskInFileAsync(
@@ -191,6 +369,8 @@ public static partial class MarkdownTaskCodec
         TaskItem updatedTask,
         CancellationToken ct = default)
     {
+        updatedTask.EnsureChildTasksSynced();
+
         var sourcePath = !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
             ? updatedTask.SourceMarkdownPath
             : string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
@@ -198,20 +378,35 @@ public static partial class MarkdownTaskCodec
                 : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
 
         var tasks = (await LoadFileAsync(sourcePath, updatedTask.CourseFolder, ct)).ToList();
-        var idx = tasks.FindIndex(t =>
-            (!string.IsNullOrWhiteSpace(updatedTask.LmsId) && string.Equals(t.LmsId, updatedTask.LmsId, StringComparison.OrdinalIgnoreCase)) ||
-            (t.LineNumber == updatedTask.LineNumber && t.LineNumber > 0) ||
-            t.Id == updatedTask.Id);
-
-        if (idx >= 0)
-            tasks[idx] = updatedTask;
-        else
+        if (!TryReplaceTaskRecursive(tasks, updatedTask))
+        {
             tasks.Add(updatedTask);
+        }
 
         var header = string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
             ? "Inbox"
             : updatedTask.CourseFolder.Replace('_', ' ');
-        await SaveDocumentAsync(sourcePath, tasks, header, ct);
+        await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+    }
+
+    private static bool TryReplaceTaskRecursive(List<TaskItem> nodes, TaskItem updatedTask)
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (IsMatchingTaskIdentity(nodes[i], updatedTask))
+            {
+                nodes[i] = updatedTask;
+                return true;
+            }
+
+            if (nodes[i].ChildTasks.Count > 0 && TryReplaceTaskRecursive(nodes[i].ChildTasks, updatedTask))
+            {
+                nodes[i].EnsureChildTasksSynced();
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static async Task DeleteTaskFromFileAsync(
@@ -226,20 +421,61 @@ public static partial class MarkdownTaskCodec
                 : Path.Combine(basinRoot, targetTask.CourseFolder, "tasks.md");
 
         var tasks = (await LoadFileAsync(sourcePath, targetTask.CourseFolder, ct)).ToList();
-        tasks.RemoveAll(t =>
-            (!string.IsNullOrWhiteSpace(targetTask.LmsId) && string.Equals(t.LmsId, targetTask.LmsId, StringComparison.OrdinalIgnoreCase)) ||
-            (t.LineNumber == targetTask.LineNumber && t.Title.Equals(targetTask.Title, StringComparison.OrdinalIgnoreCase)) ||
-            t.Id == targetTask.Id);
+        RemoveTaskRecursive(tasks, targetTask);
 
         var header = string.IsNullOrWhiteSpace(targetTask.CourseFolder)
             ? "Inbox"
             : targetTask.CourseFolder.Replace('_', ' ');
-        await SaveDocumentAsync(sourcePath, tasks, header, ct);
+        await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+    }
+
+    private static void RemoveTaskRecursive(List<TaskItem> nodes, TaskItem targetTask)
+    {
+        nodes.RemoveAll(t => IsMatchingTaskIdentity(t, targetTask));
+        foreach (var node in nodes)
+        {
+            if (node.ChildTasks.Count > 0)
+            {
+                RemoveTaskRecursive(node.ChildTasks, targetTask);
+                node.EnsureChildTasksSynced();
+            }
+        }
+    }
+
+    internal static bool IsMatchingTaskIdentity(TaskItem candidate, TaskItem target)
+    {
+        if (!string.IsNullOrWhiteSpace(target.LmsId) &&
+            string.Equals(candidate.LmsId, target.LmsId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(candidate.Id, target.Id, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Also match when one ID is prefixed with CourseFolder: (from SQLite) and the other is file-local
+        if (!string.IsNullOrWhiteSpace(target.CourseFolder) &&
+            (string.Equals($"{target.CourseFolder}:{candidate.Id}", target.Id, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(candidate.Id, $"{target.CourseFolder}:{target.Id}", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (candidate.LineNumber == target.LineNumber && target.LineNumber > 0)
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(target.ParentTaskId) &&
+            string.Equals(candidate.Title, target.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Idempotently merges incoming LMS tasks into an existing tasks list by [lms_id:: ...],
-    /// preserving user-added subtasks, difficulty, labels, and manual [x] completion state.
+    /// preserving user-added subtasks, difficulty, custom labels, and manual [x] completion state.
     /// </summary>
     public static List<TaskItem> MergeLmsTasks(
         IEnumerable<TaskItem> existingTasks,
@@ -258,12 +494,34 @@ public static partial class MarkdownTaskCodec
                 existing.Title = incoming.Title;
                 existing.DueDate = incoming.DueDate ?? existing.DueDate;
                 existing.DueTime = incoming.DueTime ?? existing.DueTime;
+                existing.Term = incoming.Term ?? existing.Term;
+                existing.Section = incoming.Section ?? existing.Section;
+                existing.LmsKind = incoming.LmsKind ?? existing.LmsKind;
+                existing.WeightPercent = incoming.WeightPercent ?? existing.WeightPercent;
                 existing.LmsStatus = incoming.LmsStatus;
                 existing.LmsScore = incoming.LmsScore;
                 existing.LmsUrl = incoming.LmsUrl ?? existing.LmsUrl;
                 existing.NotePath = incoming.NotePath ?? existing.NotePath;
                 existing.CourseAlias ??= incoming.CourseAlias;
                 existing.CourseFolder ??= incoming.CourseFolder;
+
+                foreach (var lbl in incoming.Labels)
+                {
+                    if (!existing.Labels.Contains(lbl, StringComparer.OrdinalIgnoreCase))
+                        existing.Labels.Add(lbl);
+                }
+
+                foreach (var att in incoming.InstructionFiles)
+                {
+                    if (!existing.InstructionFiles.Contains(att, StringComparer.OrdinalIgnoreCase))
+                        existing.InstructionFiles.Add(att);
+                }
+
+                foreach (var sub in incoming.SubmissionFiles)
+                {
+                    if (!existing.SubmissionFiles.Contains(sub, StringComparer.OrdinalIgnoreCase))
+                        existing.SubmissionFiles.Add(sub);
+                }
 
                 foreach (var f in incoming.LinkedFiles)
                 {
@@ -322,7 +580,11 @@ public static partial class MarkdownTaskCodec
         else if (working.Contains("🔽")) { priority = TaskPriority.P4; working = working.Replace("🔽", ""); }
 
         int difficulty = 1;
+        string? term = null, section = null, lmsKind = null;
+        double? weightPercent = null;
         string? lmsId = null, lmsStatus = null, lmsScore = null, lmsUrl = null, notePath = null;
+        var instructionFiles = new List<string>();
+        var submissionFiles = new List<string>();
         var linkedFiles = new List<string>();
 
         working = InlineFieldRegex().Replace(working, m =>
@@ -345,6 +607,24 @@ public static partial class MarkdownTaskCodec
                     break;
                 case "diff" when int.TryParse(val, out var d):
                     difficulty = Math.Clamp(d, 1, 5);
+                    break;
+                case "term":
+                    term = TaskItem.NormalizeTerm(val) ?? val;
+                    break;
+                case "section":
+                    section = val;
+                    break;
+                case "kind":
+                    lmsKind = val;
+                    break;
+                case "weight" when double.TryParse(val.TrimEnd('%'), NumberStyles.Any, CultureInfo.InvariantCulture, out var w):
+                    weightPercent = w;
+                    break;
+                case "attachment":
+                    instructionFiles.Add(val);
+                    break;
+                case "submission":
+                    submissionFiles.Add(val);
                     break;
                 case "file":
                     linkedFiles.Add(val);
@@ -378,7 +658,9 @@ public static partial class MarkdownTaskCodec
         var labels = new List<string>();
         working = LabelTagRegex().Replace(working, m =>
         {
-            labels.Add(m.Groups[1].Value);
+            var lbl = m.Groups[1].Value;
+            labels.Add(lbl);
+            term ??= TaskItem.NormalizeTerm(lbl);
             return string.Empty;
         });
 
@@ -396,7 +678,13 @@ public static partial class MarkdownTaskCodec
             Difficulty = difficulty,
             CourseFolder = defaultCourseFolder,
             CourseAlias = courseAlias,
+            Term = term,
+            Section = section,
+            LmsKind = lmsKind,
+            WeightPercent = weightPercent,
             Labels = labels,
+            InstructionFiles = instructionFiles,
+            SubmissionFiles = submissionFiles,
             LinkedFiles = linkedFiles,
             NotePath = notePath,
             LmsId = lmsId,

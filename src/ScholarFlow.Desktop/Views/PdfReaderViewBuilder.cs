@@ -49,16 +49,14 @@ public static class PdfReaderViewBuilder
             VerticalAlignment = VerticalAlignment.Center
         };
 
+        var backLabel = vm.PdfReturnTask is not null
+            ? $"Back to Task"
+            : "Back";
+
         leftGroup.Children.Add(UiBuilder.GhostButton(
-            "Back",
+            backLabel,
             MaterialIconKind.ArrowLeft,
-            () =>
-            {
-                if (vm.ActiveCourse is not null)
-                    vm.SelectCourse(vm.ActiveCourse, showMaterials: true);
-                else
-                    vm.SelectSmartView(vm.ActiveSmartView);
-            }));
+            () => vm.ReturnFromPdfReader()));
 
         if (reader.BookmarkRoots.Count > 0)
         {

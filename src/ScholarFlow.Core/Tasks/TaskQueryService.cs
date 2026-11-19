@@ -10,11 +10,12 @@ public enum SmartViewKind
     All,
     Completed,
     Course,
-    Label
+    Label,
+    Term
 }
 
 /// <summary>
-/// Provides Todoist-style smart views and scans for unregistered files inside ongoing/ folders.
+/// Provides Todoist-style smart views, term/label filtering, and scans for unregistered files inside ongoing/ folders.
 /// </summary>
 public static class TaskQueryService
 {
@@ -23,7 +24,8 @@ public static class TaskQueryService
         SmartViewKind view,
         string? targetValue = null,
         string? searchQuery = null,
-        DateOnly? todayOverride = null)
+        DateOnly? todayOverride = null,
+        string? termFilter = null)
     {
         var today = todayOverride ?? DateOnly.FromDateTime(DateTime.Today);
 
@@ -35,8 +37,14 @@ public static class TaskQueryService
             SmartViewKind.Completed => allTasks.Where(t => t.IsCompleted),
             SmartViewKind.Course => allTasks.Where(t => !t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
             SmartViewKind.Label => allTasks.Where(t => !t.IsCompleted && t.Labels.Contains(targetValue ?? "", StringComparer.OrdinalIgnoreCase)),
+            SmartViewKind.Term => allTasks.Where(t => !t.IsCompleted && MatchesTerm(t, targetValue)),
             _ => allTasks.Where(t => !t.IsCompleted)
         };
+
+        if (!string.IsNullOrWhiteSpace(termFilter))
+        {
+            query = query.Where(t => MatchesTerm(t, termFilter));
+        }
 
         if (!string.IsNullOrWhiteSpace(searchQuery))
         {
@@ -45,6 +53,8 @@ public static class TaskQueryService
                 t.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                 (t.CourseFolder?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (t.CourseAlias?.Contains(term.TrimStart('#'), StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.Term?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.Section?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 t.Labels.Any(l => l.Contains(term.TrimStart('@'), StringComparison.OrdinalIgnoreCase)));
         }
 
@@ -55,6 +65,19 @@ public static class TaskQueryService
                 : query.OrderByDescending(t => UrgencyCalculator.CalculateScore(t, today)).ThenBy(t => t.DueDate).ToList();
     }
 
+    public static bool MatchesTerm(TaskItem task, string? expectedTerm)
+    {
+        var normalizedExpected = TaskItem.NormalizeTerm(expectedTerm);
+        if (string.IsNullOrEmpty(normalizedExpected))
+            return true;
+
+        var taskTerm = TaskItem.NormalizeTerm(task.Term);
+        if (string.Equals(taskTerm, normalizedExpected, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return task.Labels.Any(l => string.Equals(TaskItem.NormalizeTerm(l), normalizedExpected, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static IReadOnlyList<UnregisteredOngoingFile> FindUnregisteredOngoingFiles(
         string basinRoot,
         IReadOnlyList<BasinCourseEntry> courses,
@@ -63,7 +86,7 @@ public static class TaskQueryService
         var trackedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in allTasks)
         {
-            foreach (var f in t.LinkedFiles)
+            foreach (var f in t.AllFiles)
                 trackedFiles.Add(Path.GetFileName(f));
             if (!string.IsNullOrWhiteSpace(t.NotePath))
                 trackedFiles.Add(Path.GetFileName(t.NotePath));
@@ -79,7 +102,7 @@ public static class TaskQueryService
             foreach (var filePath in Directory.EnumerateFiles(ongoingDir))
             {
                 var name = Path.GetFileName(filePath);
-                if (name.StartsWith('.'))
+                if (name.StartsWith('.') || name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 if (trackedFiles.Contains(name))
@@ -93,7 +116,7 @@ public static class TaskQueryService
                     RelativePath: $"ongoing/{name}",
                     FullPath: filePath,
                     SizeBytes: info.Length,
-                    LastModifiedAt: info.LastWriteTimeUtc));
+                    DateTimeOffset.FromFileTime(info.LastWriteTimeUtc.ToFileTimeUtc())));
             }
         }
 

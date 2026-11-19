@@ -44,6 +44,8 @@ public sealed class MainWindow : Window
     private string _mountedModalKind = string.Empty;
     private bool _suppressTextCallbacks;
     private bool _lastAutoSidebarCollapse;
+    private Vector _sidebarScrollOffset;
+    private Vector _taskListScrollOffset;
 
     public MainWindow(MainWindowViewModel vm)
     {
@@ -453,7 +455,60 @@ public sealed class MainWindow : Window
                 compact));
         }
 
-        var coursesScroll = new ScrollViewer { Content = coursesStack };
+        // Academic Terms Quick-Filter Section in Sidebar
+        if (!compact)
+        {
+            coursesStack.Children.Add(UiBuilder.SectionHeader("Academic Terms"));
+            foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+            {
+                var capturedTerm = termName;
+                int termCount = _vm.AllTasks.Count(t => !t.IsCompleted && TaskQueryService.MatchesTerm(t, capturedTerm));
+                bool isTermActive = string.Equals(_vm.ActiveTermFilter, capturedTerm, StringComparison.OrdinalIgnoreCase);
+
+                coursesStack.Children.Add(BuildNavButton(
+                    capturedTerm,
+                    MaterialIconKind.SchoolOutline,
+                    termCount,
+                    isTermActive,
+                    () => _vm.SelectTermView(capturedTerm),
+                    compact: false));
+            }
+
+            // Custom Tags (@) Section in Sidebar
+            var customLabels = _vm.AllKnownLabels
+                .Where(l => TaskItem.NormalizeTerm(l) is null)
+                .ToList();
+
+            if (customLabels.Count > 0)
+            {
+                coursesStack.Children.Add(UiBuilder.SectionHeader("Tags"));
+                foreach (var lbl in customLabels)
+                {
+                    var capturedLbl = lbl;
+                    int lblCount = _vm.AllTasks.Count(t => !t.IsCompleted && t.Labels.Contains(capturedLbl, StringComparer.OrdinalIgnoreCase));
+                    bool isLblActive = _vm.ActiveMode == WorkspaceTabMode.TaskList &&
+                                       _vm.ActiveSmartView == SmartViewKind.Label &&
+                                       string.Equals(_vm.ActiveLabelFilter, capturedLbl, StringComparison.OrdinalIgnoreCase);
+
+                    coursesStack.Children.Add(BuildNavButton(
+                        $"@{capturedLbl}",
+                        MaterialIconKind.TagOutline,
+                        lblCount,
+                        isLblActive,
+                        () => _vm.SelectLabelView(capturedLbl),
+                        compact: false));
+                }
+            }
+        }
+
+        var savedSidebarOffset = _sidebarScrollOffset;
+        var coursesScroll = new ScrollViewer
+        {
+            Content = coursesStack,
+            Offset = savedSidebarOffset
+        };
+        coursesScroll.ScrollChanged += (_, _) => _sidebarScrollOffset = coursesScroll.Offset;
+        Dispatcher.UIThread.Post(() => coursesScroll.Offset = savedSidebarOffset, DispatcherPriority.Loaded);
         Grid.SetRow(coursesScroll, 2);
         grid.Children.Add(coursesScroll);
 
@@ -621,9 +676,18 @@ public sealed class MainWindow : Window
             };
 
             var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Bottom };
+            var headingText = vm.ActiveSmartView switch
+            {
+                SmartViewKind.All => "All Active",
+                SmartViewKind.Label when !string.IsNullOrWhiteSpace(vm.ActiveLabelFilter) => $"@{vm.ActiveLabelFilter}",
+                _ => vm.ActiveSmartView.ToString()
+            };
+            if (!string.IsNullOrWhiteSpace(vm.ActiveTermFilter))
+                headingText += $" · {vm.ActiveTermFilter}";
+
             titleLeft.Children.Add(new TextBlock
             {
-                Text = vm.ActiveSmartView == SmartViewKind.All ? "All Active" : vm.ActiveSmartView.ToString(),
+                Text = headingText,
                 FontSize = 22,
                 FontWeight = FontWeight.Bold,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary)
@@ -659,6 +723,61 @@ public sealed class MainWindow : Window
 
             stack.Children.Add(headerGrid);
         }
+
+        // Academic Term Filter & Grouping Bar
+        var filterBar = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("*,Auto"),
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+
+        var termPills = new WrapPanel { Orientation = Orientation.Horizontal };
+        var allTermsBtn = UiBuilder.GhostButton(
+            "All Terms",
+            null,
+            () => vm.SelectTermView(null),
+            isActive: string.IsNullOrEmpty(vm.ActiveTermFilter));
+        allTermsBtn.Margin = new Thickness(0, 0, 4, 4);
+        termPills.Children.Add(allTermsBtn);
+
+        foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+        {
+            var capturedTerm = termName;
+            bool isTermActive = string.Equals(vm.ActiveTermFilter, capturedTerm, StringComparison.OrdinalIgnoreCase);
+            var tBtn = UiBuilder.GhostButton(
+                capturedTerm,
+                null,
+                () => vm.SelectTermView(capturedTerm),
+                isActive: isTermActive);
+            tBtn.Margin = new Thickness(0, 0, 4, 4);
+            termPills.Children.Add(tBtn);
+        }
+        filterBar.Children.Add(termPills);
+
+        var effectiveGrouping = vm.ActiveGrouping == TaskGroupingMode.Default
+            ? (isCourseSubView ? TaskGroupingMode.Term : TaskGroupingMode.DueDate)
+            : vm.ActiveGrouping;
+
+        var groupPills = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Top };
+        groupPills.Children.Add(UiBuilder.GhostButton(
+            "By Term",
+            MaterialIconKind.SchoolOutline,
+            () => vm.SetGroupingMode(TaskGroupingMode.Term),
+            isActive: effectiveGrouping == TaskGroupingMode.Term));
+        groupPills.Children.Add(UiBuilder.GhostButton(
+            "By Date",
+            MaterialIconKind.CalendarBlankOutline,
+            () => vm.SetGroupingMode(TaskGroupingMode.DueDate),
+            isActive: effectiveGrouping == TaskGroupingMode.DueDate));
+        groupPills.Children.Add(UiBuilder.GhostButton(
+            "By Priority",
+            MaterialIconKind.FlagOutline,
+            () => vm.SetGroupingMode(TaskGroupingMode.Priority),
+            isActive: effectiveGrouping == TaskGroupingMode.Priority));
+
+        Grid.SetColumn(groupPills, 1);
+        filterBar.Children.Add(groupPills);
+        stack.Children.Add(filterBar);
 
         // Unregistered Ongoing Files Banner (quiet, compact)
         var relevantUnregistered = vm.ActiveCourse is not null
@@ -738,7 +857,7 @@ public sealed class MainWindow : Window
         else
         {
             var today = DateOnly.FromDateTime(DateTime.Today);
-            var groups = GroupTasksTodoistStyle(vm.VisibleTasks, today, vm.ActiveSmartView);
+            var groups = GroupTasksTodoistStyle(vm.VisibleTasks, today, vm.ActiveSmartView, effectiveGrouping);
 
             foreach (var (sectionTitle, sectionTasks, isUrgentSection) in groups)
             {
@@ -805,16 +924,63 @@ public sealed class MainWindow : Window
             stack.Children.Add(inlineAddBtn);
         }
 
-        return new ScrollViewer { Content = stack };
+        var savedTaskListOffset = _taskListScrollOffset;
+        var taskListScroll = new ScrollViewer
+        {
+            Content = stack,
+            Offset = savedTaskListOffset
+        };
+        taskListScroll.ScrollChanged += (_, _) => _taskListScrollOffset = taskListScroll.Offset;
+        Dispatcher.UIThread.Post(() => taskListScroll.Offset = savedTaskListOffset, DispatcherPriority.Loaded);
+        return taskListScroll;
     }
 
     private static List<(string Title, List<TaskItem> Tasks, bool IsUrgent)> GroupTasksTodoistStyle(
         IReadOnlyList<TaskItem> tasks,
         DateOnly today,
-        SmartViewKind viewKind)
+        SmartViewKind viewKind,
+        TaskGroupingMode groupingMode)
     {
-        if (viewKind == SmartViewKind.Completed)
+        if (viewKind == SmartViewKind.Completed && groupingMode == TaskGroupingMode.DueDate)
             return [("Completed", tasks.ToList(), false)];
+
+        if (groupingMode == TaskGroupingMode.Term)
+        {
+            var termGroups = new List<(string Title, List<TaskItem> Tasks, bool IsUrgent)>();
+            foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+            {
+                var matched = tasks.Where(t => TaskQueryService.MatchesTerm(t, termName)).ToList();
+                if (matched.Count > 0)
+                    termGroups.Add((termName, matched, false));
+            }
+
+            var uncategorized = tasks
+                .Where(t => string.IsNullOrWhiteSpace(TaskItem.NormalizeTerm(t.Term)) &&
+                            !t.Labels.Any(l => TaskItem.NormalizeTerm(l) is not null))
+                .ToList();
+            if (uncategorized.Count > 0)
+                termGroups.Add(("General / Uncategorized", uncategorized, false));
+
+            return termGroups;
+        }
+
+        if (groupingMode == TaskGroupingMode.Priority)
+        {
+            var priGroups = new List<(string Title, List<TaskItem> Tasks, bool IsUrgent)>();
+            foreach (var (p, label, urgent) in new[]
+                     {
+                         (TaskPriority.P1, "Priority 1 — Urgent", true),
+                         (TaskPriority.P2, "Priority 2 — High", false),
+                         (TaskPriority.P3, "Priority 3 — Medium", false),
+                         (TaskPriority.P4, "Priority 4 — Normal", false)
+                     })
+            {
+                var matched = tasks.Where(t => t.Priority == p).ToList();
+                if (matched.Count > 0)
+                    priGroups.Add((label, matched, urgent));
+            }
+            return priGroups;
+        }
 
         var overdue = new List<TaskItem>();
         var dueToday = new List<TaskItem>();
@@ -906,16 +1072,22 @@ public sealed class MainWindow : Window
         centerStack.Children.Add(titleBlock);
 
         var subParts = new List<string>();
-        if (task.SubTasks.Count > 0)
-            subParts.Add($"{task.SubTasks.Count(s => s.IsCompleted)}/{task.SubTasks.Count} subtasks");
         if (!string.IsNullOrWhiteSpace(task.LmsScore))
             subParts.Add($"Score: {task.LmsScore}");
         else if (!string.IsNullOrWhiteSpace(task.LmsStatus) && !task.LmsStatus.Equals("Pending", StringComparison.OrdinalIgnoreCase))
             subParts.Add(task.LmsStatus);
-        if (task.LinkedFiles.Count > 0)
-            subParts.Add($"{task.LinkedFiles.Count} file(s)");
-        foreach (var lbl in task.Labels.Where(l => !l.Equals("assignment", StringComparison.OrdinalIgnoreCase)))
+        if (task.InstructionFiles.Count > 0)
+            subParts.Add($"{task.InstructionFiles.Count} attachment(s)");
+        if (task.SubmissionFiles.Count > 0)
+            subParts.Add($"{task.SubmissionFiles.Count} submission(s)");
+        foreach (var lbl in task.Labels.Where(l =>
+                     !l.Equals("assignment", StringComparison.OrdinalIgnoreCase) &&
+                     !l.Equals("freeform", StringComparison.OrdinalIgnoreCase) &&
+                     !l.Equals("dropbox", StringComparison.OrdinalIgnoreCase) &&
+                     TaskItem.NormalizeTerm(l) is null))
+        {
             subParts.Add($"@{lbl}");
+        }
 
         if (subParts.Count > 0)
         {
@@ -931,11 +1103,11 @@ public sealed class MainWindow : Window
         Grid.SetColumn(centerStack, 1);
         rowGrid.Children.Add(centerStack);
 
-        // 3. Right Minimal Metadata (Hover Quick Actions + Due Date + Quiet #Course Tag)
+        // 3. Right Minimal Metadata (Hover Actions + Subtasks Toggle + Attachment PDF Chip + Term Pill + Due Date + #Course)
         var rightRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center
         };
 
@@ -947,14 +1119,6 @@ public sealed class MainWindow : Window
             IsVisible = isSelected,
             VerticalAlignment = VerticalAlignment.Center
         };
-
-        if (task.LinkedFiles.Count > 0 || !string.IsNullOrWhiteSpace(task.NotePath))
-        {
-            hoverActions.Children.Add(UiBuilder.IconButton(
-                MaterialIconKind.FileDocumentOutline,
-                () => vm.OpenPrimaryTaskFileOrNote(task),
-                14));
-        }
 
         if (!string.IsNullOrWhiteSpace(task.LmsUrl) || !string.IsNullOrWhiteSpace(task.LmsId))
         {
@@ -970,6 +1134,45 @@ public sealed class MainWindow : Window
             14));
 
         rightRow.Children.Add(hoverActions);
+
+        // Inline Subtasks Expand/Collapse Button
+        task.EnsureChildTasksSynced();
+        if (task.ChildTasks.Count > 0)
+        {
+            int doneSubs = task.ChildTasks.Count(s => s.IsCompleted);
+            rightRow.Children.Add(UiBuilder.GhostButton(
+                $"{doneSubs}/{task.ChildTasks.Count}",
+                task.IsSubtasksExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight,
+                () => vm.ToggleTaskSubtasksExpanded(task)));
+        }
+
+        // Direct Attachment / Submission PDF Viewer Chip
+        var primaryPdf = task.PrimaryPdfFile;
+        if (!string.IsNullOrWhiteSpace(primaryPdf))
+        {
+            rightRow.Children.Add(UiBuilder.GhostButton(
+                "PDF",
+                MaterialIconKind.FilePdfBox,
+                () => vm.OpenTaskFile(task, primaryPdf)));
+        }
+        else if (task.AllFiles.Count > 0)
+        {
+            rightRow.Children.Add(UiBuilder.GhostButton(
+                "File",
+                MaterialIconKind.Paperclip,
+                () => vm.OpenTaskFile(task, task.AllFiles[0])));
+        }
+
+        // Academic Term Badge
+        var normTerm = TaskItem.NormalizeTerm(task.Term);
+        if (!string.IsNullOrWhiteSpace(normTerm))
+        {
+            rightRow.Children.Add(UiBuilder.Pill(
+                normTerm,
+                ThemeService.Brush(ThemeService.TextSecondary),
+                ThemeService.Brush(ThemeService.BgElevated),
+                fontSize: 10.5));
+        }
 
         if (task.DueDate.HasValue)
         {
@@ -1008,6 +1211,133 @@ public sealed class MainWindow : Window
         Grid.SetColumn(rightRow, 2);
         rowGrid.Children.Add(rightRow);
 
+        var rowContainer = new StackPanel { Spacing = 4 };
+        rowContainer.Children.Add(rowGrid);
+
+        // Inline Nested Subtasks Tree directly under the parent task row (First-Class Child TaskItems)
+        task.EnsureChildTasksSynced();
+        if (task.ChildTasks.Count > 0 && task.IsSubtasksExpanded)
+        {
+            var subTreeStack = new StackPanel
+            {
+                Spacing = 2,
+                Margin = new Thickness(28, 4, 4, 2)
+            };
+
+            for (int i = 0; i < task.ChildTasks.Count; i++)
+            {
+                int subIdx = i;
+                var child = task.ChildTasks[i];
+                bool isChildSelected = _vm.SelectedTask?.Id == child.Id;
+
+                var childRow = new Grid
+                {
+                    ColumnDefinitions = ColumnDefinitions.Parse("Auto,*")
+                };
+
+                var checkSubBtn = new Button
+                {
+                    Content = UiBuilder.Icon(
+                        child.IsCompleted ? MaterialIconKind.CheckCircle : MaterialIconKind.CircleOutline,
+                        14.5,
+                        child.IsCompleted ? ThemeService.Brush(ThemeService.SuccessFg) : ThemeService.PriorityBrush(child.Priority)),
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(4, 2.5),
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                checkSubBtn.Click += async (_, e) =>
+                {
+                    e.Handled = true;
+                    await vm.ToggleSubtaskAsync(task, subIdx);
+                };
+                childRow.Children.Add(checkSubBtn);
+
+                var childInfoStack = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 7,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                childInfoStack.Children.Add(new TextBlock
+                {
+                    Text = child.Title,
+                    FontSize = 12,
+                    FontWeight = isChildSelected ? FontWeight.SemiBold : FontWeight.Normal,
+                    Foreground = child.IsCompleted
+                        ? ThemeService.Brush(ThemeService.TextMuted)
+                        : isChildSelected
+                            ? ThemeService.Brush(ThemeService.AccentPrimary)
+                            : ThemeService.Brush(ThemeService.TextSecondary),
+                    TextDecorations = child.IsCompleted ? TextDecorations.Strikethrough : null,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+
+                if (child.DueDate.HasValue)
+                {
+                    childInfoStack.Children.Add(new TextBlock
+                    {
+                        Text = child.DueDate.Value.ToString("MMM d"),
+                        FontSize = 11,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                if (child.Priority != TaskPriority.P4)
+                {
+                    childInfoStack.Children.Add(new TextBlock
+                    {
+                        Text = $"P{(int)child.Priority}",
+                        FontSize = 10.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.PriorityBrush(child.Priority),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                foreach (var lbl in child.Labels.Take(2))
+                {
+                    childInfoStack.Children.Add(new TextBlock
+                    {
+                        Text = $"@{lbl}",
+                        FontSize = 10.5,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                var selectChildBtn = new Button
+                {
+                    Content = childInfoStack,
+                    Background = isChildSelected ? ThemeService.Brush(ThemeService.BgHover) : Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(6, 2.5),
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    HorizontalAlignment = HorizontalAlignment.Left
+                };
+                selectChildBtn.Click += (_, e) =>
+                {
+                    e.Handled = true;
+                    vm.SelectTask(child, openInspector: true);
+                };
+                Grid.SetColumn(selectChildBtn, 1);
+                childRow.Children.Add(selectChildBtn);
+
+                subTreeStack.Children.Add(childRow);
+            }
+
+            rowContainer.Children.Add(new Border
+            {
+                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                BorderThickness = new Thickness(1, 0, 0, 0),
+                Margin = new Thickness(10, 0, 0, 0),
+                Child = subTreeStack
+            });
+        }
+
         var rowBorder = new Border
         {
             Background = isSelected ? ThemeService.Brush(ThemeService.BgElevated) : Brushes.Transparent,
@@ -1017,7 +1347,7 @@ public sealed class MainWindow : Window
             Cursor = new Cursor(StandardCursorType.Hand),
             Padding = new Thickness(6, 8.5),
             Transitions = UiBuilder.CreateSmoothBrushTransitions(110),
-            Child = rowGrid
+            Child = rowContainer
         };
 
         rowBorder.PointerEntered += (_, _) =>
@@ -1215,9 +1545,34 @@ public sealed class MainWindow : Window
         }
 
         var dateRegex = @"\b(today|tomorrow|tmrw|next\s+week|\+\d+d|\d{4}-\d{2}-\d{2})\b";
+        var quickDatePicker = new CalendarDatePicker
+        {
+            Watermark = "Pick date...",
+            Width = 135,
+            Margin = new Thickness(0, 0, 5, 5),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        quickDatePicker.SelectedDateChanged += (_, _) =>
+        {
+            if (quickDatePicker.SelectedDate.HasValue)
+            {
+                var iso = quickDatePicker.SelectedDate.Value.ToString("yyyy-MM-dd");
+                _vm.InsertQuickAddToken(iso, dateRegex);
+                _quickAddBox.Focus();
+                _quickAddBox.CaretIndex = _quickAddBox.Text?.Length ?? 0;
+            }
+        };
+        selectorsWrap.Children.Add(quickDatePicker);
+
         AddTokenBtn("Today", MaterialIconKind.CalendarToday, "today", dateRegex);
         AddTokenBtn("Tomorrow", MaterialIconKind.CalendarArrowRight, "tomorrow", dateRegex);
         AddTokenBtn("Next week", MaterialIconKind.CalendarWeek, "+7d", dateRegex);
+
+        var termRegex = @"\b@?(prelims?|midterms?|pre-?finals?|finals?)\b";
+        foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+        {
+            AddTokenBtn(termName, MaterialIconKind.SchoolOutline, termName.ToLowerInvariant(), termRegex);
+        }
 
         foreach (var p in new[] { TaskPriority.P1, TaskPriority.P2, TaskPriority.P3, TaskPriority.P4 })
         {

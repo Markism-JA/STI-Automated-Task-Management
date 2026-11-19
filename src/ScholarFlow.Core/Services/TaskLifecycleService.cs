@@ -36,16 +36,23 @@ public sealed class TaskLifecycleService
             var fromSub = isCompleted ? "ongoing" : "completed";
             var toSub = isCompleted ? "completed" : "ongoing";
 
-            for (int i = 0; i < target.LinkedFiles.Count; i++)
+            async Task MoveFileListAsync(List<string> fileList)
             {
-                var rel = target.LinkedFiles[i].Replace('\\', '/');
-                if (rel.StartsWith($"{fromSub}/", StringComparison.OrdinalIgnoreCase))
+                for (int i = 0; i < fileList.Count; i++)
                 {
-                    var movedRel = await TryMoveRelativeFileAsync(courseRoot, rel, toSub);
-                    if (movedRel is not null)
-                        target.LinkedFiles[i] = movedRel;
+                    var rel = fileList[i].Replace('\\', '/');
+                    if (rel.StartsWith($"{fromSub}/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var movedRel = await TryMoveRelativeFileAsync(courseRoot, rel, toSub);
+                        if (movedRel is not null)
+                            fileList[i] = movedRel;
+                    }
                 }
             }
+
+            await MoveFileListAsync(target.LinkedFiles);
+            await MoveFileListAsync(target.InstructionFiles);
+            await MoveFileListAsync(target.SubmissionFiles);
 
             if (!string.IsNullOrWhiteSpace(target.NotePath) &&
                 target.NotePath.Replace('\\', '/').StartsWith($"{fromSub}/", StringComparison.OrdinalIgnoreCase))
@@ -55,6 +62,9 @@ public sealed class TaskLifecycleService
                     target.NotePath = movedNote;
             }
         }
+
+        foreach (var root in tasks)
+            root.EnsureChildTasksSynced();
 
         var header = string.IsNullOrWhiteSpace(task.CourseFolder) ? "Inbox" : task.CourseFolder.Replace('_', ' ');
         await MarkdownTaskCodec.SaveDocumentAsync(sourcePath, tasks, header, ct);
@@ -90,11 +100,13 @@ public sealed class TaskLifecycleService
 
     private static TaskItem? FindMatchingTask(List<TaskItem> tasks, TaskItem target)
     {
-        if (!string.IsNullOrWhiteSpace(target.LmsId))
+        foreach (var t in tasks)
         {
-            var byLms = tasks.FirstOrDefault(t => string.Equals(t.LmsId, target.LmsId, StringComparison.OrdinalIgnoreCase));
-            if (byLms is not null)
-                return byLms;
+            if (MarkdownTaskCodec.IsMatchingTaskIdentity(t, target))
+                return t;
+            var childMatch = FindMatchingTask(t.ChildTasks, target);
+            if (childMatch is not null)
+                return childMatch;
         }
 
         return tasks.FirstOrDefault(t =>

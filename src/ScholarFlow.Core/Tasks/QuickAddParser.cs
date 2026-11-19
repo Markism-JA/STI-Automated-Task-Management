@@ -12,7 +12,7 @@ public sealed record ParsedQuickAddResult(
 
 /// <summary>
 /// Parses Todoist-style natural-language Quick Add strings such as:
-/// "Finish OS lab 2 tomorrow p1 d4 #os @lab"
+/// "Finish OS lab 2 tomorrow p1 d4 #os @lab midterms /Labs"
 /// </summary>
 public static partial class QuickAddParser
 {
@@ -28,10 +28,16 @@ public static partial class QuickAddParser
     [GeneratedRegex(@"(?<!\S)@([A-Za-z0-9_\-]+)", RegexOptions.Compiled)]
     private static partial Regex LabelTagRegex();
 
+    [GeneratedRegex(@"(?<!\S)/(?!/)([A-Za-z0-9_\-]+)", RegexOptions.Compiled)]
+    private static partial Regex SectionTagRegex();
+
+    [GeneratedRegex(@"(?<!\S)(prelims?|midterms?|pre-?finals?|finals?)(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex TermTokenRegex();
+
     [GeneratedRegex(@"(?<!\S)(\d{4}-\d{2}-\d{2})(?!\S)", RegexOptions.Compiled)]
     private static partial Regex IsoDateRegex();
 
-    [GeneratedRegex(@"(?<!\S)(today|tod|tomorrow|tom|next\s+(?:mon|monday|tue|tuesday|wed|wednesday|thu|thursday|fri|friday|sat|saturday|sun|sunday))(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(@"(?<!\S)(today|tod|tomorrow|tom|tmrw|next\s+week|\+\d+d|next\s+(?:mon|monday|tue|tuesday|wed|wednesday|thu|thursday|fri|friday|sat|saturday|sun|sunday))(?!\S)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex RelativeDateRegex();
 
     public static ParsedQuickAddResult Parse(
@@ -79,13 +85,49 @@ public static partial class QuickAddParser
             return string.Empty;
         });
 
+        string? term = null;
         var labels = new List<string>();
         working = LabelTagRegex().Replace(working, m =>
         {
             var lbl = m.Groups[1].Value;
-            labels.Add(lbl);
-            chips.Add(new QuickAddChip("Label", $"@{lbl}"));
+            var maybeTerm = TaskItem.NormalizeTerm(lbl);
+            if (maybeTerm is not null)
+            {
+                term = maybeTerm;
+                chips.Add(new QuickAddChip("Term", maybeTerm));
+            }
+            if (!labels.Contains(lbl, StringComparer.OrdinalIgnoreCase))
+            {
+                labels.Add(lbl);
+                chips.Add(new QuickAddChip("Label", $"@{lbl}"));
+            }
             return string.Empty;
+        });
+
+        string? section = null;
+        working = SectionTagRegex().Replace(working, m =>
+        {
+            section = m.Groups[1].Value.Replace('_', ' ');
+            chips.Add(new QuickAddChip("Section", $"/{section}"));
+            return string.Empty;
+        });
+
+        working = TermTokenRegex().Replace(working, m =>
+        {
+            if (term is not null)
+                return m.Value;
+
+            var normalized = TaskItem.NormalizeTerm(m.Groups[1].Value);
+            if (normalized is not null)
+            {
+                term = normalized;
+                var termTag = normalized.ToLowerInvariant();
+                if (!labels.Contains(termTag, StringComparer.OrdinalIgnoreCase))
+                    labels.Add(termTag);
+                chips.Add(new QuickAddChip("Term", normalized));
+                return string.Empty;
+            }
+            return m.Value;
         });
 
         DateOnly? dueDate = null;
@@ -124,6 +166,8 @@ public static partial class QuickAddParser
             DueDate = dueDate,
             CourseFolder = courseFolder,
             CourseAlias = courseAlias,
+            Term = term,
+            Section = section,
             Labels = labels
         };
 
@@ -145,8 +189,13 @@ public static partial class QuickAddParser
         var lower = string.Join(' ', token.ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (lower is "today" or "tod")
             return today;
-        if (lower is "tomorrow" or "tom")
+        if (lower is "tomorrow" or "tom" or "tmrw")
             return today.AddDays(1);
+        if (lower is "next week")
+            return today.AddDays(7);
+
+        if (lower.StartsWith('+') && lower.EndsWith('d') && int.TryParse(lower[1..^1], out int plusDays))
+            return today.AddDays(plusDays);
 
         if (lower.StartsWith("next "))
         {

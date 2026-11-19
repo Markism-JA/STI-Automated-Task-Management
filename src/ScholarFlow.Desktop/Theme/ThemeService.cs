@@ -128,6 +128,8 @@ public static class ThemeService
         _ => (Brush(PriorityP4Fg), Brush(PriorityP4Bg))
     };
 
+    public static IBrush PriorityBrush(TaskPriority priority) => GetPriorityBrushes(priority).Fg;
+
     private static void SetBrush(IResourceDictionary dict, string key, string hex)
         => dict[key] = new SolidColorBrush(Color.Parse(hex));
 }

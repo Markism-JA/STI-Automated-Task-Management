@@ -278,24 +278,248 @@ public sealed class BasinService
 
     public async Task<IReadOnlyList<TaskItem>> LoadAllTasksAsync(string basinRoot, CancellationToken ct = default)
     {
-        var all = new List<TaskItem>();
-        var inbox = await MarkdownTaskCodec.LoadFileAsync(GetInboxPath(basinRoot), defaultCourseFolder: null, ct);
-        all.AddRange(inbox);
-
         var courses = await LoadCoursesAsync(basinRoot, ct);
-        foreach (var course in courses.Where(c => !c.IsArchived))
+        return await Database.ScholarFlowDatabase.SyncAndLoadAllTasksAsync(basinRoot, courses, ct);
+    }
+
+    public static Dictionary<string, List<string>> LoadCourseTermMap(string basinRoot, string courseFolder)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var path = Path.Combine(basinRoot, courseFolder, "term.json");
+        if (!File.Exists(path))
+            return result;
+
+        try
         {
-            var tasksPath = GetCourseTasksPath(basinRoot, course.FolderName);
-            var courseTasks = await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct);
-            foreach (var t in courseTasks)
+            var json = File.ReadAllText(path);
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
+            if (parsed is not null)
             {
-                t.CourseFolder ??= course.FolderName;
-                t.CourseAlias ??= course.Alias;
+                foreach (var (k, v) in parsed)
+                    result[k] = v ?? [];
             }
-            all.AddRange(courseTasks);
+        }
+        catch
+        {
+            // Ignore malformed term.json
         }
 
-        return all;
+        return result;
+    }
+
+    public static string? ResolveAcademicTerm(
+        Dictionary<string, List<string>>? courseTermMap,
+        string? explicitTerm,
+        string? title,
+        string? parentModuleOrSection = null)
+    {
+        var norm = TaskItem.NormalizeTerm(explicitTerm)
+                   ?? TaskItem.NormalizeTerm(title)
+                   ?? TaskItem.NormalizeTerm(parentModuleOrSection);
+        if (norm is not null)
+            return norm;
+
+        // Extract leading 2-digit module prefix (e.g. "04 Quiz 1" -> "04", "05 Task Performance 1" -> "05")
+        var prefix = ExtractTwoDigitModulePrefix(title) ?? ExtractTwoDigitModulePrefix(parentModuleOrSection);
+        if (prefix is null)
+            return null;
+
+        if (courseTermMap is not null)
+        {
+            foreach (var (termKey, prefixes) in courseTermMap)
+            {
+                if (prefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
+                    return TaskItem.NormalizeTerm(termKey) ?? termKey;
+            }
+        }
+
+        if (int.TryParse(prefix, out int num))
+        {
+            return num switch
+            {
+                <= 2 => "Prelims",
+                <= 4 => "Midterms",
+                <= 6 => "Prefinals",
+                _ => "Finals"
+            };
+        }
+
+        return null;
+    }
+
+    private static string? ExtractTwoDigitModulePrefix(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"\b(0[1-9]|1[0-9])\b");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    public static List<string> InferAcademicTags(string? title, string? term, string? lmsKind)
+    {
+        var tags = new List<string>();
+
+        var normTerm = TaskItem.NormalizeTerm(term) ?? TaskItem.NormalizeTerm(title);
+        if (normTerm is not null)
+            tags.Add(normTerm.ToLowerInvariant());
+
+        var t = (title ?? string.Empty).ToLowerInvariant();
+        if (t.Contains("quiz") || string.Equals(lmsKind, "Quiz", StringComparison.OrdinalIgnoreCase))
+            tags.Add("quiz");
+        else if (t.Contains("task performance") || t.Contains("performance task") || t.Contains("tp"))
+            tags.Add("tp");
+        else if (t.Contains("laboratory") || t.Contains("lab "))
+            tags.Add("lab");
+        else if (t.Contains("seatwork") || t.Contains("sw "))
+            tags.Add("seatwork");
+        else if (t.Contains("exam"))
+            tags.Add("exam");
+        else if (t.Contains("activity"))
+            tags.Add("activity");
+
+        if (!string.IsNullOrWhiteSpace(lmsKind))
+        {
+            var kindLower = lmsKind.ToLowerInvariant();
+            if (kindLower is not ("unknown" or "quiz") && !tags.Contains(kindLower))
+                tags.Add(kindLower);
+        }
+
+        return tags;
+    }
+
+    public static bool EnrichTaskMetadataAndFiles(
+        string basinRoot,
+        BasinCourseEntry course,
+        TaskItem task,
+        Dictionary<string, List<string>>? termMap = null)
+    {
+        bool changed = false;
+        termMap ??= LoadCourseTermMap(basinRoot, course.FolderName);
+
+        var resolvedTerm = ResolveAcademicTerm(termMap, task.Term, task.Title, task.Section);
+        if (resolvedTerm is not null && !string.Equals(task.Term, resolvedTerm, StringComparison.OrdinalIgnoreCase))
+        {
+            task.Term = resolvedTerm;
+            changed = true;
+        }
+
+        foreach (var tag in InferAcademicTags(task.Title, task.Term, task.LmsKind))
+        {
+            // Remove noisy legacy "@freeform" / "@dropbox" tag if a cleaner activity tag exists, or keep and add
+            if (!task.Labels.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            {
+                task.Labels.Add(tag);
+                changed = true;
+            }
+        }
+
+        var courseDir = Path.Combine(basinRoot, course.FolderName);
+        if (!Directory.Exists(courseDir))
+            return changed;
+
+        var taskStem = ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(task.Title, "").TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(taskStem))
+            return changed;
+
+        // Discover matching instruction worksheet PDFs in module subdirectories or ongoing/
+        foreach (var dir in Directory.GetDirectories(courseDir))
+        {
+            var dirName = Path.GetFileName(dir);
+            if (dirName.StartsWith('.'))
+                continue;
+
+            bool isCompletedDir = dirName.Equals("completed", StringComparison.OrdinalIgnoreCase);
+            bool isOngoingDir = dirName.Equals("ongoing", StringComparison.OrdinalIgnoreCase);
+
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                var ext = Path.GetExtension(file);
+                if (ext.Equals(".md", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var fileStem = Path.GetFileNameWithoutExtension(file).TrimEnd('_');
+                bool isExactWorksheetMatch = fileStem.Equals(taskStem, StringComparison.OrdinalIgnoreCase) ||
+                                             dirName.Equals(taskStem, StringComparison.OrdinalIgnoreCase);
+
+                var relPath = Path.GetRelativePath(courseDir, file).Replace('\\', '/');
+                if (isExactWorksheetMatch && ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!task.InstructionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+                    {
+                        task.InstructionFiles.Add(relPath);
+                        changed = true;
+                    }
+                    if (task.SubmissionFiles.RemoveAll(s => s.Equals(relPath, StringComparison.OrdinalIgnoreCase)) > 0)
+                    {
+                        changed = true;
+                    }
+                }
+                else if (isCompletedDir && (isExactWorksheetMatch || MatchesDeliverableSignature(task.Title, fileStem)))
+                {
+                    if (!task.InstructionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase) &&
+                        !task.SubmissionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+                    {
+                        task.SubmissionFiles.Add(relPath);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Ensure SubmissionFiles never duplicates an InstructionFile
+        if (task.SubmissionFiles.RemoveAll(s => task.InstructionFiles.Contains(s, StringComparer.OrdinalIgnoreCase)) > 0)
+            changed = true;
+
+        task.EnsureChildTasksSynced();
+        return changed;
+    }
+
+    private static bool MatchesDeliverableSignature(string taskTitle, string candidateFileStem)
+    {
+        var taskMod = ExtractTwoDigitModulePrefix(taskTitle);
+        var fileMod = ExtractTwoDigitModulePrefix(candidateFileStem);
+        if (taskMod is null || fileMod is null || !taskMod.Equals(fileMod, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        static string ExtractKind(string s)
+        {
+            var lower = s.ToLowerInvariant();
+            if (lower.Contains("task performance") || lower.Contains("performance task") ||
+                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)tp(?:\d|[_\-\s]|$)"))
+                return "tp";
+            if (lower.Contains("laboratory") ||
+                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)lab(?:\d|[_\-\s]|$)"))
+                return "lab";
+            if (lower.Contains("activity") ||
+                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)act(?:\d|[_\-\s]|$)"))
+                return "act";
+            if (lower.Contains("quiz"))
+                return "quiz";
+            return "";
+        }
+
+        var taskKind = ExtractKind(taskTitle);
+        var fileKind = ExtractKind(candidateFileStem);
+        if (string.IsNullOrEmpty(taskKind) || !taskKind.Equals(fileKind, StringComparison.Ordinal))
+            return false;
+
+        // Compare trailing activity number (e.g. "1" in "05 Task Performance 1" vs "05 TP 1")
+        var taskNums = System.Text.RegularExpressions.Regex.Matches(taskTitle, @"\d+");
+        var fileNums = System.Text.RegularExpressions.Regex.Matches(candidateFileStem, @"\d+");
+        if (taskNums.Count >= 2 && fileNums.Count >= 2)
+        {
+            int tNum = int.Parse(taskNums[^1].Value);
+            // Find any non-module number in fileNums that matches tNum
+            for (int i = 1; i < fileNums.Count; i++)
+            {
+                if (int.TryParse(fileNums[i].Value, out int fNum) && fNum == tNum)
+                    return true;
+            }
+            return false;
+        }
+
+        return true;
     }
 
     public async Task<TaskItem> AddQuickTaskAsync(

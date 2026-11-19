@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
@@ -18,6 +19,15 @@ public enum WorkspaceTabMode
     Calendar,
     CourseWorkspace,
     PdfReader
+}
+
+public enum TaskGroupingMode
+{
+    Default,
+    Term,
+    DueDate,
+    Priority,
+    Course
 }
 
 public enum UiChangeKind
@@ -61,6 +71,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     private readonly ElmsBasinSyncService _syncService;
     private readonly ElmsPollingService _pollingService;
     private readonly DesktopNotificationService _notificationService = new();
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
     private BasinWatcher? _watcher;
 
@@ -73,13 +84,20 @@ public sealed class MainWindowViewModel : IAsyncDisposable
     public BasinCourseEntry? ActiveCourse { get; private set; }
     public bool ShowCourseMaterialsSubTab { get; private set; }
 
+    public string? ActiveTermFilter { get; private set; }
+    public string? ActiveLabelFilter { get; private set; }
+    public TaskGroupingMode ActiveGrouping { get; private set; } = TaskGroupingMode.Default;
+
     public IReadOnlyList<BasinCourseEntry> Courses { get; private set; } = [];
     public IReadOnlyList<TaskItem> AllTasks { get; private set; } = [];
     public IReadOnlyList<TaskItem> VisibleTasks { get; private set; } = [];
+    public IReadOnlyList<string> AllKnownLabels { get; private set; } = [];
     public IReadOnlyList<UnregisteredOngoingFile> UnregisteredFiles { get; private set; } = [];
 
     public TaskItem? SelectedTask { get; private set; }
     public string? SelectedTaskNoteContent { get; private set; }
+    public TaskItem? PdfReturnTask { get; private set; }
+    public WorkspaceTabMode PdfReturnMode { get; private set; } = WorkspaceTabMode.TaskList;
 
     public string QuickAddText { get; private set; } = string.Empty;
     public IReadOnlyList<QuickAddChip> QuickAddChips { get; private set; } = [];
@@ -176,13 +194,38 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(BasinRoot))
             return;
 
-        Courses = await _basinService.LoadCoursesAsync(BasinRoot);
-        AllTasks = await _basinService.LoadAllTasksAsync(BasinRoot);
-        UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(BasinRoot, Courses, AllTasks);
-        Calendar.UpdateTasks(AllTasks);
+        await _reloadLock.WaitAsync();
+        try
+        {
+            Courses = await _basinService.LoadCoursesAsync(BasinRoot);
+            AllTasks = await _basinService.LoadAllTasksAsync(BasinRoot);
+            AllKnownLabels = EnumerateAllTaskNodes(AllTasks)
+                .SelectMany(t => t.Labels)
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(BasinRoot, Courses, AllTasks);
+            Calendar.UpdateTasks(AllTasks);
 
-        RecomputeVisibleTasks();
+            RecomputeVisibleTasks();
+        }
+        finally
+        {
+            _reloadLock.Release();
+        }
+
         NotifyStateChanged();
+    }
+
+    public static IEnumerable<TaskItem> EnumerateAllTaskNodes(IEnumerable<TaskItem> roots)
+    {
+        foreach (var t in roots)
+        {
+            yield return t;
+            foreach (var c in EnumerateAllTaskNodes(t.ChildTasks))
+                yield return c;
+        }
     }
 
     public void SelectSmartView(SmartViewKind view)
@@ -190,7 +233,52 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         ActiveMode = WorkspaceTabMode.TaskList;
         ActiveSmartView = view;
         ActiveCourse = null;
+        ActiveLabelFilter = null;
         RecomputeVisibleTasks();
+        NotifyStateChanged();
+    }
+
+    public void SelectTermView(string? term)
+    {
+        var normalized = TaskItem.NormalizeTerm(term);
+        if (ActiveMode == WorkspaceTabMode.CourseWorkspace)
+        {
+            ActiveTermFilter = string.Equals(ActiveTermFilter, normalized, StringComparison.OrdinalIgnoreCase) ? null : normalized;
+        }
+        else
+        {
+            ActiveMode = WorkspaceTabMode.TaskList;
+            if (normalized is null || string.Equals(ActiveTermFilter, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                ActiveTermFilter = null;
+                if (ActiveSmartView == SmartViewKind.Term)
+                    ActiveSmartView = SmartViewKind.All;
+            }
+            else
+            {
+                ActiveTermFilter = normalized;
+                if (ActiveSmartView is SmartViewKind.Completed)
+                    ActiveSmartView = SmartViewKind.All;
+            }
+        }
+
+        RecomputeVisibleTasks();
+        NotifyStateChanged();
+    }
+
+    public void SelectLabelView(string label)
+    {
+        ActiveMode = WorkspaceTabMode.TaskList;
+        ActiveSmartView = SmartViewKind.Label;
+        ActiveCourse = null;
+        ActiveLabelFilter = label;
+        RecomputeVisibleTasks();
+        NotifyStateChanged();
+    }
+
+    public void SetGroupingMode(TaskGroupingMode mode)
+    {
+        ActiveGrouping = mode;
         NotifyStateChanged();
     }
 
@@ -207,6 +295,7 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         ActiveMode = WorkspaceTabMode.CourseWorkspace;
         ActiveSmartView = SmartViewKind.Course;
         ActiveCourse = course;
+        ActiveLabelFilter = null;
         ShowCourseMaterialsSubTab = showMaterials;
         RecomputeVisibleTasks();
         NotifyStateChanged();
@@ -218,11 +307,33 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         NotifyStateChanged();
     }
 
-    public void OpenPdfInReader(string pdfFullPath)
+    public void OpenPdfInReader(string pdfFullPath, TaskItem? associatedTask = null)
     {
+        if (ActiveMode != WorkspaceTabMode.PdfReader)
+            PdfReturnMode = ActiveMode;
+        PdfReturnTask = associatedTask;
         PdfReader.LoadPdf(pdfFullPath);
         ActiveMode = WorkspaceTabMode.PdfReader;
         NotifyStateChanged();
+    }
+
+    public void ReturnFromPdfReader()
+    {
+        var returnTask = PdfReturnTask;
+        PdfReturnTask = null;
+        if (returnTask is not null)
+        {
+            ActiveMode = PdfReturnMode == WorkspaceTabMode.PdfReader ? WorkspaceTabMode.TaskList : PdfReturnMode;
+            SelectTask(returnTask, openInspector: true);
+            return;
+        }
+
+        if (ActiveCourse is not null)
+            SelectCourse(ActiveCourse, showMaterials: ShowCourseMaterialsSubTab);
+        else if (PdfReturnMode == WorkspaceTabMode.Calendar)
+            SelectCalendarView();
+        else
+            SelectSmartView(ActiveSmartView);
     }
 
     public void SelectTask(TaskItem? task, bool openInspector = false)
@@ -549,31 +660,62 @@ public sealed class MainWindowViewModel : IAsyncDisposable
             }
         }
 
-        // 2. Matching Tasks
-        var candidateTasks = AllTasks
-            .OrderBy(t => t.IsCompleted ? 1 : 0)
-            .ThenByDescending(t => UrgencyCalculator.Explain(t).Score)
-            .ToList();
+        // 2. Matching Tasks (via SQLite FTS5 index across titles, subtasks, tags, terms, and note bodies, with in-memory fallback)
+        var allNodes = EnumerateAllTaskNodes(AllTasks).ToList();
+        var byId = allNodes.ToDictionary(t => t.Id, StringComparer.OrdinalIgnoreCase);
+        var matchedTasks = new List<TaskItem>();
 
-        foreach (var t in candidateTasks)
+        if (!string.IsNullOrWhiteSpace(q))
         {
-            if (string.IsNullOrEmpty(q) ||
-                t.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (t.CourseAlias?.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase) == true) ||
-                t.Labels.Any(l => l.Contains(q.TrimStart('@'), StringComparison.OrdinalIgnoreCase)))
+            var ftsIds = ScholarFlowDatabase.SearchTaskIdsFts(BasinRoot, q, limit: 18);
+            foreach (var ftsId in ftsIds)
             {
-                var sub = t.DueDate.HasValue ? $"Due {t.DueDate.Value:MMM d}" : (t.IsCompleted ? "Completed" : "No due date");
-                var badge = !string.IsNullOrWhiteSpace(t.CourseAlias) ? $"#{t.CourseAlias}" : $"P{(int)t.Priority}";
-                results.Add(new SearchResultItem(
-                    SearchResultKind.Task,
-                    t.Title,
-                    sub,
-                    badge,
-                    Task: t));
-
-                if (results.Count >= 18)
-                    break;
+                if (byId.TryGetValue(ftsId, out var matched))
+                    matchedTasks.Add(matched);
             }
+        }
+
+        if (matchedTasks.Count < 16)
+        {
+            var seenIds = new HashSet<string>(matchedTasks.Select(t => t.Id), StringComparer.OrdinalIgnoreCase);
+            var candidateTasks = allNodes
+                .OrderBy(t => t.IsCompleted ? 1 : 0)
+                .ThenByDescending(t => UrgencyCalculator.Explain(t).Score)
+                .ToList();
+
+            foreach (var t in candidateTasks)
+            {
+                if (seenIds.Contains(t.Id))
+                    continue;
+
+                if (string.IsNullOrEmpty(q) ||
+                    t.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    (t.CourseAlias?.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase) == true) ||
+                    (t.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true) ||
+                    t.Labels.Any(l => l.Contains(q.TrimStart('@'), StringComparison.OrdinalIgnoreCase)))
+                {
+                    matchedTasks.Add(t);
+                    if (matchedTasks.Count >= 18)
+                        break;
+                }
+            }
+        }
+
+        foreach (var t in matchedTasks)
+        {
+            var sub = t.DueDate.HasValue ? $"Due {t.DueDate.Value:MMM d}" : (t.IsCompleted ? "Completed" : "No due date");
+            if (!string.IsNullOrWhiteSpace(t.ParentTaskId))
+                sub = $"Subtask · {sub}";
+            var badge = !string.IsNullOrWhiteSpace(t.CourseAlias) ? $"#{t.CourseAlias}" : $"P{(int)t.Priority}";
+            results.Add(new SearchResultItem(
+                SearchResultKind.Task,
+                t.Title,
+                sub,
+                badge,
+                Task: t));
+
+            if (results.Count >= 18)
+                break;
         }
 
         // 3. Matching Master PDFs & Handouts
@@ -634,37 +776,76 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         await ReloadBasinDataAsync();
     }
 
-    public async Task AddSubtaskAsync(TaskItem parentTask, string subtaskTitle)
+    public TaskItem? GetParentTask(TaskItem task) =>
+        TaskItem.FindParentOf(AllTasks, task.Id)
+        ?? (!string.IsNullOrWhiteSpace(task.ParentTaskId) ? TaskItem.FindById(AllTasks, task.ParentTaskId) : null);
+
+    public async Task AddSubtaskAsync(TaskItem parentTask, string subtaskInput)
     {
-        if (string.IsNullOrWhiteSpace(subtaskTitle))
+        if (string.IsNullOrWhiteSpace(subtaskInput))
             return;
 
-        parentTask.SubTasks.Add(new TaskSubItem(subtaskTitle.Trim(), false));
+        parentTask.EnsureChildTasksSynced();
+
+        var parsed = QuickAddParser.Parse(subtaskInput.Trim(), Courses);
+        var child = parsed.Task;
+        if (string.IsNullOrWhiteSpace(child.Title))
+            child.Title = subtaskInput.Trim();
+
+        child.Id = $"{parentTask.Id}:sub-{parentTask.ChildTasks.Count + 1}";
+        child.ParentTaskId = parentTask.Id;
+        child.CourseFolder ??= parentTask.CourseFolder;
+        child.CourseAlias ??= parentTask.CourseAlias;
+        child.Term ??= parentTask.Term;
+        child.Section ??= parentTask.Section;
+        child.SourceMarkdownPath = parentTask.SourceMarkdownPath;
+
+        parentTask.ChildTasks.Add(child);
+        parentTask.EnsureChildTasksSynced();
+
         await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, parentTask);
+        StatusText = $"Added subtask '{child.Title}' under '{parentTask.Title}'";
         await ReloadBasinDataAsync();
     }
 
     public async Task ToggleSubtaskAsync(TaskItem parentTask, int subIndex)
     {
-        if (subIndex < 0 || subIndex >= parentTask.SubTasks.Count)
+        parentTask.EnsureChildTasksSynced();
+        if (subIndex < 0 || subIndex >= parentTask.ChildTasks.Count)
             return;
 
-        var existing = parentTask.SubTasks[subIndex];
-        var nextDone = !existing.IsCompleted;
-        parentTask.SubTasks[subIndex] = new TaskSubItem(
-            existing.Title,
-            nextDone,
-            nextDone ? DateOnly.FromDateTime(DateTime.Today) : null);
+        var child = parentTask.ChildTasks[subIndex];
+        child.IsCompleted = !child.IsCompleted;
+        child.CompletedDate = child.IsCompleted ? DateOnly.FromDateTime(DateTime.Today) : null;
+        parentTask.EnsureChildTasksSynced();
 
         await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, parentTask);
+        StatusText = child.IsCompleted ? $"Completed subtask: {child.Title}" : $"Reopened subtask: {child.Title}";
         await ReloadBasinDataAsync();
+    }
+
+    public async Task ToggleChildTaskAsync(TaskItem parentTask, TaskItem childTask)
+    {
+        parentTask.EnsureChildTasksSynced();
+        var idx = parentTask.ChildTasks.FindIndex(c =>
+            string.Equals(c.Id, childTask.Id, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Title, childTask.Title, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            await ToggleSubtaskAsync(parentTask, idx);
+        }
+        else
+        {
+            await ToggleTaskCompletedAsync(childTask);
+        }
     }
 
     public async Task DeleteTaskAsync(TaskItem task)
     {
+        var parent = GetParentTask(task);
         await MarkdownTaskCodec.DeleteTaskFromFileAsync(BasinRoot, task);
         if (SelectedTask?.Id == task.Id)
-            SelectedTask = null;
+            SelectedTask = parent;
         StatusText = $"Deleted task '{task.Title}'";
         await ReloadBasinDataAsync();
     }
@@ -677,22 +858,156 @@ public sealed class MainWindowViewModel : IAsyncDisposable
         SelectTask(created);
     }
 
+    public async Task SetTaskDueDateAsync(TaskItem task, DateOnly? dueDate)
+    {
+        if (task.DueDate == dueDate)
+            return;
+
+        task.DueDate = dueDate;
+        await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+        StatusText = dueDate.HasValue
+            ? $"Due date set to {dueDate.Value:MMM d, yyyy} for '{task.Title}'"
+            : $"Cleared due date for '{task.Title}'";
+        await ReloadBasinDataAsync();
+    }
+
+    public async Task SetTaskTermAsync(TaskItem task, string? term)
+    {
+        var normalized = TaskItem.NormalizeTerm(term);
+        task.Term = normalized;
+
+        // Remove old term tags and add the new term tag
+        task.Labels.RemoveAll(l => TaskItem.NormalizeTerm(l) is not null);
+        if (normalized is not null)
+            task.Labels.Insert(0, normalized.ToLowerInvariant());
+
+        await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+        StatusText = normalized is not null
+            ? $"Assigned '{task.Title}' to {normalized}"
+            : $"Cleared term for '{task.Title}'";
+        await ReloadBasinDataAsync();
+    }
+
+    public async Task SetTaskSectionAsync(TaskItem task, string? section)
+    {
+        task.Section = string.IsNullOrWhiteSpace(section) ? null : section.Trim();
+        await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+        StatusText = $"Updated section for '{task.Title}'";
+        await ReloadBasinDataAsync();
+    }
+
+    public async Task AddTaskLabelAsync(TaskItem task, string label)
+    {
+        var clean = label.Trim().TrimStart('@').Replace(' ', '-').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(clean))
+            return;
+
+        if (!task.Labels.Contains(clean, StringComparer.OrdinalIgnoreCase))
+        {
+            task.Labels.Add(clean);
+            var maybeTerm = TaskItem.NormalizeTerm(clean);
+            if (maybeTerm is not null)
+                task.Term = maybeTerm;
+
+            await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+            StatusText = $"Added @{clean} to '{task.Title}'";
+            await ReloadBasinDataAsync();
+        }
+    }
+
+    public async Task RemoveTaskLabelAsync(TaskItem task, string label)
+    {
+        if (task.Labels.RemoveAll(l => l.Equals(label, StringComparison.OrdinalIgnoreCase)) > 0)
+        {
+            await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+            StatusText = $"Removed @{label} from '{task.Title}'";
+            await ReloadBasinDataAsync();
+        }
+    }
+
+    public async Task AttachFileToTaskAsync(TaskItem task, string fullFilePath, bool isSubmission)
+    {
+        if (!File.Exists(fullFilePath))
+            return;
+
+        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder)
+            ? BasinRoot
+            : Path.Combine(BasinRoot, task.CourseFolder);
+
+        string relPath;
+        if (fullFilePath.StartsWith(courseDir, StringComparison.OrdinalIgnoreCase))
+        {
+            relPath = Path.GetRelativePath(courseDir, fullFilePath).Replace('\\', '/');
+        }
+        else
+        {
+            // Copy external file into ongoing/ or completed/ inside the course folder
+            var targetSub = isSubmission ? (task.IsCompleted ? "completed" : "ongoing") : "ongoing";
+            var destDir = Path.Combine(courseDir, targetSub);
+            Directory.CreateDirectory(destDir);
+            var destPath = Path.Combine(destDir, Path.GetFileName(fullFilePath));
+            if (!File.Exists(destPath))
+                File.Copy(fullFilePath, destPath);
+            relPath = $"{targetSub}/{Path.GetFileName(fullFilePath)}";
+        }
+
+        if (isSubmission)
+        {
+            if (!task.SubmissionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+                task.SubmissionFiles.Add(relPath);
+        }
+        else
+        {
+            if (!task.InstructionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+                task.InstructionFiles.Add(relPath);
+        }
+
+        if (!task.LinkedFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+            task.LinkedFiles.Add(relPath);
+
+        await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+        StatusText = $"Linked '{Path.GetFileName(relPath)}' to '{task.Title}'";
+        await ReloadBasinDataAsync();
+    }
+
+    public void ToggleTaskSubtasksExpanded(TaskItem task)
+    {
+        task.IsSubtasksExpanded = !task.IsSubtasksExpanded;
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public void OpenTaskFile(TaskItem task, string relativeOrFullFilePath)
+    {
+        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder) ? BasinRoot : Path.Combine(BasinRoot, task.CourseFolder);
+        var fullPath = Path.IsPathRooted(relativeOrFullFilePath)
+            ? relativeOrFullFilePath
+            : Path.Combine(courseDir, relativeOrFullFilePath);
+
+        if (fullPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath))
+        {
+            OpenPdfInReader(fullPath, associatedTask: task);
+            return;
+        }
+
+        ExternalFileLauncher.OpenLocalFile(fullPath);
+    }
+
     public void OpenPrimaryTaskFileOrNote(TaskItem? task)
     {
         if (task is null)
             return;
 
-        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder) ? BasinRoot : Path.Combine(BasinRoot, task.CourseFolder);
-        var relTarget = task.LinkedFiles.FirstOrDefault() ?? task.NotePath;
-        if (!string.IsNullOrWhiteSpace(relTarget))
+        var primaryPdf = task.PrimaryPdfFile;
+        if (!string.IsNullOrWhiteSpace(primaryPdf))
         {
-            var fullPath = Path.Combine(courseDir, relTarget);
-            if (fullPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath))
-            {
-                OpenPdfInReader(fullPath);
-                return;
-            }
-            ExternalFileLauncher.OpenLocalFile(fullPath);
+            OpenTaskFile(task, primaryPdf);
+            return;
+        }
+
+        var firstFile = task.AllFiles.FirstOrDefault() ?? task.NotePath;
+        if (!string.IsNullOrWhiteSpace(firstFile))
+        {
+            OpenTaskFile(task, firstFile);
             return;
         }
 
@@ -856,15 +1171,31 @@ public sealed class MainWindowViewModel : IAsyncDisposable
             ? SmartViewKind.Course
             : ActiveSmartView;
 
+        var targetVal = viewKind switch
+        {
+            SmartViewKind.Course => ActiveCourse?.FolderName,
+            SmartViewKind.Label => ActiveLabelFilter,
+            SmartViewKind.Term => ActiveTermFilter,
+            _ => null
+        };
+
         VisibleTasks = TaskQueryService.Filter(
             AllTasks,
             viewKind,
-            targetValue: ActiveCourse?.FolderName,
-            searchQuery: SearchQuery);
+            targetValue: targetVal,
+            searchQuery: IsSearchModalOpen ? null : SearchQuery,
+            termFilter: ActiveTermFilter);
 
         if (SelectedTask is not null)
         {
-            SelectedTask = AllTasks.FirstOrDefault(t => t.Id == SelectedTask.Id)
+            var prev = SelectedTask;
+            var allNodes = EnumerateAllTaskNodes(AllTasks).ToList();
+            SelectedTask = TaskItem.FindById(AllTasks, prev.Id)
+                           ?? allNodes.FirstOrDefault(t =>
+                               (!string.IsNullOrWhiteSpace(prev.LmsId) && string.Equals(t.LmsId, prev.LmsId, StringComparison.OrdinalIgnoreCase)) ||
+                               (string.Equals(t.CourseFolder, prev.CourseFolder, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(t.Title, prev.Title, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(t.ParentTaskId ?? "", prev.ParentTaskId ?? "", StringComparison.OrdinalIgnoreCase)))
                            ?? VisibleTasks.FirstOrDefault();
             SelectedTaskNoteContent = LoadTaskNotePreview(SelectedTask);
         }

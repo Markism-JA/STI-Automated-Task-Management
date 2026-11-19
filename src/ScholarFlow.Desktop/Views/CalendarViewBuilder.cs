@@ -186,6 +186,7 @@ public static class CalendarViewBuilder
 
         foreach (var t in cell.Tasks.Take(2))
         {
+            var capturedTask = t;
             var (pFg, pBg) = t.IsCompleted
                 ? (
                     ThemeService.Brush(ThemeService.SuccessFg),
@@ -193,22 +194,31 @@ public static class CalendarViewBuilder
                 )
                 : ThemeService.GetPriorityBrushes(t.Priority);
 
-            stack.Children.Add(
-                new Border
+            var pillBtn = new Button
+            {
+                Content = new TextBlock
                 {
-                    Background = pBg,
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(4, 1.5),
-                    Child = new TextBlock
-                    {
-                        Text = t.Title,
-                        FontSize = 10.5,
-                        Foreground = pFg,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                        MaxLines = 1,
-                    },
-                }
-            );
+                    Text = t.Title,
+                    FontSize = 10.5,
+                    Foreground = pFg,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1,
+                },
+                Background = pBg,
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(4, 1.5),
+                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left
+            };
+            pillBtn.Click += (_, e) =>
+            {
+                e.Handled = true;
+                cal.SelectDate(cell.Date);
+                vm.SelectTask(capturedTask, openInspector: true);
+            };
+            stack.Children.Add(pillBtn);
         }
 
         if (cell.Tasks.Count > 2)
@@ -242,7 +252,7 @@ public static class CalendarViewBuilder
         {
             cal.SelectDate(cell.Date);
             if (cell.Tasks.Count > 0)
-                vm.SelectTask(cell.Tasks[0]);
+                vm.SelectTask(cell.Tasks[0], openInspector: true);
             else
                 vm.SelectTask(null);
         };
@@ -337,25 +347,46 @@ public static class CalendarViewBuilder
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Left,
                 };
-                titleBtn.Click += (_, _) => vm.SelectTask(task);
+                titleBtn.Click += (_, _) => vm.SelectTask(task, openInspector: true);
                 Grid.SetColumn(titleBtn, 1);
                 row.Children.Add(titleBtn);
 
+                var rightBadges = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                if (!string.IsNullOrWhiteSpace(task.PrimaryPdfFile))
+                {
+                    rightBadges.Children.Add(UiBuilder.GhostButton(
+                        "View PDF",
+                        MaterialIconKind.FilePdfBox,
+                        () => vm.OpenTaskFile(task, task.PrimaryPdfFile!)));
+                }
+                if (!string.IsNullOrWhiteSpace(task.Term))
+                {
+                    rightBadges.Children.Add(UiBuilder.Pill(
+                        task.Term,
+                        ThemeService.Brush(ThemeService.TextSecondary),
+                        ThemeService.Brush(ThemeService.BgElevated)));
+                }
                 if (!string.IsNullOrWhiteSpace(task.CourseAlias))
                 {
-                    var coursePill = UiBuilder.Pill(
+                    rightBadges.Children.Add(UiBuilder.Pill(
                         $"#{task.CourseAlias}",
                         ThemeService.Brush(ThemeService.AccentPrimary),
-                        ThemeService.Brush(ThemeService.AccentSoftBg)
-                    );
-                    coursePill.Margin = new Thickness(6, 0);
-                    Grid.SetColumn(coursePill, 2);
-                    row.Children.Add(coursePill);
+                        ThemeService.Brush(ThemeService.AccentSoftBg)));
                 }
+                rightBadges.Children.Add(UiBuilder.Pill($"P{(int)task.Priority}", pFg, pBg));
+                rightBadges.Children.Add(UiBuilder.GhostButton(
+                    "Inspect",
+                    MaterialIconKind.TuneVariant,
+                    () => vm.SelectTask(task, openInspector: true)));
 
-                var priPill = UiBuilder.Pill($"P{(int)task.Priority}", pFg, pBg);
-                Grid.SetColumn(priPill, 3);
-                row.Children.Add(priPill);
+                Grid.SetColumn(rightBadges, 2);
+                Grid.SetColumnSpan(rightBadges, 2);
+                row.Children.Add(rightBadges);
 
                 listStack.Children.Add(
                     new Border
