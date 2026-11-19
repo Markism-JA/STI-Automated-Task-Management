@@ -56,6 +56,7 @@ public sealed class QuizStudioViewModel
     public QuizBuilderOutputMode BuilderOutputMode { get; private set; } = QuizBuilderOutputMode.AiApi;
     public string? AppendTargetQuizId { get; private set; }
     public string? AppendTargetQuizTitle { get; private set; }
+    public string CustomPromptInstructions { get; private set; } = string.Empty;
 
     public IReadOnlyList<(int PageNumber, string SectionTitle, string? Term)> MatchedScopePages { get; private set; } = [];
     public int PreviewScopeIndex { get; private set; }
@@ -343,6 +344,34 @@ public sealed class QuizStudioViewModel
     public Dictionary<QuizQuestionKind, int> GetResolvedExactKindCounts()
     {
         return BuildCurrentRequest().ResolveExactKindCounts(QuestionCount);
+    }
+
+    public void SetCustomPromptInstructions(string? instructions, bool notify = true)
+    {
+        var next = instructions ?? string.Empty;
+        if (next.Length > 1200)
+            next = next[..1200];
+
+        if (string.Equals(CustomPromptInstructions, next, StringComparison.Ordinal))
+            return;
+
+        CustomPromptInstructions = next;
+        RefreshLivePromptPreviewIfActive();
+        if (notify)
+            _mainVm.RequestUiRefresh();
+    }
+
+    public void AppendCustomPromptDirective(string directive)
+    {
+        if (string.IsNullOrWhiteSpace(directive))
+            return;
+
+        var current = CustomPromptInstructions.Trim();
+        if (current.Contains(directive, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var updated = string.IsNullOrEmpty(current) ? directive : $"{current}\n{directive}";
+        SetCustomPromptInstructions(updated, notify: true);
     }
 
     public void SetBuilderOutputMode(QuizBuilderOutputMode mode)
@@ -1548,6 +1577,7 @@ public sealed class QuizStudioViewModel
             AllocationMode = AllocationMode,
             KindAllocations = new Dictionary<QuizQuestionKind, int>(KindAllocations),
             ExcludePromptsOrTopics = excludes,
+            CustomInstructions = CustomPromptInstructions,
             AppendToQuizId = AppendTargetQuizId,
             ProviderBaseUrl = settings.AiBaseUrl,
             ApiKey = settings.AiApiKey,

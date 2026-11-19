@@ -936,6 +936,76 @@ public static class QuizStudioViewBuilder
             }
         );
 
+        // Guarded Custom Prompt Instructions (Focus / Tone / Difficulty — schema & evidence locked)
+        var customPromptStack = new StackPanel { Spacing = 6 };
+        var customPromptHeader = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
+        customPromptHeader.Children.Add(
+            new TextBlock
+            {
+                Text = "Custom Focus & Style Directives (Optional — JSON schema & PDF evidence rules stay locked)",
+                FontSize = 11.5,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        );
+        if (!string.IsNullOrWhiteSpace(studio.CustomPromptInstructions))
+        {
+            var clearDirBtn = UiBuilder.GhostButton(
+                "Clear",
+                MaterialIconKind.Close,
+                () => studio.SetCustomPromptInstructions(string.Empty, notify: true)
+            );
+            Grid.SetColumn(clearDirBtn, 1);
+            customPromptHeader.Children.Add(clearDirBtn);
+        }
+        customPromptStack.Children.Add(customPromptHeader);
+
+        var directiveChips = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var (chipLabel, chipText) in new[]
+                 {
+                     ("+ Edge Cases", "Focus on edge cases, common pitfalls, and troubleshooting scenarios."),
+                     ("+ Hard Difficulty", "Target difficulty 4-5 analysis and application questions."),
+                     ("+ Concise Stems", "Keep question stems concise (1-2 sentences) and distractors subtle."),
+                     ("+ Definitions & Acronyms", "Emphasize exact technical definitions, acronyms, and comparisons.")
+                 })
+        {
+            var capturedText = chipText;
+            var chipBtn = UiBuilder.GhostButton(
+                chipLabel,
+                null,
+                () => studio.AppendCustomPromptDirective(capturedText)
+            );
+            chipBtn.Margin = new Thickness(0, 0, 5, 4);
+            directiveChips.Children.Add(chipBtn);
+        }
+        customPromptStack.Children.Add(directiveChips);
+
+        var customPromptBox = new TextBox
+        {
+            Text = studio.CustomPromptInstructions,
+            Watermark = "e.g. Focus on TCP congestion control vs flow control, avoid trivial date questions... (max 1200 chars)",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 52,
+            MaxHeight = 110,
+            FontSize = 12,
+        };
+        customPromptBox.LostFocus += (_, _) =>
+        {
+            studio.SetCustomPromptInstructions(customPromptBox.Text, notify: false);
+        };
+        customPromptBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            {
+                e.Handled = true;
+                studio.SetCustomPromptInstructions(customPromptBox.Text, notify: true);
+            }
+        };
+        customPromptStack.Children.Add(customPromptBox);
+        configCard.Children.Add(customPromptStack);
+
         // Unified Output Mode Bar (AI API vs Auto-Synced Web JSON vs Offline Smart PDF)
         var outputModeBar = new WrapPanel
         {

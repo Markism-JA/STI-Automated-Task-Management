@@ -288,6 +288,7 @@ public sealed class QuizGenerationRequest
     public QuestionAllocationMode AllocationMode { get; set; } = QuestionAllocationMode.Percentages;
     public Dictionary<QuizQuestionKind, int> KindAllocations { get; set; } = GetDefaultAllocationsForPreset(QuizPresetMode.ExamSimulator);
     public List<string> ExcludePromptsOrTopics { get; set; } = [];
+    public string? CustomInstructions { get; set; }
     public string? AppendToQuizId { get; set; }
     public string ProviderBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
     public string? ApiKey { get; set; }

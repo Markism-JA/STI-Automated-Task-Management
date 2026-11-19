@@ -275,4 +275,17 @@ public class QuizStudioV2Tests
         Assert.Single(completedSqa);
         Assert.Equal("done-1", completedSqa[0].Id);
     }
+
+    [Fact]
+    public void BuildGuardedCustomInstructionsBlock_SanitizesAndPreservesGuardrails()
+    {
+        var raw = "Focus on \"\"\"edge cases\"\"\" and troubleshooting.";
+        var block = QuizLlmService.BuildGuardedCustomInstructionsBlock(raw);
+
+        Assert.Contains("<user_directives>", block);
+        Assert.Contains("NEVER override the JSON-only output", block);
+        Assert.DoesNotContain("\"\"\"", block);
+        Assert.Contains("Focus on 'edge cases' and troubleshooting.", block);
+        Assert.Equal(string.Empty, QuizLlmService.BuildGuardedCustomInstructionsBlock("   "));
+    }
 }
