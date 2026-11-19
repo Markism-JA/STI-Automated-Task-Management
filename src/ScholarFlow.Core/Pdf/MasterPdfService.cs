@@ -782,23 +782,52 @@ public sealed class MasterPdfService
     {
         public string DefaultFontName => "Sans";
 
-        private static readonly string[] RegularCandidates =
-        [
-            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        ];
+        private static readonly string[] RegularCandidates = BuildRegularCandidates();
+        private static readonly string[] BoldCandidates = BuildBoldCandidates();
 
-        private static readonly string[] BoldCandidates =
-        [
-            "/usr/share/fonts/noto/NotoSans-Bold.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        ];
+        private static string[] BuildRegularCandidates()
+        {
+            var list = new List<string>();
+            if (OperatingSystem.IsWindows())
+            {
+                var winFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
+                list.Add(Path.Combine(winFonts, "segoeui.ttf"));
+                list.Add(Path.Combine(winFonts, "arial.ttf"));
+                list.Add(Path.Combine(winFonts, "calibri.ttf"));
+                list.Add(Path.Combine(winFonts, "tahoma.ttf"));
+            }
+            list.AddRange(
+            [
+                "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            ]);
+            return [.. list];
+        }
+
+        private static string[] BuildBoldCandidates()
+        {
+            var list = new List<string>();
+            if (OperatingSystem.IsWindows())
+            {
+                var winFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
+                list.Add(Path.Combine(winFonts, "segoeuib.ttf"));
+                list.Add(Path.Combine(winFonts, "arialbd.ttf"));
+                list.Add(Path.Combine(winFonts, "calibrib.ttf"));
+                list.Add(Path.Combine(winFonts, "tahomabd.ttf"));
+            }
+            list.AddRange(
+            [
+                "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            ]);
+            return [.. list];
+        }
 
         public byte[]? GetFont(string faceName)
         {
@@ -810,12 +839,19 @@ public sealed class MasterPdfService
             if (found is not null)
                 return File.ReadAllBytes(found);
 
-            // Fallback: scan /usr/share/fonts for any regular .ttf
-            if (Directory.Exists("/usr/share/fonts"))
+            // Fallback: scan system fonts directory for any .ttf
+            var fontDirs = OperatingSystem.IsWindows()
+                ? new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts") }
+                : new[] { "/usr/share/fonts", "/usr/local/share/fonts" };
+
+            foreach (var dir in fontDirs)
             {
-                var anyTtf = Directory.EnumerateFiles("/usr/share/fonts", "*.ttf", SearchOption.AllDirectories)
+                if (!Directory.Exists(dir))
+                    continue;
+
+                var anyTtf = Directory.EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories)
                     .FirstOrDefault(f => f.Contains("Regular", StringComparison.OrdinalIgnoreCase))
-                    ?? Directory.EnumerateFiles("/usr/share/fonts", "*.ttf", SearchOption.AllDirectories).FirstOrDefault();
+                    ?? Directory.EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories).FirstOrDefault();
 
                 if (anyTtf is not null)
                     return File.ReadAllBytes(anyTtf);

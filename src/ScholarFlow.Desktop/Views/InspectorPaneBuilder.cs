@@ -519,7 +519,13 @@ public static class InspectorPaneBuilder
             {
                 var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder) ? vm.BasinRoot : Path.Combine(vm.BasinRoot, task.CourseFolder);
                 var noteFull = Path.Combine(courseDir, task.NotePath);
-                var nvimBtn = UiBuilder.GhostButton("Edit in Neovim", MaterialIconKind.FileEditOutline, () => ExternalFileLauncher.OpenLocalFile(noteFull));
+                var configuredEditor = ExternalFileLauncher.GetConfiguredEditor();
+                var editLabel = !string.IsNullOrWhiteSpace(configuredEditor)
+                    ? $"Edit in {Path.GetFileNameWithoutExtension(configuredEditor.Split(' ')[0])}"
+                    : OperatingSystem.IsLinux() && File.Exists("/usr/bin/kitty")
+                        ? "Edit in Neovim"
+                        : "Open Externally";
+                var nvimBtn = UiBuilder.GhostButton(editLabel, MaterialIconKind.FileEditOutline, () => ExternalFileLauncher.OpenLocalFile(noteFull));
                 Grid.SetColumn(nvimBtn, 1);
                 noteHeader.Children.Add(nvimBtn);
             }
