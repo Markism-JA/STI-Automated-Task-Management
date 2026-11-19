@@ -13,7 +13,7 @@ public static partial class AssignmentsListParser
     [GeneratedRegex(@"/student_([a-z_]+)_assignment/show/(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex TypedAssignmentUrlRegex();
 
-    [GeneratedRegex(@"/(?:student_assignment|student_quiz|assignment)/show/(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(@"/(?:student_assignment|student_quiz|quiz|assignment)/(?:show|take|start|intro|view)/(\d+)|/student_quiz/(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex FallbackAssignmentIdRegex();
 
     public static IReadOnlyList<ElmsAssignmentSummary> Parse(
@@ -30,7 +30,8 @@ public static partial class AssignmentsListParser
         foreach (var tr in doc.QuerySelectorAll("tr"))
         {
             var assignmentCell = tr.QuerySelector("td.assignment");
-            var primaryLink = assignmentCell?.QuerySelector("a[href*=\"_assignment/show/\"], a[href*=\"/assignment/show/\"]");
+            const string linkSelector = "a[href*=\"_assignment/show/\"], a[href*=\"/assignment/show/\"], a[href*=\"/student_quiz/\"], a[href*=\"/quiz/show/\"]";
+            var primaryLink = (assignmentCell ?? tr).QuerySelector(linkSelector);
             if (primaryLink is null)
                 continue;
 
@@ -48,7 +49,7 @@ public static partial class AssignmentsListParser
 
             var absUrl = HtmlParsingHelpers.ToAbsoluteUrl(href, baseUrl);
 
-            var moduleLink = assignmentCell!.QuerySelector("a[href*=\"/student_lesson/show/\"]");
+            var moduleLink = (assignmentCell ?? tr).QuerySelector("a[href*=\"/student_lesson/show/\"]");
             var parentModuleTitle = HtmlParsingHelpers.NormalizeWhitespace(moduleLink?.TextContent);
             if (string.IsNullOrWhiteSpace(parentModuleTitle))
                 parentModuleTitle = null;
@@ -109,13 +110,16 @@ public static partial class AssignmentsListParser
         }
 
         var fallback = FallbackAssignmentIdRegex().Match(urlOrHref);
-        var fallbackId = fallback.Success ? fallback.Groups[1].Value : urlOrHref;
+        var fallbackId = fallback.Success
+            ? (!string.IsNullOrEmpty(fallback.Groups[1].Value) ? fallback.Groups[1].Value : fallback.Groups[2].Value)
+            : urlOrHref;
 
         var inferredKind = titleAttr?.Split(':')[0].Trim().ToLowerInvariant() switch
         {
             "essay" => ElmsAssignmentKind.Freeform,
             "dropbox" => ElmsAssignmentKind.Dropbox,
             "quiz" => ElmsAssignmentKind.Quiz,
+            _ when urlOrHref.Contains("quiz", StringComparison.OrdinalIgnoreCase) => ElmsAssignmentKind.Quiz,
             _ => ElmsAssignmentKind.Unknown
         };
 

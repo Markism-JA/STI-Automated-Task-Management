@@ -191,4 +191,36 @@ public sealed class ParsersTests
         Assert.Equal("completed/SQA_1PRELIMS_03TP1_MOLINA.docx", subFiles[0].RelativeTargetPath);
         Assert.Equal("https://elms.sti.edu/files/11603036/SQA_1PRELIMS_03TP1_MOLINA.docx", subFiles[0].CanonicalUrl);
     }
+
+    [Fact]
+    public void AssignmentsListParser_ParsesStudentQuizLinks()
+    {
+        const string listHtml = """
+            <table><tbody>
+              <tr>
+                <td></td>
+                <td></td>
+                <td class="assignment">
+                  <a href="/student_quiz/show/60123456">05 Quiz 1</a>
+                  <a href="/student_lesson/show/999001">Finals Module</a>
+                </td>
+                <td>Nov 25, 11:59 pm</td>
+                <td>10%</td>
+                <td><span title="Not submitted">-</span></td>
+                <td><span title="No">-</span></td>
+                <td>-</td>
+                <td>-</td>
+              </tr>
+            </tbody></table>
+            """;
+
+        var summaries = AssignmentsListParser.Parse(listHtml, "5725165", referenceYear: 2026);
+        var quiz = Assert.Single(summaries);
+        Assert.Equal("60123456", quiz.LmsId);
+        Assert.Equal(ElmsAssignmentKind.Quiz, quiz.Kind);
+        Assert.Equal("05 Quiz 1", quiz.Title);
+        Assert.Equal("https://elms.sti.edu/student_quiz/show/60123456", quiz.Url);
+        Assert.Equal("Finals", quiz.TermHeader);
+        Assert.Equal(AssignmentStatus.Pending, quiz.Status);
+    }
 }
