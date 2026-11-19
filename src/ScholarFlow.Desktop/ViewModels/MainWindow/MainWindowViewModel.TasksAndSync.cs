@@ -134,10 +134,31 @@ public sealed partial class MainWindowViewModel
             return;
 
         task.DueDate = dueDate;
+        if (!dueDate.HasValue)
+            task.DueTime = null;
+        else if (!task.DueTime.HasValue)
+            task.DueTime = new TimeOnly(0, 0);
+
         await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
         StatusText = dueDate.HasValue
-            ? $"Due date set to {dueDate.Value:MMM d, yyyy} for '{task.Title}'"
+            ? $"Due date set to {dueDate.Value:MMM d, yyyy} ({task.DueTime:h:mm tt}) for '{task.Title}'"
             : $"Cleared due date for '{task.Title}'";
+        await ReloadBasinDataAsync();
+    }
+
+    public async Task SetTaskDueTimeAsync(TaskItem task, TimeOnly? dueTime)
+    {
+        if (task.DueTime == dueTime)
+            return;
+
+        task.DueTime = dueTime;
+        if (dueTime.HasValue && !task.DueDate.HasValue)
+            task.DueDate = DateOnly.FromDateTime(DateTime.Today);
+
+        await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, task);
+        StatusText = dueTime.HasValue
+            ? $"Due time set to {dueTime.Value:h:mm tt} for '{task.Title}'"
+            : $"Cleared due time for '{task.Title}'";
         await ReloadBasinDataAsync();
     }
 

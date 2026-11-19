@@ -716,7 +716,10 @@ public sealed partial class MainWindow
                 : isDueToday ? ThemeService.Brush(ThemeService.SuccessFg)
                 : ThemeService.Brush(ThemeService.TextSecondary);
 
-            var dateText = isDueToday ? "Today" : task.DueDate.Value.ToString("MMM d");
+            var baseDateText = isDueToday ? "Today" : task.DueDate.Value.ToString("MMM d");
+            var dateText = task.DueTime.HasValue
+                ? $"{baseDateText} · {task.DueTime.Value:h:mm tt}"
+                : baseDateText;
             var dateRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,

@@ -210,6 +210,68 @@ public static class InspectorPaneBuilder
 
         stack.Children.Add(dateRow);
 
+        // Due Time Editor + Quick Presets
+        stack.Children.Add(UiBuilder.SectionHeader("Due Time"));
+        var timeRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        var timeBox = new TextBox
+        {
+            Text = task.DueTime?.ToString("h:mm tt") ?? string.Empty,
+            Watermark = "12:00 AM / 23:59",
+            Width = 135,
+            Margin = new Thickness(0, 0, 6, 4),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        async Task ApplyTimeInputAsync()
+        {
+            var raw = timeBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                await vm.SetTaskDueTimeAsync(task, null);
+                return;
+            }
+            if (TimeOnly.TryParse(raw, System.Globalization.CultureInfo.CurrentCulture, out var parsed) ||
+                TimeOnly.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+            {
+                await vm.SetTaskDueTimeAsync(task, parsed);
+            }
+        }
+
+        timeBox.KeyDown += async (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                await ApplyTimeInputAsync();
+            }
+        };
+        timeBox.LostFocus += async (_, _) => await ApplyTimeInputAsync();
+        timeRow.Children.Add(timeBox);
+
+        void AddQuickTimeBtn(string label, TimeOnly? targetTime)
+        {
+            var btn = UiBuilder.GhostButton(
+                label,
+                null,
+                async () =>
+                {
+                    timeBox.Text = targetTime?.ToString("h:mm tt") ?? string.Empty;
+                    await vm.SetTaskDueTimeAsync(task, targetTime);
+                },
+                isActive: task.DueTime == targetTime && targetTime.HasValue);
+            btn.Margin = new Thickness(0, 0, 4, 4);
+            timeRow.Children.Add(btn);
+        }
+
+        AddQuickTimeBtn("12:00 AM", new TimeOnly(0, 0));
+        AddQuickTimeBtn("12:00 PM", new TimeOnly(12, 0));
+        AddQuickTimeBtn("5:00 PM", new TimeOnly(17, 0));
+        AddQuickTimeBtn("11:59 PM", new TimeOnly(23, 59));
+        if (task.DueTime.HasValue)
+            AddQuickTimeBtn("Clear", null);
+
+        stack.Children.Add(timeRow);
+
         // Academic Term Selector (Prelims / Midterms / Prefinals / Finals)
         stack.Children.Add(UiBuilder.SectionHeader("Academic Term"));
         var termRow = new WrapPanel { Orientation = Orientation.Horizontal };

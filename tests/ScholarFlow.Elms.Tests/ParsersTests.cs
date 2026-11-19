@@ -239,6 +239,7 @@ public sealed class ParsersTests
               <div class="hasRightColumn">
                 <div class="leftColumn">
                   <h2>Instructions</h2>
+                  <div class="materialStyle"><p></p></div>
                   <p>The quiz is timed, and you have 20:00 (mm:ss) to complete it.</p>
                 </div>
                 <aside class="rightColumn">
@@ -249,6 +250,7 @@ public sealed class ParsersTests
                       <li>Max score: 20</li>
                       <li>Start: Nov 19, 7:00 pm</li>
                       <li>Due: Nov 20, 11:00 am</li>
+                      <li>Timer: 20:00 (mm:ss)</li>
                     </ul>
                   </div>
                   <div class="block">
@@ -283,5 +285,15 @@ public sealed class ParsersTests
         Assert.Equal(AssignmentStatus.Pending, parsed.Status);
         Assert.NotNull(parsed.DueDate);
         Assert.Equal(new DateTime(2026, 11, 20, 11, 0, 0), parsed.DueDate.Value.LocalDateTime);
+        Assert.NotNull(parsed.StartDate);
+        Assert.Equal(new DateTime(2026, 11, 19, 19, 0, 0), parsed.StartDate.Value.LocalDateTime);
+        Assert.Equal("20:00 (mm:ss)", parsed.TimerText);
+        Assert.Contains("20:00 (mm:ss)", parsed.InstructionsMarkdown);
+
+        var note = HtmlToMarkdownConverter.FormatAssignmentNote(parsed);
+        Assert.Contains("timer: \"20:00 (mm:ss)\"", note);
+        Assert.Contains("**Timer:** 20:00 (mm:ss)", note);
+        Assert.Contains("- **Attempts:** 0 / 1", note);
+        Assert.Contains("- **Allow Late Submissions:** No", note);
     }
 }

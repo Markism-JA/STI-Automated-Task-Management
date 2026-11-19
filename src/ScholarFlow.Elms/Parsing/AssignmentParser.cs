@@ -100,15 +100,58 @@ public static partial class AssignmentParser
                       ?? summary?.DueDate
                       ?? TryParseDueDateFromPageText(centre.TextContent, year);
 
+        DateTimeOffset? startDate = null;
+        string? timerText = null;
+        if (rightCol is not null)
+        {
+            foreach (var li in rightCol.QuerySelectorAll("li"))
+            {
+                var liText = HtmlParsingHelpers.NormalizeWhitespace(li.TextContent);
+                if (liText.StartsWith("Start:", StringComparison.OrdinalIgnoreCase))
+                {
+                    startDate ??= TryParseFlexibleDate(liText["Start:".Length..].Trim(), year);
+                }
+                else if (liText.StartsWith("Timer:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var t = liText["Timer:".Length..].Trim();
+                    if (!string.IsNullOrWhiteSpace(t))
+                        timerText ??= t;
+                }
+            }
+        }
+
         var submissionInfo = ParseSubmissionBlock(rightCol, baseUrl);
         var status = DetermineStatus(centre, rightColText, submissionInfo, summary);
 
         var score = summary?.ScoreText ?? ExtractScoreText(rightCol, centre);
 
-        var instructionsEl = centre.QuerySelector(".leftColumn .materialStyle, .instructions, .assignment-description, .description")
-                             ?? centre.QuerySelector(".leftColumn, main, article")
-                             ?? centre;
-        var instructionsHtml = instructionsEl?.InnerHtml;
+        var instructionsEl = centre.QuerySelector(".leftColumn .materialStyle, .instructions, .assignment-description, .description");
+        if (instructionsEl is not null && string.IsNullOrWhiteSpace(HtmlParsingHelpers.NormalizeWhitespace(instructionsEl.TextContent)))
+            instructionsEl = null;
+        instructionsEl ??= centre.QuerySelector(".leftColumn, main, article") ?? centre;
+
+        string? instructionsHtml;
+        if (instructionsEl.ClassList.Contains("leftColumn"))
+        {
+            var clone = instructionsEl.Clone(true) as IElement;
+            if (clone is not null)
+            {
+                foreach (var actionBar in clone.QuerySelectorAll(".action-toolbar, .action-menu, script"))
+                    actionBar.Remove();
+                var firstH2 = clone.QuerySelector("h2");
+                if (firstH2 is not null && HtmlParsingHelpers.NormalizeWhitespace(firstH2.TextContent).Equals("Instructions", StringComparison.OrdinalIgnoreCase))
+                    firstH2.Remove();
+                instructionsHtml = clone.InnerHtml;
+            }
+            else
+            {
+                instructionsHtml = instructionsEl.InnerHtml;
+            }
+        }
+        else
+        {
+            instructionsHtml = instructionsEl.InnerHtml;
+        }
         var instructionsMd = HtmlToMarkdownConverter.Convert(instructionsHtml);
 
         var targetFolder = status is AssignmentStatus.Submitted or AssignmentStatus.Graded ? "completed" : "ongoing";
@@ -137,7 +180,9 @@ public static partial class AssignmentParser
             MaxScore: maxScore,
             WeightPercent: summary?.WeightPercent,
             InstructionsMarkdown: string.IsNullOrWhiteSpace(instructionsMd) ? null : instructionsMd,
-            Submission: submissionInfo);
+            Submission: submissionInfo,
+            StartDate: startDate,
+            TimerText: timerText);
     }
 
     /// <summary>

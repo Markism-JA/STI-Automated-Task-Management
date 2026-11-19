@@ -194,11 +194,15 @@ public static class CalendarViewBuilder
                 )
                 : ThemeService.GetPriorityBrushes(t.Priority);
 
+            var pillLabel = t.DueTime.HasValue
+                ? $"{t.DueTime.Value:h:mm tt} · {t.Title}"
+                : t.Title;
+
             var pillBtn = new Button
             {
                 Content = new TextBlock
                 {
-                    Text = t.Title,
+                    Text = pillLabel,
                     FontSize = 10.5,
                     Foreground = pFg,
                     TextTrimming = TextTrimming.CharacterEllipsis,
@@ -363,6 +367,13 @@ public static class CalendarViewBuilder
                         "View PDF",
                         MaterialIconKind.FilePdfBox,
                         () => vm.OpenTaskFile(task, task.PrimaryPdfFile!)));
+                }
+                if (task.DueTime.HasValue)
+                {
+                    rightBadges.Children.Add(UiBuilder.Pill(
+                        task.DueTime.Value.ToString("h:mm tt"),
+                        ThemeService.Brush(ThemeService.TextPrimary),
+                        ThemeService.Brush(ThemeService.BgBase)));
                 }
                 if (!string.IsNullOrWhiteSpace(task.Term))
                 {

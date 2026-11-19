@@ -58,8 +58,12 @@ public static class HtmlToMarkdownConverter
         sb.AppendLine($"course_id: \"{assignment.CourseId}\"");
         sb.AppendLine($"type: \"{assignment.Kind}\"");
         sb.AppendLine($"status: \"{assignment.Status}\"");
+        if (assignment.StartDate.HasValue)
+            sb.AppendLine($"start_date: \"{assignment.StartDate.Value:yyyy-MM-dd HH:mm}\"");
         if (assignment.DueDate.HasValue)
             sb.AppendLine($"due_date: \"{assignment.DueDate.Value:yyyy-MM-dd HH:mm}\"");
+        if (!string.IsNullOrWhiteSpace(assignment.TimerText))
+            sb.AppendLine($"timer: \"{assignment.TimerText}\"");
         if (!string.IsNullOrWhiteSpace(assignment.TermHeader))
             sb.AppendLine($"term: \"{assignment.TermHeader}\"");
         if (assignment.MaxScore.HasValue)
@@ -75,8 +79,12 @@ public static class HtmlToMarkdownConverter
         sb.AppendLine();
 
         var metaParts = new List<string> { $"**Status:** {assignment.Status}" };
+        if (assignment.StartDate.HasValue)
+            metaParts.Add($"**Start:** {assignment.StartDate.Value:yyyy-MM-dd h:mm tt}");
         if (assignment.DueDate.HasValue)
             metaParts.Add($"**Due:** {assignment.DueDate.Value:yyyy-MM-dd h:mm tt}");
+        if (!string.IsNullOrWhiteSpace(assignment.TimerText))
+            metaParts.Add($"**Timer:** {assignment.TimerText}");
         if (assignment.MaxScore.HasValue)
             metaParts.Add($"**Max Score:** {assignment.MaxScore.Value}");
         if (!string.IsNullOrWhiteSpace(assignment.Score))
@@ -105,13 +113,16 @@ public static class HtmlToMarkdownConverter
         }
 
         var sub = assignment.SubmissionInfo;
-        if (sub.IsSubmitted || sub.SubmittedFiles.Count > 0 || sub.Comments.Count > 0)
+        if (sub.IsSubmitted || sub.SubmittedFiles.Count > 0 || sub.Comments.Count > 0 ||
+            assignment.Kind == ElmsAssignmentKind.Quiz || sub.MaxAttempts.HasValue)
         {
             sb.AppendLine("## Submission");
             sb.AppendLine();
             if (!string.IsNullOrWhiteSpace(sub.SubmittedAtText))
                 sb.AppendLine($"- **Submitted:** {sub.SubmittedAtText}");
             sb.AppendLine($"- **Attempts:** {sub.Attempts}" + (sub.MaxAttempts.HasValue ? $" / {sub.MaxAttempts.Value}" : ""));
+            if (assignment.Kind == ElmsAssignmentKind.Quiz || sub.MaxAttempts.HasValue)
+                sb.AppendLine($"- **Allow Late Submissions:** {(sub.AllowLateSubmissions ? "Yes" : "No")}");
             foreach (var file in sub.SubmittedFiles)
                 sb.AppendLine($"- **Submitted File:** [{file.DisplayName}]({file.SanitizedFileName})");
             foreach (var comment in sub.Comments)

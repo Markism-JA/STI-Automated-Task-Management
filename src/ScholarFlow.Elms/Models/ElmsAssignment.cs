@@ -74,7 +74,9 @@ public sealed record ElmsAssignment(
     int? MaxScore = null,
     double? WeightPercent = null,
     string? InstructionsMarkdown = null,
-    ElmsSubmissionInfo? Submission = null)
+    ElmsSubmissionInfo? Submission = null,
+    DateTimeOffset? StartDate = null,
+    string? TimerText = null)
 {
     public ElmsSubmissionInfo SubmissionInfo => Submission ?? ElmsSubmissionInfo.Empty;
 
