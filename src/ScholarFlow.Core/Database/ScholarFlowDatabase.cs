@@ -147,6 +147,7 @@ public static partial class ScholarFlowDatabase
                 section_title TEXT NOT NULL,
                 verbatim_quote TEXT NOT NULL,
                 highlight_rects_json TEXT NOT NULL,
+                evidence_anchors_json TEXT NOT NULL DEFAULT '[]',
                 srs_interval_days REAL NOT NULL DEFAULT 0,
                 srs_ease_factor REAL NOT NULL DEFAULT 2.5,
                 srs_due_date TEXT NULL,
@@ -185,7 +186,8 @@ public static partial class ScholarFlowDatabase
                      "ALTER TABLE quiz_questions ADD COLUMN code_snippet TEXT NULL;",
                      "ALTER TABLE quiz_questions ADD COLUMN code_language TEXT NULL;",
                      "ALTER TABLE quiz_questions ADD COLUMN math_latex TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;"
+                     "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;",
+                     "ALTER TABLE quiz_questions ADD COLUMN evidence_anchors_json TEXT NOT NULL DEFAULT '[]';"
                  })
         {
             try

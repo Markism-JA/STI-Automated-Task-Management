@@ -362,9 +362,61 @@ public static class PdfQuizGrounder
             foreach (var q in questions)
             {
                 q.SourcePdfPath = pdfPath;
-                var rects = ComputeHighlightRects(doc, q.SourcePage, q.VerbatimQuote, out int resolvedPage);
-                q.SourcePage = Math.Clamp(resolvedPage, 1, doc.NumberOfPages);
-                q.HighlightRects = rects;
+                var candidateQuotes = CollectCandidateQuotes(q);
+                var resolvedAnchors = new List<GroundedEvidenceAnchor>();
+                var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                int primaryPage = q.SourcePage;
+                List<NormalizedHighlightRect> primaryRects = [];
+
+                foreach (var quote in candidateQuotes)
+                {
+                    var rects = ComputeHighlightRects(doc, q.SourcePage, quote, out int resolvedPage);
+                    resolvedPage = Math.Clamp(resolvedPage, 1, doc.NumberOfPages);
+                    if (rects.Count == 0)
+                        continue;
+
+                    var sec = pageSections[resolvedPage].SectionBreadcrumb;
+                    var key = $"{resolvedPage}:{quote.Trim()}";
+                    if (seenKeys.Add(key))
+                    {
+                        resolvedAnchors.Add(new GroundedEvidenceAnchor(
+                            resolvedPage,
+                            !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
+                            quote.Trim(),
+                            rects));
+                    }
+
+                    if (primaryRects.Count == 0)
+                    {
+                        primaryPage = resolvedPage;
+                        primaryRects = [.. rects];
+                    }
+                    else if (resolvedPage == primaryPage)
+                    {
+                        primaryRects.AddRange(rects);
+                    }
+                }
+
+                // Fallback to whole VerbatimQuote if splitting yielded nothing
+                if (primaryRects.Count == 0 && !string.IsNullOrWhiteSpace(q.VerbatimQuote))
+                {
+                    primaryRects = ComputeHighlightRects(doc, q.SourcePage, q.VerbatimQuote, out int fallbackPage);
+                    primaryPage = Math.Clamp(fallbackPage, 1, doc.NumberOfPages);
+                    if (primaryRects.Count > 0)
+                    {
+                        var sec = pageSections[primaryPage].SectionBreadcrumb;
+                        resolvedAnchors.Add(new GroundedEvidenceAnchor(
+                            primaryPage,
+                            !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
+                            q.VerbatimQuote.Trim(),
+                            primaryRects));
+                    }
+                }
+
+                q.SourcePage = Math.Clamp(primaryPage, 1, doc.NumberOfPages);
+                q.HighlightRects = primaryRects;
+                q.EvidenceAnchors = resolvedAnchors;
 
                 if (forceUpdateSection || string.IsNullOrWhiteSpace(q.SectionTitle))
                 {
@@ -728,5 +780,44 @@ public static class PdfQuizGrounder
             return true;
         }
         return false;
+    }
+
+    private static List<string> CollectCandidateQuotes(QuizQuestionRecord q)
+    {
+        var quotes = new List<string>();
+        void AddIfUseful(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+            var trimmed = raw.Trim();
+            if (trimmed.Length >= 6 && !quotes.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+                quotes.Add(trimmed);
+        }
+
+        if (!string.IsNullOrWhiteSpace(q.VerbatimQuote))
+        {
+            var segments = q.VerbatimQuote
+                .Split(["...", " | ", "; ", " vs. ", " vs "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length > 1)
+            {
+                foreach (var seg in segments)
+                    AddIfUseful(seg);
+            }
+            else
+            {
+                AddIfUseful(q.VerbatimQuote);
+            }
+        }
+
+        foreach (var anchor in q.EvidenceAnchors)
+            AddIfUseful(anchor.VerbatimQuote);
+
+        if (q.Kind == QuizQuestionKind.Ordering && q.Options.Count >= 2 && quotes.Count <= 1)
+        {
+            foreach (var step in q.Options)
+                AddIfUseful(step);
+        }
+
+        return quotes;
     }
 }

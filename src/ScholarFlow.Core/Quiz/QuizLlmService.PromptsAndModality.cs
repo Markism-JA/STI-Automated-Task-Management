@@ -115,6 +115,7 @@ public sealed partial class QuizLlmService
                - "pageNumber": the exact integer page number from the "=== [PAGE N] | Section: ... ===" header where the fact appears.
                - "sectionTitle": the exact section title from that page header.
                - "verbatimQuote": an exact 8 to 28 word substring copied WORD-FOR-WORD from that page's text so our PDF highlighter can locate its pixel bounding box.
+               - "secondaryQuotes" (optional string array): for Ordering questions (include key verbatim phrases for all steps) or Comparison/Distinction questions (include the contrasting statement verbatim), list additional exact quotes so multiple sections/pages are highlighted.
             3. For MultipleChoice and Situational questions:
                - Provide 4 options in "options" (plain text without "A)" prefixes).
                - "correctAnswer" MUST exactly match one of the strings in "options".

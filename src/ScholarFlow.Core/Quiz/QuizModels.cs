@@ -58,6 +58,12 @@ public sealed record NormalizedHighlightRect(
     double Width,
     double Height);
 
+public sealed record GroundedEvidenceAnchor(
+    int PageNumber,
+    string SectionTitle,
+    string VerbatimQuote,
+    List<NormalizedHighlightRect> HighlightRects);
+
 /// <summary>
 /// JSON DTO representing the exact statement and page inside the Master/Handout PDF that grounds a question.
 /// </summary>
@@ -71,6 +77,9 @@ public sealed class EvidenceAnchorDto
 
     [JsonPropertyName("verbatimQuote")]
     public string VerbatimQuote { get; set; } = string.Empty;
+
+    [JsonPropertyName("secondaryQuotes")]
+    public List<string>? SecondaryQuotes { get; set; }
 }
 
 /// <summary>
@@ -167,6 +176,7 @@ public sealed class QuizQuestionRecord
     public string SectionTitle { get; set; } = string.Empty;
     public string VerbatimQuote { get; set; } = string.Empty;
     public List<NormalizedHighlightRect> HighlightRects { get; set; } = [];
+    public List<GroundedEvidenceAnchor> EvidenceAnchors { get; set; } = [];
 
     // Spaced Repetition (SM-2 / FSRS hybrid) & Attempt History
     public double SrsIntervalDays { get; set; }
@@ -229,7 +239,133 @@ public sealed class QuizQuestionRecord
             }
         }
 
+        if (Kind is QuizQuestionKind.FillInTheBlank or QuizQuestionKind.Identification)
+        {
+            if (IsFuzzyTextMatch(userAnswer, CorrectAnswer))
+                return true;
+
+            foreach (var alias in AcceptedAliases)
+            {
+                if (!string.IsNullOrWhiteSpace(alias) && IsFuzzyTextMatch(userAnswer, alias))
+                    return true;
+            }
+        }
+
         return false;
+    }
+
+    private static readonly HashSet<string> AnswerStopwords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "of", "in", "on", "at", "to", "for", "and", "or", "by", "with", "is", "are", "was", "were", "that", "which"
+    };
+
+    private static bool IsFuzzyTextMatch(string userRaw, string targetRaw)
+    {
+        var userNorm = NormalizeAnswerToken(userRaw);
+        var targetNorm = NormalizeAnswerToken(targetRaw);
+        if (string.IsNullOrEmpty(userNorm) || string.IsNullOrEmpty(targetNorm))
+            return false;
+
+        // Strip leading articles / filler words
+        var userStripped = StripLeadingStopwords(userNorm);
+        var targetStripped = StripLeadingStopwords(targetNorm);
+        if (string.Equals(userStripped, targetStripped, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Avoid fuzzy matching short codes/acronyms or pure numbers (e.g. "TCP" vs "UDP", "1984" vs "1985")
+        if (targetStripped.All(c => char.IsDigit(c) || char.IsWhiteSpace(c)) || targetStripped.Length < 4)
+            return false;
+
+        // Single/phrase Levenshtein tolerance
+        int maxDist = targetStripped.Length switch
+        {
+            <= 4 => 0,
+            <= 9 => 1,
+            <= 18 => 2,
+            _ => 3
+        };
+        if (maxDist > 0 && ComputeLevenshteinDistance(userStripped, targetStripped) <= maxDist)
+            return true;
+
+        // Multi-word / key-token coverage (ignores articles/prepositions and handles minor plural/typo differences)
+        var userTokens = TokenizeSignificant(userRaw);
+        var targetTokens = TokenizeSignificant(targetRaw);
+        if (targetTokens.Count == 0 || userTokens.Count == 0)
+            return false;
+
+        if (userTokens.Count > targetTokens.Count + 2)
+            return false;
+
+        int matched = 0;
+        foreach (var tTok in targetTokens)
+        {
+            if (userTokens.Any(uTok => TokensApproximatelyEqual(uTok, tTok)))
+                matched++;
+        }
+
+        double coverage = (double)matched / targetTokens.Count;
+        return targetTokens.Count == 1
+            ? matched == 1
+            : coverage >= 0.85 && userTokens.Count >= Math.Max(1, targetTokens.Count - 1);
+    }
+
+    private static string StripLeadingStopwords(string normalized)
+    {
+        var parts = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (parts.Count > 1 && AnswerStopwords.Contains(parts[0]))
+            parts.RemoveAt(0);
+        return string.Join(' ', parts);
+    }
+
+    private static List<string> TokenizeSignificant(string raw)
+    {
+        return NormalizeAnswerToken(raw)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => !AnswerStopwords.Contains(t))
+            .Select(SingularizeToken)
+            .ToList();
+    }
+
+    private static string SingularizeToken(string token)
+    {
+        if (token.Length >= 5 && token.EndsWith("ies", StringComparison.Ordinal))
+            return token[..^3] + "y";
+        if (token.Length >= 4 && token.EndsWith('s') && !token.EndsWith("ss", StringComparison.Ordinal))
+            return token[..^1];
+        return token;
+    }
+
+    private static bool TokensApproximatelyEqual(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (a.Length < 5 || b.Length < 5)
+            return false;
+        return ComputeLevenshteinDistance(a, b) <= 1;
+    }
+
+    private static int ComputeLevenshteinDistance(string s, string t)
+    {
+        int n = s.Length, m = t.Length;
+        if (Math.Abs(n - m) > 4)
+            return Math.Abs(n - m);
+
+        var prev = new int[m + 1];
+        var curr = new int[m + 1];
+        for (int j = 0; j <= m; j++) prev[j] = j;
+
+        for (int i = 1; i <= n; i++)
+        {
+            curr[0] = i;
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            (prev, curr) = (curr, prev);
+        }
+
+        return prev[m];
     }
 
     private static string StripOptionPrefix(string text)

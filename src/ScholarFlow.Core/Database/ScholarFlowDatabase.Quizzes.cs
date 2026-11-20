@@ -76,13 +76,13 @@ public static partial class ScholarFlowDatabase
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
                         srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
-                        code_snippet, code_language, math_latex, diagram_text
+                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json
                     ) VALUES (
                         $id, $quiz_id, $order_index, $kind, $cognitive_level, $difficulty, $topic_tag,
                         $prompt, $options_json, $correct_answer, $aliases_json, $explanation,
                         $source_pdf_path, $source_page, $section_title, $verbatim_quote, $highlight_rects_json,
                         $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct,
-                        $code_snippet, $code_language, $math_latex, $diagram_text
+                        $code_snippet, $code_language, $math_latex, $diagram_text, $evidence_anchors_json
                     );
                     """;
                 itemCmd.Parameters.AddWithValue("$id", q.Id);
@@ -102,6 +102,7 @@ public static partial class ScholarFlowDatabase
                 itemCmd.Parameters.AddWithValue("$section_title", q.SectionTitle);
                 itemCmd.Parameters.AddWithValue("$verbatim_quote", q.VerbatimQuote);
                 itemCmd.Parameters.AddWithValue("$highlight_rects_json", JsonSerializer.Serialize(q.HighlightRects));
+                itemCmd.Parameters.AddWithValue("$evidence_anchors_json", JsonSerializer.Serialize(q.EvidenceAnchors));
                 itemCmd.Parameters.AddWithValue("$srs_interval_days", q.SrsIntervalDays);
                 itemCmd.Parameters.AddWithValue("$srs_ease_factor", q.SrsEaseFactor);
                 itemCmd.Parameters.AddWithValue("$srs_due_date", q.SrsDueDate.HasValue ? q.SrsDueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : DBNull.Value);
@@ -186,7 +187,7 @@ public static partial class ScholarFlowDatabase
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
                         srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
-                        code_snippet, code_language, math_latex, diagram_text
+                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json
                     FROM quiz_questions
                     ORDER BY quiz_id, order_index;
                     """;
@@ -217,6 +218,9 @@ public static partial class ScholarFlowDatabase
                         SectionTitle = r.GetString(14),
                         VerbatimQuote = r.GetString(15),
                         HighlightRects = TryDeserializeList<NormalizedHighlightRect>(r.GetString(16)),
+                        EvidenceAnchors = r.FieldCount > 27 && !r.IsDBNull(27)
+                            ? TryDeserializeList<GroundedEvidenceAnchor>(r.GetString(27))
+                            : [],
                         SrsIntervalDays = r.GetDouble(17),
                         SrsEaseFactor = r.GetDouble(18),
                         SrsDueDate = !r.IsDBNull(19) && DateOnly.TryParseExact(r.GetString(19), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var sd) ? sd : null,

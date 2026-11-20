@@ -258,6 +258,14 @@ public sealed partial class QuizLlmService
                 SourcePage = qDto.Evidence?.PageNumber > 0 ? qDto.Evidence.PageNumber : (pages.FirstOrDefault()?.PageNumber ?? 1),
                 SectionTitle = qDto.Evidence?.SectionTitle ?? string.Empty,
                 VerbatimQuote = qDto.Evidence?.VerbatimQuote ?? string.Empty,
+                EvidenceAnchors = qDto.Evidence?.SecondaryQuotes?
+                    .Where(sq => !string.IsNullOrWhiteSpace(sq))
+                    .Select(sq => new GroundedEvidenceAnchor(
+                        qDto.Evidence.PageNumber > 0 ? qDto.Evidence.PageNumber : 1,
+                        qDto.Evidence.SectionTitle ?? string.Empty,
+                        sq.Trim(),
+                        []))
+                    .ToList() ?? [],
                 SrsDueDate = today
             };
 

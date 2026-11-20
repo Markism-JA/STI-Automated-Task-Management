@@ -379,4 +379,30 @@ public class QuizStudioV2Tests
                 Directory.Delete(tempRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public void EvaluateAnswer_FillInTheBlank_SupportsFuzzyTyposArticlesAndRejectsWrongAcronyms()
+    {
+        var phraseQ = new QuizQuestionRecord
+        {
+            Kind = QuizQuestionKind.FillInTheBlank,
+            Prompt = "The process of verifying conformance is called _____.",
+            CorrectAnswer = "Software Quality Assurance"
+        };
+
+        Assert.True(phraseQ.EvaluateAnswer("software quality assurance"));
+        Assert.True(phraseQ.EvaluateAnswer("the software quality assurance"));
+        Assert.True(phraseQ.EvaluateAnswer("software quality assuranc")); // 1-char typo
+        Assert.False(phraseQ.EvaluateAnswer("software testing"));
+
+        var acronymQ = new QuizQuestionRecord
+        {
+            Kind = QuizQuestionKind.FillInTheBlank,
+            Prompt = "_____ provides connectionless datagram delivery.",
+            CorrectAnswer = "UDP"
+        };
+
+        Assert.True(acronymQ.EvaluateAnswer("udp"));
+        Assert.False(acronymQ.EvaluateAnswer("TCP")); // Must NOT fuzzy-match short 3-letter acronyms
+    }
 }
