@@ -557,45 +557,174 @@ public static partial class QuizStudioViewBuilder
                         or QuizQuestionKind.TrueFalse
                 )
                 {
-                    editStack.Children.Add(
+                    bool isOrdering = capturedQ.Kind == QuizQuestionKind.Ordering;
+                    var optsHeader = new Grid
+                    {
+                        ColumnDefinitions = ColumnDefinitions.Parse("*,Auto"),
+                        ColumnSpacing = 8,
+                    };
+                    optsHeader.Children.Add(
                         new TextBlock
                         {
-                            Text =
-                                capturedQ.Kind == QuizQuestionKind.Ordering
-                                    ? "Steps in CORRECT chronological order (one step per line — shuffled automatically during quiz):"
-                                    : "Options (one option per line):",
+                            Text = isOrdering
+                                ? "Steps in CORRECT chronological order (shuffled automatically during quiz):"
+                                : "Options (click the circle to mark the correct answer):",
                             FontSize = 11.5,
                             Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                            TextWrapping = TextWrapping.Wrap,
+                            VerticalAlignment = VerticalAlignment.Center,
                         }
                     );
-
-                    var optsBox = new TextBox
-                    {
-                        Text = string.Join("\n", capturedQ.Options),
-                        AcceptsReturn = true,
-                        TextWrapping = TextWrapping.Wrap,
-                        MinHeight = 72,
-                        FontSize = 12,
-                    };
-                    optsBox.PropertyChanged += (_, e) =>
-                    {
-                        if (e.Property == TextBox.TextProperty)
+                    var addOptBtn = UiBuilder.GhostButton(
+                        isOrdering ? "Add Step" : "Add Option",
+                        MaterialIconKind.Plus,
+                        () =>
                         {
-                            capturedQ.Options = (optsBox.Text ?? string.Empty)
-                                .Split(
-                                    '\n',
-                                    StringSplitOptions.RemoveEmptyEntries
-                                        | StringSplitOptions.TrimEntries
-                                )
-                                .ToList();
-                            if (
-                                capturedQ.Kind == QuizQuestionKind.Ordering
-                                && capturedQ.Options.Count >= 2
-                            )
+                            capturedQ.Options.Add(
+                                isOrdering
+                                    ? $"Step {capturedQ.Options.Count + 1}"
+                                    : $"Option {capturedQ.Options.Count + 1}"
+                            );
+                            if (isOrdering && capturedQ.Options.Count >= 2)
                                 capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                            vm.RequestUiRefresh();
                         }
-                    };
-                    editStack.Children.Add(optsBox);
+                    );
+                    Grid.SetColumn(addOptBtn, 1);
+                    optsHeader.Children.Add(addOptBtn);
+                    editStack.Children.Add(optsHeader);
+
+                    var optsListStack = new StackPanel { Spacing = 6 };
+                    for (int oi = 0; oi < capturedQ.Options.Count; oi++)
+                    {
+                        int capturedIdx = oi;
+                        var currentVal = capturedQ.Options[oi];
+                        bool isCorrectChoice = !isOrdering && string.Equals(
+                            currentVal.Trim(),
+                            capturedQ.CorrectAnswer.Trim(),
+                            StringComparison.OrdinalIgnoreCase);
+
+                        var optRow = new Grid
+                        {
+                            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto,Auto"),
+                            ColumnSpacing = 6,
+                        };
+
+                        if (isOrdering)
+                        {
+                            var numPill = UiBuilder.PillBadge(
+                                $"{oi + 1}",
+                                ThemeService.Brush(ThemeService.AccentPrimary),
+                                ThemeService.Brush(ThemeService.AccentSoftBg)
+                            );
+                            numPill.VerticalAlignment = VerticalAlignment.Center;
+                            optRow.Children.Add(numPill);
+                        }
+                        else
+                        {
+                            var markBtn = UiBuilder.IconButton(
+                                isCorrectChoice
+                                    ? MaterialIconKind.CheckCircle
+                                    : MaterialIconKind.CircleOutline,
+                                () =>
+                                {
+                                    capturedQ.CorrectAnswer = capturedQ.Options[capturedIdx];
+                                    vm.RequestUiRefresh();
+                                },
+                                16,
+                                isCorrectChoice
+                                    ? ThemeService.Brush(ThemeService.SuccessFg)
+                                    : ThemeService.Brush(ThemeService.TextMuted)
+                            );
+                            markBtn.VerticalAlignment = VerticalAlignment.Center;
+                            optRow.Children.Add(markBtn);
+                        }
+
+                        var optItemBox = new TextBox
+                        {
+                            Text = currentVal,
+                            Watermark = isOrdering ? $"Step {oi + 1}..." : $"Option {oi + 1}...",
+                            TextWrapping = TextWrapping.Wrap,
+                            FontSize = 12,
+                        };
+                        optItemBox.PropertyChanged += (_, e) =>
+                        {
+                            if (e.Property == TextBox.TextProperty && capturedIdx < capturedQ.Options.Count)
+                            {
+                                var wasCorrect = !isOrdering && string.Equals(
+                                    capturedQ.Options[capturedIdx].Trim(),
+                                    capturedQ.CorrectAnswer.Trim(),
+                                    StringComparison.OrdinalIgnoreCase);
+                                var nextText = optItemBox.Text ?? string.Empty;
+                                capturedQ.Options[capturedIdx] = nextText;
+                                if (wasCorrect)
+                                    capturedQ.CorrectAnswer = nextText.Trim();
+                                else if (isOrdering && capturedQ.Options.Count >= 2)
+                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                            }
+                        };
+                        Grid.SetColumn(optItemBox, 1);
+                        optRow.Children.Add(optItemBox);
+
+                        if (isOrdering)
+                        {
+                            var upStepBtn = UiBuilder.IconButton(
+                                MaterialIconKind.ArrowUp,
+                                () =>
+                                {
+                                    if (capturedIdx <= 0) return;
+                                    (capturedQ.Options[capturedIdx - 1], capturedQ.Options[capturedIdx]) =
+                                        (capturedQ.Options[capturedIdx], capturedQ.Options[capturedIdx - 1]);
+                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    vm.RequestUiRefresh();
+                                },
+                                13,
+                                ThemeService.Brush(ThemeService.TextSecondary)
+                            );
+                            upStepBtn.VerticalAlignment = VerticalAlignment.Center;
+                            Grid.SetColumn(upStepBtn, 2);
+                            optRow.Children.Add(upStepBtn);
+
+                            var downStepBtn = UiBuilder.IconButton(
+                                MaterialIconKind.ArrowDown,
+                                () =>
+                                {
+                                    if (capturedIdx >= capturedQ.Options.Count - 1) return;
+                                    (capturedQ.Options[capturedIdx + 1], capturedQ.Options[capturedIdx]) =
+                                        (capturedQ.Options[capturedIdx], capturedQ.Options[capturedIdx + 1]);
+                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    vm.RequestUiRefresh();
+                                },
+                                13,
+                                ThemeService.Brush(ThemeService.TextSecondary)
+                            );
+                            downStepBtn.VerticalAlignment = VerticalAlignment.Center;
+                            Grid.SetColumn(downStepBtn, 3);
+                            optRow.Children.Add(downStepBtn);
+                        }
+
+                        var delOptBtn = UiBuilder.IconButton(
+                            MaterialIconKind.Close,
+                            () =>
+                            {
+                                if (capturedIdx < capturedQ.Options.Count)
+                                {
+                                    capturedQ.Options.RemoveAt(capturedIdx);
+                                    if (isOrdering && capturedQ.Options.Count >= 2)
+                                        capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    vm.RequestUiRefresh();
+                                }
+                            },
+                            13,
+                            ThemeService.Brush(ThemeService.PriorityP1Fg)
+                        );
+                        delOptBtn.VerticalAlignment = VerticalAlignment.Center;
+                        Grid.SetColumn(delOptBtn, 4);
+                        optRow.Children.Add(delOptBtn);
+
+                        optsListStack.Children.Add(optRow);
+                    }
+                    editStack.Children.Add(optsListStack);
                 }
 
                 var ansGrid = new Grid
@@ -721,6 +850,22 @@ public static partial class QuizStudioViewBuilder
         }
 
         stack.Children.Add(qListStack);
+
+        var bottomAddRow = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 8),
+        };
+        var bottomAddBtn = UiBuilder.ActionButton(
+            $"Add {addKindTarget} Question",
+            MaterialIconKind.Plus,
+            () => studio.AddBlankOrganizerQuestion(addKindTarget),
+            isPrimary: false
+        );
+        bottomAddRow.Children.Add(bottomAddBtn);
+        stack.Children.Add(bottomAddRow);
+
         return UiBuilder.PersistentScrollViewer($"quiz-organizer:{deck.Id}", stack);
     }
 
