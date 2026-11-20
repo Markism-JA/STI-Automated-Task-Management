@@ -8,7 +8,7 @@ public enum UrgencyTier
     Normal,
     Elevated,
     High,
-    Critical
+    Critical,
 }
 
 public sealed record UrgencyBreakdown(
@@ -19,7 +19,8 @@ public sealed record UrgencyBreakdown(
     double PriorityPoints,
     double DifficultyPoints,
     double LmsPenaltyPoints,
-    string Summary);
+    string Summary
+);
 
 /// <summary>
 /// Continuous Academic Urgency Calculator v2 (0-100 scale):
@@ -28,8 +29,8 @@ public sealed record UrgencyBreakdown(
 /// </summary>
 public static class UrgencyCalculator
 {
-    public static int CalculateScore(TaskItem task, DateOnly? today = null)
-        => Explain(task, today).Score;
+    public static int CalculateScore(TaskItem task, DateOnly? today = null) =>
+        Explain(task, today).Score;
 
     public static UrgencyBreakdown Explain(TaskItem task, DateOnly? today = null)
     {
@@ -61,7 +62,11 @@ public static class UrgencyCalculator
             else if (daysRemaining <= 21)
             {
                 deadlinePts = 34.0 * Math.Exp(-0.14 * daysRemaining);
-                leadTimePts = Math.Clamp(((diff - 1) * 4.5) / Math.Max(1.0, daysRemaining / 2.0), 0.0, 18.0);
+                leadTimePts = Math.Clamp(
+                    (diff - 1) * 4.5 / Math.Max(1.0, daysRemaining / 2.0),
+                    0.0,
+                    18.0
+                );
                 factors.Add($"Due in {daysRemaining}d (+{deadlinePts:F0})");
             }
             else
@@ -78,7 +83,7 @@ public static class UrgencyCalculator
             TaskPriority.P1 => 24.0,
             TaskPriority.P2 => 16.0,
             TaskPriority.P3 => 8.0,
-            _ => 0.0
+            _ => 0.0,
         };
         if (priorityPts > 0)
             factors.Add($"P{(int)task.Priority} (+{priorityPts:F0})");
@@ -86,21 +91,41 @@ public static class UrgencyCalculator
         double difficultyPts = diff * 2.0;
         factors.Add($"D{diff} (+{difficultyPts:F0})");
 
-        double lmsPenalty = string.Equals(task.LmsStatus, "Missing", StringComparison.OrdinalIgnoreCase) ? 6.0 : 0.0;
+        double lmsPenalty = string.Equals(
+            task.LmsStatus,
+            "Missing",
+            StringComparison.OrdinalIgnoreCase
+        )
+            ? 6.0
+            : 0.0;
         if (lmsPenalty > 0)
             factors.Add($"Missing (+{lmsPenalty:F0})");
 
-        int total = (int)Math.Clamp(Math.Round(deadlinePts + leadTimePts + priorityPts + difficultyPts + lmsPenalty), 0, 100);
+        int total = (int)
+            Math.Clamp(
+                Math.Round(deadlinePts + leadTimePts + priorityPts + difficultyPts + lmsPenalty),
+                0,
+                100
+            );
         var tier = total switch
         {
             >= 75 => UrgencyTier.Critical,
             >= 55 => UrgencyTier.High,
             >= 35 => UrgencyTier.Elevated,
             >= 15 => UrgencyTier.Normal,
-            _ => UrgencyTier.Low
+            _ => UrgencyTier.Low,
         };
 
         var summary = $"{total} · {tier} ({string.Join(" · ", factors)})";
-        return new UrgencyBreakdown(total, tier, deadlinePts, leadTimePts, priorityPts, difficultyPts, lmsPenalty, summary);
+        return new UrgencyBreakdown(
+            total,
+            tier,
+            deadlinePts,
+            leadTimePts,
+            priorityPts,
+            difficultyPts,
+            lmsPenalty,
+            summary
+        );
     }
 }

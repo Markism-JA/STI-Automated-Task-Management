@@ -8,10 +8,14 @@ namespace ScholarFlow.Core.Sync;
 /// - Fast Poll: checks assignment lists for new tasks, due-date updates, and newly posted grades.
 /// - Full Sync: downloads new handouts/submissions and regenerates stale Master PDFs.
 /// </summary>
-public sealed class ElmsPollingService : IAsyncDisposable
+public sealed class ElmsPollingService(
+    ElmsBasinSyncService syncService,
+    ILogger<ElmsPollingService>? logger = null
+) : IAsyncDisposable
 {
-    private readonly ElmsBasinSyncService _syncService;
-    private readonly ILogger<ElmsPollingService>? _logger;
+    private readonly ElmsBasinSyncService _syncService =
+        syncService ?? throw new ArgumentNullException(nameof(syncService));
+    private readonly ILogger<ElmsPollingService>? _logger = logger;
 
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
@@ -32,12 +36,6 @@ public sealed class ElmsPollingService : IAsyncDisposable
     {
         IsPaused = false;
         PausedUntilUtc = null;
-    }
-
-    public ElmsPollingService(ElmsBasinSyncService syncService, ILogger<ElmsPollingService>? logger = null)
-    {
-        _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
-        _logger = logger;
     }
 
     public void Start(string basinRoot, BasinConfig config)
@@ -65,19 +63,25 @@ public sealed class ElmsPollingService : IAsyncDisposable
 
     public async Task<IReadOnlyList<AppNotification>> TriggerFastPollAsync(
         string basinRoot,
-        CancellationToken ct = default,
-        bool allowInteractiveAuth = true)
+        bool allowInteractiveAuth = true,
+        CancellationToken ct = default
+    )
     {
         try
         {
-            var notifs = await _syncService.FastPollAssignmentsAsync(basinRoot, ct, allowInteractiveAuth);
+            var notifs = await _syncService.FastPollAssignmentsAsync(
+                basinRoot,
+                allowInteractiveAuth,
+                ct
+            );
             foreach (var n in notifs)
                 NotificationEmitted?.Invoke(this, n);
             return notifs;
         }
-        catch (ScholarFlow.Elms.Models.ElmsAuthenticationRequiredException ex)
+        catch (Elms.Models.ElmsAuthenticationRequiredException ex)
         {
-            _logger?.LogInformation("Skipping background fast poll: {Message}", ex.Message);
+            if (_logger?.IsEnabled(LogLevel.Information) == true)
+                _logger.LogInformation("Skipping background fast poll: {Message}", ex.Message);
             return [];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -92,20 +96,27 @@ public sealed class ElmsPollingService : IAsyncDisposable
     public async Task<BasinSyncReport> TriggerFullSyncAsync(
         string basinRoot,
         bool force = false,
-        CancellationToken ct = default,
-        bool allowInteractiveAuth = true)
+        bool allowInteractiveAuth = true,
+        CancellationToken ct = default
+    )
     {
         var report = await _syncService.SyncAllAsync(
             basinRoot,
             forceRedownload: force,
             ct: ct,
-            allowInteractiveAuth: allowInteractiveAuth);
+            allowInteractiveAuth: allowInteractiveAuth
+        );
         foreach (var n in report.Notifications)
             NotificationEmitted?.Invoke(this, n);
         return report;
     }
 
-    private async Task RunLoopAsync(string basinRoot, TimeSpan fastInterval, TimeSpan fullInterval, CancellationToken ct)
+    private async Task RunLoopAsync(
+        string basinRoot,
+        TimeSpan fastInterval,
+        TimeSpan fullInterval,
+        CancellationToken ct
+    )
     {
         var lastFullSync = DateTimeOffset.UtcNow;
         using var timer = new PeriodicTimer(fastInterval);
@@ -128,21 +139,27 @@ public sealed class ElmsPollingService : IAsyncDisposable
 
                 if (DateTimeOffset.UtcNow - lastFullSync >= fullInterval)
                 {
-                    await TriggerFullSyncAsync(basinRoot, force: false, ct, allowInteractiveAuth: false);
+                    await TriggerFullSyncAsync(basinRoot, force: false, false, ct);
                     lastFullSync = DateTimeOffset.UtcNow;
                 }
                 else
                 {
-                    await TriggerFastPollAsync(basinRoot, ct, allowInteractiveAuth: false);
+                    await TriggerFastPollAsync(basinRoot, false, ct);
                 }
             }
             catch (OperationCanceledException)
             {
                 break;
             }
-            catch (ScholarFlow.Elms.Models.ElmsAuthenticationRequiredException ex)
+            catch (Elms.Models.ElmsAuthenticationRequiredException ex)
             {
-                _logger?.LogInformation("Background sync deferred until user re-authenticates: {Message}", ex.Message);
+                if (_logger?.IsEnabled(LogLevel.Information) == true)
+                {
+                    _logger.LogInformation(
+                        "Background sync deferred until user re-authenticates: {Message}",
+                        ex.Message
+                    );
+                }
             }
             catch (Exception ex)
             {
@@ -158,7 +175,11 @@ public sealed class ElmsPollingService : IAsyncDisposable
         Stop();
         if (task is not null)
         {
-            try { await task; } catch (OperationCanceledException) { }
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException) { }
         }
     }
 }

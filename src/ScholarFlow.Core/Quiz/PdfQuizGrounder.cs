@@ -11,7 +11,8 @@ public sealed record GroundedPdfPage(
     int PageNumber,
     string? Term,
     string SectionBreadcrumb,
-    string Text);
+    string Text
+);
 
 /// <summary>
 /// Extracts bookmark-aware grounded page chunks from Master/Handout PDFs and resolves
@@ -23,11 +24,17 @@ public static class PdfQuizGrounder
         long LastWriteTicks,
         int TotalPages,
         (string? Term, string SectionBreadcrumb)[] PageSections,
-        string?[] PageTexts);
+        string?[] PageTexts
+    );
 
-    private static readonly ConcurrentDictionary<string, CachedPdfTextData> PdfTextCache =
-        new(StringComparer.OrdinalIgnoreCase);
-    public static IReadOnlyList<PdfOutlineSectionInfo> InspectOutlineSections(string pdfPath, out int totalPages)
+    private static readonly ConcurrentDictionary<string, CachedPdfTextData> PdfTextCache = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+
+    public static IReadOnlyList<PdfOutlineSectionInfo> InspectOutlineSections(
+        string pdfPath,
+        out int totalPages
+    )
     {
         totalPages = 0;
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
@@ -38,7 +45,11 @@ public static class PdfQuizGrounder
             using var doc = PdfDocument.Open(pdfPath);
             int pageCount = doc.NumberOfPages;
             totalPages = pageCount;
-            if (pageCount == 0 || !doc.TryGetBookmarks(out var bookmarks) || bookmarks.Roots.Count == 0)
+            if (
+                pageCount == 0
+                || !doc.TryGetBookmarks(out var bookmarks)
+                || bookmarks.Roots.Count == 0
+            )
                 return [];
 
             var flat = new List<(string Title, string? Term, int Level, int StartPage)>();
@@ -49,10 +60,12 @@ public static class PdfQuizGrounder
                 {
                     var title = (node.Title ?? string.Empty).Trim();
                     var term = TaskItem.NormalizeTerm(title) ?? inheritedTerm;
-                    if (node is DocumentBookmarkNode docNode &&
-                        docNode.PageNumber >= 1 &&
-                        docNode.PageNumber <= pageCount &&
-                        !title.Equals("Table of Contents", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        node is DocumentBookmarkNode docNode
+                        && docNode.PageNumber >= 1
+                        && docNode.PageNumber <= pageCount
+                        && !title.Equals("Table of Contents", StringComparison.OrdinalIgnoreCase)
+                    )
                     {
                         flat.Add((title, term, level, docNode.PageNumber));
                     }
@@ -67,25 +80,25 @@ public static class PdfQuizGrounder
             var sections = new List<PdfOutlineSectionInfo>();
             for (int i = 0; i < flat.Count; i++)
             {
-                var cur = flat[i];
+                var (Title, Term, Level, StartPage) = flat[i];
                 int endPage = totalPages;
                 for (int j = i + 1; j < flat.Count; j++)
                 {
-                    if (flat[j].Level <= cur.Level && flat[j].StartPage > cur.StartPage)
+                    if (flat[j].Level <= Level && flat[j].StartPage > StartPage)
                     {
                         endPage = flat[j].StartPage - 1;
                         break;
                     }
-                    if (flat[j].Level > cur.Level && flat[j].StartPage > cur.StartPage && cur.Level == 1)
+                    if (flat[j].Level > Level && flat[j].StartPage > StartPage && Level == 1)
                         continue;
                 }
 
                 // For leaf/handout nodes, also cap at next sibling or parent boundary
-                if (cur.Level >= 2)
+                if (Level >= 2)
                 {
                     for (int j = i + 1; j < flat.Count; j++)
                     {
-                        if (flat[j].StartPage > cur.StartPage)
+                        if (flat[j].StartPage > StartPage)
                         {
                             endPage = Math.Min(endPage, flat[j].StartPage - 1);
                             break;
@@ -93,8 +106,8 @@ public static class PdfQuizGrounder
                     }
                 }
 
-                endPage = Math.Clamp(endPage, cur.StartPage, totalPages);
-                sections.Add(new PdfOutlineSectionInfo(cur.Title, cur.Term, cur.Level, cur.StartPage, endPage));
+                endPage = Math.Clamp(endPage, StartPage, totalPages);
+                sections.Add(new PdfOutlineSectionInfo(Title, Term, Level, StartPage, endPage));
             }
 
             return sections;
@@ -109,13 +122,18 @@ public static class PdfQuizGrounder
     /// Fast (< 0.1ms) metadata-only resolution of which PDF pages and section titles are included in the active scope,
     /// without re-opening or re-parsing the PDF on the UI thread.
     /// </summary>
-    public static IReadOnlyList<(int PageNumber, string SectionTitle, string? Term)> ResolveScopePagesFast(
+    public static IReadOnlyList<(
+        int PageNumber,
+        string SectionTitle,
+        string? Term
+    )> ResolveScopePagesFast(
         int totalPages,
         IReadOnlyList<PdfOutlineSectionInfo> outlineSections,
         string? termFilter = null,
         int? startPage = null,
         int? endPage = null,
-        IReadOnlyList<PdfPageRange>? explicitRanges = null)
+        IReadOnlyList<PdfPageRange>? explicitRanges = null
+    )
     {
         if (totalPages <= 0)
             return [];
@@ -124,9 +142,11 @@ public static class PdfQuizGrounder
         bool hasExplicitRanges = explicitRanges is { Count: > 0 };
         var leafSections = outlineSections.Where(s => s.Level >= 2).ToList();
         if (leafSections.Count == 0)
-            leafSections = outlineSections.ToList();
+            leafSections = [.. outlineSections];
 
-        bool hasNonSyllabusSections = leafSections.Any(s => !s.Title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase));
+        bool hasNonSyllabusSections = leafSections.Any(s =>
+            !s.Title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
+        );
         int minP = Math.Clamp(startPage ?? 1, 1, totalPages);
         int maxP = Math.Clamp(endPage ?? totalPages, minP, totalPages);
 
@@ -136,37 +156,57 @@ public static class PdfQuizGrounder
             if (hasExplicitRanges && !explicitRanges!.Any(r => r.Contains(p)))
                 continue;
 
-            var sec = leafSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage)
-                      ?? outlineSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage);
+            var sec =
+                leafSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage)
+                ?? outlineSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage);
 
             // Skip cover / TOC / single-page term divider headers when outline sections exist and no explicit page range was typed
-            if (!hasExplicitRanges && !startPage.HasValue && !endPage.HasValue && outlineSections.Count > 0)
+            if (
+                !hasExplicitRanges
+                && !startPage.HasValue
+                && !endPage.HasValue
+                && outlineSections.Count > 0
+            )
             {
                 if (sec is null)
                     continue;
 
                 // Skip the 1-page Term Divider sheet itself (Level 1 start page before Level 2 handout starts)
-                if (outlineSections.Any(s => s.Level == 1 && s.StartPage == p && TaskItem.NormalizeTerm(s.Title) is not null) &&
-                    outlineSections.Any(s => s.Level >= 2))
+                if (
+                    outlineSections.Any(s =>
+                        s.Level == 1
+                        && s.StartPage == p
+                        && TaskItem.NormalizeTerm(s.Title) is not null
+                    ) && outlineSections.Any(s => s.Level >= 2)
+                )
                 {
                     continue;
                 }
 
                 // Skip Course Syllabus boilerplate by default unless explicitly checked
-                if (hasNonSyllabusSections && sec.Title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase))
+                if (
+                    hasNonSyllabusSections
+                    && sec.Title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
+                )
                     continue;
             }
 
             if (!hasExplicitRanges && !string.IsNullOrWhiteSpace(normalizedTerm))
             {
-                if (sec is null || !string.Equals(sec.Term, normalizedTerm, StringComparison.OrdinalIgnoreCase))
+                if (
+                    sec is null
+                    || !string.Equals(sec.Term, normalizedTerm, StringComparison.OrdinalIgnoreCase)
+                )
                     continue;
             }
 
             var label = sec is not null
-                ? (!string.IsNullOrWhiteSpace(sec.Term) && !sec.Title.Contains(sec.Term, StringComparison.OrdinalIgnoreCase)
-                    ? $"{sec.Term} / {sec.Title}"
-                    : sec.Title)
+                ? (
+                    !string.IsNullOrWhiteSpace(sec.Term)
+                    && !sec.Title.Contains(sec.Term, StringComparison.OrdinalIgnoreCase)
+                        ? $"{sec.Term} / {sec.Title}"
+                        : sec.Title
+                )
                 : $"Page {p}";
 
             matched.Add((p, label, sec?.Term ?? normalizedTerm));
@@ -192,16 +232,29 @@ public static class PdfQuizGrounder
         string? sectionFilter = null,
         int? startPage = null,
         int? endPage = null,
-        IReadOnlyList<PdfPageRange>? explicitRanges = null)
+        IReadOnlyList<PdfPageRange>? explicitRanges = null
+    )
     {
-        var pages = ExtractGroundedPages(pdfPath, termFilter, sectionFilter, startPage, endPage, explicitRanges, maxPages: 30);
+        var pages = ExtractGroundedPages(
+            pdfPath,
+            termFilter,
+            sectionFilter,
+            startPage,
+            endPage,
+            explicitRanges,
+            maxPages: 30
+        );
         if (pages.Count == 0)
             return (0, 0, "No readable content pages match the current filter.");
 
         int totalChars = pages.Sum(p => p.Text.Length);
         var first = pages[0];
         var snippet = first.Text.Length > 260 ? first.Text[..260].Trim() + "..." : first.Text;
-        return (pages.Count, totalChars, $"Page {first.PageNumber} ({first.SectionBreadcrumb}): {snippet}");
+        return (
+            pages.Count,
+            totalChars,
+            $"Page {first.PageNumber} ({first.SectionBreadcrumb}): {snippet}"
+        );
     }
 
     public static IReadOnlyList<GroundedPdfPage> ExtractGroundedPages(
@@ -211,13 +264,17 @@ public static class PdfQuizGrounder
         int? startPage = null,
         int? endPage = null,
         IReadOnlyList<PdfPageRange>? explicitRanges = null,
-        int maxPages = 150)
+        int maxPages = 150
+    )
     {
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
             return [];
 
         long currentTicks = File.GetLastWriteTimeUtc(pdfPath).Ticks;
-        if (!PdfTextCache.TryGetValue(pdfPath, out var cached) || cached.LastWriteTicks != currentTicks)
+        if (
+            !PdfTextCache.TryGetValue(pdfPath, out var cached)
+            || cached.LastWriteTicks != currentTicks
+        )
         {
             using var doc = PdfDocument.Open(pdfPath);
             int docPages = doc.NumberOfPages;
@@ -246,9 +303,10 @@ public static class PdfQuizGrounder
         var normalizedTerm = TaskItem.NormalizeTerm(termFilter);
         bool hasAnyTermBookmarks = pageSections.Any(ps => !string.IsNullOrWhiteSpace(ps.Term));
         bool hasNonSyllabusPages = pageSections.Any(ps =>
-            !string.IsNullOrWhiteSpace(ps.SectionBreadcrumb) &&
-            !ps.SectionBreadcrumb.Contains("Syllabus", StringComparison.OrdinalIgnoreCase) &&
-            !ps.SectionBreadcrumb.Equals("Table of Contents", StringComparison.OrdinalIgnoreCase));
+            !string.IsNullOrWhiteSpace(ps.SectionBreadcrumb)
+            && !ps.SectionBreadcrumb.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
+            && !ps.SectionBreadcrumb.Equals("Table of Contents", StringComparison.OrdinalIgnoreCase)
+        );
         bool hasExplicitRanges = explicitRanges is { Count: > 0 };
 
         int minP = Math.Clamp(startPage ?? 1, 1, totalPages);
@@ -262,25 +320,32 @@ public static class PdfQuizGrounder
 
             var (pageTerm, breadcrumb) = pageSections[p];
 
-            if (!hasExplicitRanges &&
-                !startPage.HasValue &&
-                !endPage.HasValue &&
-                string.IsNullOrWhiteSpace(sectionFilter) &&
-                hasNonSyllabusPages &&
-                breadcrumb.Contains("Syllabus", StringComparison.OrdinalIgnoreCase))
+            if (
+                !hasExplicitRanges
+                && !startPage.HasValue
+                && !endPage.HasValue
+                && string.IsNullOrWhiteSpace(sectionFilter)
+                && hasNonSyllabusPages
+                && breadcrumb.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
 
-            if (!hasExplicitRanges &&
-                !string.IsNullOrWhiteSpace(normalizedTerm) && hasAnyTermBookmarks &&
-                !string.Equals(pageTerm, normalizedTerm, StringComparison.OrdinalIgnoreCase))
+            if (
+                !hasExplicitRanges
+                && !string.IsNullOrWhiteSpace(normalizedTerm)
+                && hasAnyTermBookmarks
+                && !string.Equals(pageTerm, normalizedTerm, StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(sectionFilter) &&
-                !breadcrumb.Contains(sectionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (
+                !string.IsNullOrWhiteSpace(sectionFilter)
+                && !breadcrumb.Contains(sectionFilter.Trim(), StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
@@ -288,25 +353,41 @@ public static class PdfQuizGrounder
             var text = cached.PageTexts[p] ?? string.Empty;
 
             // Skip cover pages, term divider pages, table of contents, or nearly empty pages
-            if (text.Length < 180 ||
-                text.StartsWith("TABLE OF CONTENTS", StringComparison.OrdinalIgnoreCase) ||
-                (text.Contains("Includes:", StringComparison.OrdinalIgnoreCase) && text.Length < 320))
+            if (
+                text.Length < 180
+                || text.StartsWith("TABLE OF CONTENTS", StringComparison.OrdinalIgnoreCase)
+                || (
+                    text.Contains("Includes:", StringComparison.OrdinalIgnoreCase)
+                    && text.Length < 320
+                )
+            )
             {
                 continue;
             }
 
-            results.Add(new GroundedPdfPage(
-                PageNumber: p,
-                Term: pageTerm ?? normalizedTerm,
-                SectionBreadcrumb: string.IsNullOrWhiteSpace(breadcrumb) ? Path.GetFileNameWithoutExtension(pdfPath) : breadcrumb,
-                Text: text));
+            results.Add(
+                new GroundedPdfPage(
+                    PageNumber: p,
+                    Term: pageTerm ?? normalizedTerm,
+                    SectionBreadcrumb: string.IsNullOrWhiteSpace(breadcrumb)
+                        ? Path.GetFileNameWithoutExtension(pdfPath)
+                        : breadcrumb,
+                    Text: text
+                )
+            );
 
             if (results.Count >= maxPages)
                 break;
         }
 
         // Fallback if term filter excluded everything (e.g. individual handout PDF without term bookmarks)
-        if (results.Count == 0 && (!string.IsNullOrWhiteSpace(normalizedTerm) || !string.IsNullOrWhiteSpace(sectionFilter)))
+        if (
+            results.Count == 0
+            && (
+                !string.IsNullOrWhiteSpace(normalizedTerm)
+                || !string.IsNullOrWhiteSpace(sectionFilter)
+            )
+        )
         {
             for (int p = minP; p <= maxP && results.Count < maxPages; p++)
             {
@@ -315,18 +396,26 @@ public static class PdfQuizGrounder
                     continue;
 
                 var (_, breadcrumb) = pageSections[p];
-                results.Add(new GroundedPdfPage(
-                    PageNumber: p,
-                    Term: normalizedTerm,
-                    SectionBreadcrumb: string.IsNullOrWhiteSpace(breadcrumb) ? Path.GetFileNameWithoutExtension(pdfPath) : breadcrumb,
-                    Text: text));
+                results.Add(
+                    new GroundedPdfPage(
+                        PageNumber: p,
+                        Term: normalizedTerm,
+                        SectionBreadcrumb: string.IsNullOrWhiteSpace(breadcrumb)
+                            ? Path.GetFileNameWithoutExtension(pdfPath)
+                            : breadcrumb,
+                        Text: text
+                    )
+                );
             }
         }
 
         return results;
     }
 
-    public static string FormatPagesForPrompt(IReadOnlyList<GroundedPdfPage> pages, int maxChars = 42_000)
+    public static string FormatPagesForPrompt(
+        IReadOnlyList<GroundedPdfPage> pages,
+        int maxChars = 42_000
+    )
     {
         var sb = new StringBuilder();
         foreach (var p in pages)
@@ -346,7 +435,11 @@ public static class PdfQuizGrounder
     /// Grounds every question in the list against the source PDF, snapping SourcePage if off by 1-2 pages
     /// and computing exact normalized [0..1] highlight bounding boxes for the VerbatimQuote.
     /// </summary>
-    public static void GroundQuestionsToPdf(string pdfPath, IEnumerable<QuizQuestionRecord> questions, bool forceUpdateSection = false)
+    public static void GroundQuestionsToPdf(
+        string pdfPath,
+        IEnumerable<QuizQuestionRecord> questions,
+        bool forceUpdateSection = false
+    )
     {
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
             return;
@@ -371,7 +464,12 @@ public static class PdfQuizGrounder
 
                 foreach (var quote in candidateQuotes)
                 {
-                    var rects = ComputeHighlightRects(doc, q.SourcePage, quote, out int resolvedPage);
+                    var rects = ComputeHighlightRects(
+                        doc,
+                        q.SourcePage,
+                        quote,
+                        out int resolvedPage
+                    );
                     resolvedPage = Math.Clamp(resolvedPage, 1, doc.NumberOfPages);
                     if (rects.Count == 0)
                         continue;
@@ -380,11 +478,14 @@ public static class PdfQuizGrounder
                     var key = $"{resolvedPage}:{quote.Trim()}";
                     if (seenKeys.Add(key))
                     {
-                        resolvedAnchors.Add(new GroundedEvidenceAnchor(
-                            resolvedPage,
-                            !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
-                            quote.Trim(),
-                            rects));
+                        resolvedAnchors.Add(
+                            new GroundedEvidenceAnchor(
+                                resolvedPage,
+                                !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
+                                quote.Trim(),
+                                rects
+                            )
+                        );
                     }
 
                     if (primaryRects.Count == 0)
@@ -401,16 +502,24 @@ public static class PdfQuizGrounder
                 // Fallback to whole VerbatimQuote if splitting yielded nothing
                 if (primaryRects.Count == 0 && !string.IsNullOrWhiteSpace(q.VerbatimQuote))
                 {
-                    primaryRects = ComputeHighlightRects(doc, q.SourcePage, q.VerbatimQuote, out int fallbackPage);
+                    primaryRects = ComputeHighlightRects(
+                        doc,
+                        q.SourcePage,
+                        q.VerbatimQuote,
+                        out int fallbackPage
+                    );
                     primaryPage = Math.Clamp(fallbackPage, 1, doc.NumberOfPages);
                     if (primaryRects.Count > 0)
                     {
                         var sec = pageSections[primaryPage].SectionBreadcrumb;
-                        resolvedAnchors.Add(new GroundedEvidenceAnchor(
-                            primaryPage,
-                            !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
-                            q.VerbatimQuote.Trim(),
-                            primaryRects));
+                        resolvedAnchors.Add(
+                            new GroundedEvidenceAnchor(
+                                primaryPage,
+                                !string.IsNullOrWhiteSpace(sec) ? sec : q.SectionTitle,
+                                q.VerbatimQuote.Trim(),
+                                primaryRects
+                            )
+                        );
                     }
                 }
 
@@ -438,7 +547,11 @@ public static class PdfQuizGrounder
     /// </summary>
     public static int RegroundSessionToPdf(QuizSessionRecord session)
     {
-        if (session is null || string.IsNullOrWhiteSpace(session.SourcePdfPath) || !File.Exists(session.SourcePdfPath))
+        if (
+            session is null
+            || string.IsNullOrWhiteSpace(session.SourcePdfPath)
+            || !File.Exists(session.SourcePdfPath)
+        )
             return 0;
 
         GroundQuestionsToPdf(session.SourcePdfPath, session.Questions, forceUpdateSection: true);
@@ -450,7 +563,8 @@ public static class PdfQuizGrounder
         PdfDocument doc,
         int hintPage,
         string? verbatimQuote,
-        out int resolvedPage)
+        out int resolvedPage
+    )
     {
         int totalPages = doc.NumberOfPages;
         resolvedPage = Math.Clamp(hintPage <= 0 ? 1 : hintPage, 1, Math.Max(1, totalPages));
@@ -465,8 +579,10 @@ public static class PdfQuizGrounder
         var candidatePages = new List<int> { resolvedPage };
         for (int delta = 1; delta <= 3; delta++)
         {
-            if (resolvedPage - delta >= 1) candidatePages.Add(resolvedPage - delta);
-            if (resolvedPage + delta <= totalPages) candidatePages.Add(resolvedPage + delta);
+            if (resolvedPage - delta >= 1)
+                candidatePages.Add(resolvedPage - delta);
+            if (resolvedPage + delta <= totalPages)
+                candidatePages.Add(resolvedPage + delta);
         }
         for (int p = 1; p <= totalPages; p++)
         {
@@ -510,7 +626,8 @@ public static class PdfQuizGrounder
 
     private static (double Score, List<Word> Span) FindBestMatchingWordSpan(
         IReadOnlyList<Word> pageWords,
-        IReadOnlyList<string> quoteTokens)
+        List<string> quoteTokens
+    )
     {
         var tokenWords = pageWords
             .Select(w => (Word: w, Token: NormalizeToken(w.Text)))
@@ -527,7 +644,10 @@ public static class PdfQuizGrounder
         int bestStart = -1;
         int bestCount = 0;
 
-        var quoteSet = new HashSet<string>(quoteTokens.Where(t => t.Length >= 2), StringComparer.OrdinalIgnoreCase);
+        var quoteSet = new HashSet<string>(
+            quoteTokens.Where(t => t.Length >= 2),
+            StringComparer.OrdinalIgnoreCase
+        );
         if (quoteSet.Count == 0)
             return (0, []);
 
@@ -571,7 +691,11 @@ public static class PdfQuizGrounder
                 {
                     for (int k = 0; k < qLen; k++)
                     {
-                        if (!consumed[k] && quoteTokens[k].Length >= 3 && TokensMatch(pw, quoteTokens[k]))
+                        if (
+                            !consumed[k]
+                            && quoteTokens[k].Length >= 3
+                            && TokensMatch(pw, quoteTokens[k])
+                        )
                         {
                             consumed[k] = true;
                             hits += 1;
@@ -583,7 +707,7 @@ public static class PdfQuizGrounder
                 int spanLen = j - i + 1;
                 if (spanLen >= Math.Max(2, qLen - 2))
                 {
-                    double score = (double)hits / (2.0 * qLen + Math.Max(0, spanLen - qLen) * 0.35);
+                    double score = hits / (2.0 * qLen + Math.Max(0, spanLen - qLen) * 0.35);
                     if (score > bestScore)
                     {
                         bestScore = score;
@@ -603,7 +727,8 @@ public static class PdfQuizGrounder
     private static List<NormalizedHighlightRect> BuildLineRectangles(
         List<Word> spanWords,
         double pageWidth,
-        double pageHeight)
+        double pageHeight
+    )
     {
         var rects = new List<NormalizedHighlightRect>();
         var lines = new List<List<Word>>();
@@ -667,7 +792,11 @@ public static class PdfQuizGrounder
                 var term = TaskItem.NormalizeTerm(title) ?? inheritedTerm;
                 var path = string.IsNullOrEmpty(parentPath) ? title : $"{parentPath} / {title}";
 
-                if (node is DocumentBookmarkNode docNode && docNode.PageNumber >= 1 && docNode.PageNumber <= n)
+                if (
+                    node is DocumentBookmarkNode docNode
+                    && docNode.PageNumber >= 1
+                    && docNode.PageNumber <= n
+                )
                 {
                     anchors.Add((docNode.PageNumber, term, path));
                 }
@@ -749,19 +878,22 @@ public static class PdfQuizGrounder
     private static List<Word> SortWordsReadingOrder(List<Word> words)
     {
         // PDF coordinates have Y increasing upwards: group into approximate horizontal bands (6pt tolerance), top-to-bottom, left-to-right
-        return words
-            .OrderByDescending(w => Math.Round(w.BoundingBox.Bottom / 5.0) * 5.0)
-            .ThenBy(w => w.BoundingBox.Left)
-            .ToList();
+        return
+        [
+            .. words
+                .OrderByDescending(w => Math.Round(w.BoundingBox.Bottom / 5.0) * 5.0)
+                .ThenBy(w => w.BoundingBox.Left),
+        ];
     }
 
     private static List<string> TokenizeWords(string text)
     {
-        return text
-            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-            .Select(NormalizeToken)
-            .Where(t => t.Length > 0)
-            .ToList();
+        return
+        [
+            .. text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormalizeToken)
+                .Where(t => t.Length > 0),
+        ];
     }
 
     private static string NormalizeToken(string raw)
@@ -774,8 +906,14 @@ public static class PdfQuizGrounder
     {
         if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
             return true;
-        if (a.Length >= 5 && b.Length >= 5 &&
-            (a.StartsWith(b, StringComparison.OrdinalIgnoreCase) || b.StartsWith(a, StringComparison.OrdinalIgnoreCase)))
+        if (
+            a.Length >= 5
+            && b.Length >= 5
+            && (
+                a.StartsWith(b, StringComparison.OrdinalIgnoreCase)
+                || b.StartsWith(a, StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             return true;
         }
@@ -796,8 +934,10 @@ public static class PdfQuizGrounder
 
         if (!string.IsNullOrWhiteSpace(q.VerbatimQuote))
         {
-            var segments = q.VerbatimQuote
-                .Split(["...", " | ", "; ", " vs. ", " vs "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var segments = q.VerbatimQuote.Split(
+                ["...", " | ", "; ", " vs. ", " vs "],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            );
             if (segments.Length > 1)
             {
                 foreach (var seg in segments)

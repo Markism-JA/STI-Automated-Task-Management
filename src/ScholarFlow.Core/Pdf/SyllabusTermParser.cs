@@ -15,23 +15,132 @@ public static partial class SyllabusTermParser
 
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        "the", "and", "for", "with", "that", "this", "from", "into", "your", "are", "was", "were",
-        "will", "can", "have", "has", "had", "not", "but", "use", "using", "used", "such", "how",
-        "what", "when", "where", "which", "who", "why", "all", "any", "each", "more", "most", "other",
-        "some", "than", "then", "them", "they", "their", "there", "these", "those", "its", "about",
-        "over", "under", "between", "through", "during", "before", "after", "above", "below",
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "your",
+        "are",
+        "was",
+        "were",
+        "will",
+        "can",
+        "have",
+        "has",
+        "had",
+        "not",
+        "but",
+        "use",
+        "using",
+        "used",
+        "such",
+        "how",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "all",
+        "any",
+        "each",
+        "more",
+        "most",
+        "other",
+        "some",
+        "than",
+        "then",
+        "them",
+        "they",
+        "their",
+        "there",
+        "these",
+        "those",
+        "its",
+        "about",
+        "over",
+        "under",
+        "between",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
         // STI syllabus / handout boilerplate
-        "sti", "college", "education", "services", "group", "course", "outline", "syllabus",
-        "material", "materials", "page", "pages", "handout", "handouts", "property", "reproduction",
-        "strictly", "prohibited", "objectives", "learning", "outcomes", "intended", "topics",
-        "teaching", "activities", "activity", "assessment", "tasks", "task", "resources", "week",
-        "weeks", "module", "lesson", "student", "students", "explain", "identify", "describe",
-        "discuss", "define", "understand", "apply", "analyze", "evaluate", "create", "demonstrate",
-        "elms", "quiz", "quizzes", "performance", "exam", "examination", "preliminary", "midterm",
-        "prefinal", "final", "finals", "prelims", "midterms", "prefinals", "laboratory", "lab"
+        "sti",
+        "college",
+        "education",
+        "services",
+        "group",
+        "course",
+        "outline",
+        "syllabus",
+        "material",
+        "materials",
+        "page",
+        "pages",
+        "handout",
+        "handouts",
+        "property",
+        "reproduction",
+        "strictly",
+        "prohibited",
+        "objectives",
+        "learning",
+        "outcomes",
+        "intended",
+        "topics",
+        "teaching",
+        "activities",
+        "activity",
+        "assessment",
+        "tasks",
+        "task",
+        "resources",
+        "week",
+        "weeks",
+        "module",
+        "lesson",
+        "student",
+        "students",
+        "explain",
+        "identify",
+        "describe",
+        "discuss",
+        "define",
+        "understand",
+        "apply",
+        "analyze",
+        "evaluate",
+        "create",
+        "demonstrate",
+        "elms",
+        "quiz",
+        "quizzes",
+        "performance",
+        "exam",
+        "examination",
+        "preliminary",
+        "midterm",
+        "prefinal",
+        "final",
+        "finals",
+        "prelims",
+        "midterms",
+        "prefinals",
+        "laboratory",
+        "lab",
     };
 
-    [GeneratedRegex(@"\b(0[1-9]|1[0-9])\b(?=\s+(?:Quiz|Activity|Task|Lab|Laboratory|Performance|Seatwork|Handout|Group|eLMS|Assignment|Exam|Case|Exercise|Project|Review|Reflection|Discussion|Homework|Worksheet)\b)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"\b(0[1-9]|1[0-9])\b(?=\s+(?:Quiz|Activity|Task|Lab|Laboratory|Performance|Seatwork|Handout|Group|eLMS|Assignment|Exam|Case|Exercise|Project|Review|Reflection|Discussion|Homework|Worksheet)\b)",
+        RegexOptions.IgnoreCase
+    )]
     private static partial Regex PrefixBeforeAssessmentRegex();
 
     [GeneratedRegex(@"\b(?:Module|Handout|Lesson)\s+(0[1-9]|1[0-9])\b", RegexOptions.IgnoreCase)]
@@ -43,9 +152,16 @@ public static partial class SyllabusTermParser
     [GeneratedRegex(@"^(\d{2})_")]
     private static partial Regex LeadingTwoDigitFolderRegex();
 
+    [GeneratedRegex(@"\b(0[1-9]|1[0-9])\b")]
+    private static partial Regex TwoDigitPrefixRegex();
+
+    [GeneratedRegex(@"^[^a-zA-Z0-9]+")]
+    private static partial Regex LeadingNonAlphanumericRegex();
+
     public sealed record SyllabusSchedule(
         Dictionary<string, List<string>> TermPrefixes,
-        Dictionary<string, List<string>> TermLines);
+        Dictionary<string, List<string>> TermLines
+    );
 
     /// <summary>
     /// Searches a course directory (excluding completed, ongoing, hidden, and *_Master.pdf)
@@ -67,10 +183,15 @@ public static partial class SyllabusTermParser
             {
                 var name = Path.GetFileName(p);
                 int score = 0;
-                if (name.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)) score += 10;
-                if (name.Contains("Outline", StringComparison.OrdinalIgnoreCase)) score += 5;
-                if (name.Contains("Course", StringComparison.OrdinalIgnoreCase) ||
-                    name.Contains("Couse", StringComparison.OrdinalIgnoreCase)) score += 2;
+                if (name.Contains("Syllabus", StringComparison.OrdinalIgnoreCase))
+                    score += 10;
+                if (name.Contains("Outline", StringComparison.OrdinalIgnoreCase))
+                    score += 5;
+                if (
+                    name.Contains("Course", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("Couse", StringComparison.OrdinalIgnoreCase)
+                )
+                    score += 2;
                 return score;
             })
             .ThenBy(p => p.Length)
@@ -87,7 +208,8 @@ public static partial class SyllabusTermParser
 
     private static void CollectPdfCandidates(string dir, List<string> results, int depth)
     {
-        if (depth > 3) return;
+        if (depth > 3)
+            return;
 
         try
         {
@@ -102,9 +224,11 @@ public static partial class SyllabusTermParser
             foreach (var sub in Directory.EnumerateDirectories(dir))
             {
                 var name = Path.GetFileName(sub);
-                if (name.StartsWith('.') ||
-                    name.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
-                    name.Equals("ongoing", StringComparison.OrdinalIgnoreCase))
+                if (
+                    name.StartsWith('.')
+                    || name.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                )
                     continue;
 
                 CollectPdfCandidates(sub, results, depth + 1);
@@ -120,14 +244,17 @@ public static partial class SyllabusTermParser
     /// Parses the Course Outline table from the syllabus PDF and maps both explicit
     /// prefixes (Pass 1) and local module handout PDFs (Pass 2) into the 4 academic terms.
     /// </summary>
-    public static SyllabusSchedule ParseTermScheduleFromSyllabus(string syllabusPdfPath, string courseDir)
+    public static SyllabusSchedule ParseTermScheduleFromSyllabus(
+        string syllabusPdfPath,
+        string courseDir
+    )
     {
         var termLines = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
         {
             ["Prelims"] = [],
             ["Midterms"] = [],
             ["Prefinals"] = [],
-            ["Finals"] = []
+            ["Finals"] = [],
         };
 
         var termPrefixes = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
@@ -135,7 +262,7 @@ public static partial class SyllabusTermParser
             ["Prelims"] = [],
             ["Midterms"] = [],
             ["Prefinals"] = [],
-            ["Finals"] = []
+            ["Finals"] = [],
         };
 
         if (!File.Exists(syllabusPdfPath))
@@ -203,7 +330,8 @@ public static partial class SyllabusTermParser
         string syllabusPdfPath,
         string courseDir,
         string? taskTitle,
-        string? sectionTitle = null)
+        string? sectionTitle = null
+    )
     {
         if (string.IsNullOrWhiteSpace(syllabusPdfPath) || !File.Exists(syllabusPdfPath))
             return null;
@@ -214,7 +342,7 @@ public static partial class SyllabusTermParser
             return null;
 
         // First check if any Pass 1/Pass 2 prefix matches a 2-digit prefix in the query
-        foreach (Match m in Regex.Matches(query, @"\b(0[1-9]|1[0-9])\b"))
+        foreach (Match m in TwoDigitPrefixRegex().Matches(query))
         {
             var prefix = m.Groups[1].Value;
             foreach (var term in TermOrder)
@@ -226,7 +354,7 @@ public static partial class SyllabusTermParser
 
         // Otherwise score query tokens and title phrases against each term bucket
         var bucketProfiles = BuildBucketTokenProfiles(schedule.TermLines);
-        var cleanTitle = Regex.Replace(taskTitle ?? "", @"^[^a-zA-Z0-9]+", "").Trim();
+        var cleanTitle = LeadingNonAlphanumericRegex().Replace(taskTitle ?? "", "").Trim();
 
         double bestScore = 0;
         string? bestTerm = null;
@@ -240,8 +368,12 @@ public static partial class SyllabusTermParser
             double score = 0;
 
             // Strong boost if the exact task title appears in the bucket's syllabus lines
-            if (cleanTitle.Length >= 5 &&
-                schedule.TermLines[term].Any(l => l.Contains(cleanTitle, StringComparison.OrdinalIgnoreCase)))
+            if (
+                cleanTitle.Length >= 5
+                && schedule
+                    .TermLines[term]
+                    .Any(l => l.Contains(cleanTitle, StringComparison.OrdinalIgnoreCase))
+            )
             {
                 score += 12.0;
             }
@@ -280,7 +412,8 @@ public static partial class SyllabusTermParser
             foreach (var page in doc.GetPages())
             {
                 var words = page.GetWords().ToList();
-                if (words.Count == 0) continue;
+                if (words.Count == 0)
+                    continue;
 
                 // Sort top-to-bottom (Bottom descending), then left-to-right
                 var sorted = words
@@ -319,16 +452,22 @@ public static partial class SyllabusTermParser
 
     private static void EmitLine(List<Word> words, List<string> lines)
     {
-        if (words.Count == 0) return;
-        var text = string.Join(" ", words.OrderBy(w => w.BoundingBox.Left).Select(w => w.Text)).Trim();
+        if (words.Count == 0)
+            return;
+        var text = string.Join(" ", words.OrderBy(w => w.BoundingBox.Left).Select(w => w.Text))
+            .Trim();
         if (!string.IsNullOrWhiteSpace(text))
             lines.Add(text);
     }
 
-    private static void SplitLinesIntoTermBuckets(List<string> lines, Dictionary<string, List<string>> termLines)
+    private static void SplitLinesIntoTermBuckets(
+        List<string> lines,
+        Dictionary<string, List<string>> termLines
+    )
     {
         int outlineStart = lines.FindIndex(l =>
-            l.Contains("Course Outline", StringComparison.OrdinalIgnoreCase));
+            l.Contains("Course Outline", StringComparison.OrdinalIgnoreCase)
+        );
 
         int startIndex = outlineStart >= 0 ? outlineStart + 1 : 0;
         int currentTermIdx = 0; // 0=Prelims, 1=Midterms, 2=Prefinals, 3=Finals
@@ -341,32 +480,41 @@ public static partial class SyllabusTermParser
             if (outlineStart < 0 && line.Contains('%'))
                 continue;
 
-            if (line.Contains("PRELIMINARY EXAMINATION", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("PRELIM EXAMINATION", StringComparison.OrdinalIgnoreCase))
+            if (
+                line.Contains("PRELIMINARY EXAMINATION", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("PRELIM EXAMINATION", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 termLines[TermOrder[currentTermIdx]].Add(line);
-                if (currentTermIdx < 1) currentTermIdx = 1;
+                if (currentTermIdx < 1)
+                    currentTermIdx = 1;
                 continue;
             }
 
             if (line.Contains("MIDTERM EXAMINATION", StringComparison.OrdinalIgnoreCase))
             {
                 termLines[TermOrder[currentTermIdx]].Add(line);
-                if (currentTermIdx < 2) currentTermIdx = 2;
+                if (currentTermIdx < 2)
+                    currentTermIdx = 2;
                 continue;
             }
 
-            if (line.Contains("PRE-FINAL EXAMINATION", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("PREFINAL EXAMINATION", StringComparison.OrdinalIgnoreCase))
+            if (
+                line.Contains("PRE-FINAL EXAMINATION", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("PREFINAL EXAMINATION", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 termLines[TermOrder[currentTermIdx]].Add(line);
-                if (currentTermIdx < 3) currentTermIdx = 3;
+                if (currentTermIdx < 3)
+                    currentTermIdx = 3;
                 continue;
             }
 
-            if (line.Contains("FINAL EXAMINATION", StringComparison.OrdinalIgnoreCase) &&
-                !line.Contains("PRE-FINAL", StringComparison.OrdinalIgnoreCase) &&
-                !line.Contains("PREFINAL", StringComparison.OrdinalIgnoreCase))
+            if (
+                line.Contains("FINAL EXAMINATION", StringComparison.OrdinalIgnoreCase)
+                && !line.Contains("PRE-FINAL", StringComparison.OrdinalIgnoreCase)
+                && !line.Contains("PREFINAL", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 termLines[TermOrder[currentTermIdx]].Add(line);
                 break; // End of Finals in Course Outline
@@ -376,7 +524,9 @@ public static partial class SyllabusTermParser
         }
     }
 
-    private static List<(string Prefix, string? SamplePdf)> DiscoverLocalNumberedModules(string courseDir)
+    private static List<(string Prefix, string? SamplePdf)> DiscoverLocalNumberedModules(
+        string courseDir
+    )
     {
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
@@ -385,17 +535,24 @@ public static partial class SyllabusTermParser
             foreach (var dir in Directory.EnumerateDirectories(courseDir))
             {
                 var name = Path.GetFileName(dir);
-                if (name.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
-                    name.Equals("ongoing", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith('.'))
+                if (
+                    name.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                    || name.StartsWith('.')
+                )
                     continue;
 
                 var m = LeadingTwoDigitFolderRegex().Match(name);
-                if (!m.Success) continue;
+                if (!m.Success)
+                    continue;
 
                 var prefix = m.Groups[1].Value;
-                var pdf = Directory.EnumerateFiles(dir, "*.pdf")
-                    .Where(p => !Path.GetFileName(p).EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase))
+                var pdf = Directory
+                    .EnumerateFiles(dir, "*.pdf")
+                    .Where(p =>
+                        !Path.GetFileName(p)
+                            .EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase)
+                    )
                     .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
                     .FirstOrDefault();
 
@@ -409,7 +566,8 @@ public static partial class SyllabusTermParser
                     continue;
 
                 var m = LeadingTwoDigitFolderRegex().Match(name);
-                if (!m.Success) continue;
+                if (!m.Success)
+                    continue;
 
                 var prefix = m.Groups[1].Value;
                 result.TryAdd(prefix, file);
@@ -420,10 +578,12 @@ public static partial class SyllabusTermParser
             // Ignore unreadable directories
         }
 
-        return result
-            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kv => (kv.Key, kv.Value))
-            .ToList();
+        return
+        [
+            .. result
+                .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => (kv.Key, kv.Value)),
+        ];
     }
 
     private static string ExtractTitleHeaderText(string pdfPath)
@@ -432,11 +592,13 @@ public static partial class SyllabusTermParser
         {
             using var doc = PdfDocument.Open(pdfPath);
             var firstPage = doc.GetPages().FirstOrDefault();
-            if (firstPage is null) return "";
+            if (firstPage is null)
+                return "";
 
             // Take the top ~60 words of Page 1 (course code + module title + subheadings),
             // avoiding lower body-prose paragraphs that contain generic repeated terms.
-            var headerWords = firstPage.GetWords()
+            var headerWords = firstPage
+                .GetWords()
                 .OrderByDescending(w => Math.Round(w.BoundingBox.Bottom / 4.0) * 4.0)
                 .ThenBy(w => w.BoundingBox.Left)
                 .Take(60)
@@ -453,12 +615,16 @@ public static partial class SyllabusTermParser
     private sealed record BucketProfile(
         Dictionary<string, int> Tokens,
         HashSet<string> Bigrams,
-        Dictionary<string, double> TokenIdf);
+        Dictionary<string, double> TokenIdf
+    );
 
     private static Dictionary<string, BucketProfile> BuildBucketTokenProfiles(
-        Dictionary<string, List<string>> termLines)
+        Dictionary<string, List<string>> termLines
+    )
     {
-        var rawTokens = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+        var rawTokens = new Dictionary<string, Dictionary<string, int>>(
+            StringComparer.OrdinalIgnoreCase
+        );
         var rawBigrams = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var docFreq = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -495,10 +661,12 @@ public static partial class SyllabusTermParser
 
     private static string? ScoreTextAgainstBuckets(
         string text,
-        Dictionary<string, BucketProfile> profiles)
+        Dictionary<string, BucketProfile> profiles
+    )
     {
         var tokens = Tokenize(text);
-        if (tokens.Count == 0) return null;
+        if (tokens.Count == 0)
+            return null;
 
         var uniqueTokens = tokens.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var bigrams = BuildBigrams(tokens);

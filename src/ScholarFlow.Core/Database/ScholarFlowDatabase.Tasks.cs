@@ -1,21 +1,18 @@
 using System.Globalization;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Core.Database;
-
 
 public static partial class ScholarFlowDatabase
 {
     public static async Task<IReadOnlyList<TaskItem>> SyncAndLoadAllTasksAsync(
         string basinRoot,
         IReadOnlyList<BasinCourseEntry> courses,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot) || !Directory.Exists(basinRoot))
             return [];
@@ -36,28 +33,52 @@ public static partial class ScholarFlowDatabase
             {
                 activeSourcePaths.Add(inboxPath);
                 var currentTicks = File.GetLastWriteTimeUtc(inboxPath).Ticks;
-                if (!indexedTicks.TryGetValue(inboxPath, out var savedTicks) || savedTicks != currentTicks)
+                if (
+                    !indexedTicks.TryGetValue(inboxPath, out var savedTicks)
+                    || savedTicks != currentTicks
+                )
                 {
-                    var inboxTasks = await MarkdownTaskCodec.LoadFileAsync(inboxPath, defaultCourseFolder: null, ct);
-                    await ReplaceFileTasksInConnectionAsync(conn, basinRoot, inboxPath, courseFolder: null, inboxTasks, currentTicks, ct);
+                    var inboxTasks = await MarkdownTaskCodec.LoadFileAsync(
+                        inboxPath,
+                        defaultCourseFolder: null,
+                        ct
+                    );
+                    await ReplaceFileTasksInConnectionAsync(
+                        conn,
+                        basinRoot,
+                        inboxPath,
+                        courseFolder: null,
+                        inboxTasks,
+                        currentTicks,
+                        ct
+                    );
                 }
             }
 
             // 2. Active Courses
             foreach (var course in courses.Where(c => !c.IsArchived))
             {
-                var tasksPath = Path.GetFullPath(BasinService.GetCourseTasksPath(basinRoot, course.FolderName));
+                var tasksPath = Path.GetFullPath(
+                    BasinService.GetCourseTasksPath(basinRoot, course.FolderName)
+                );
                 if (!File.Exists(tasksPath))
                     continue;
 
                 activeSourcePaths.Add(tasksPath);
                 var termMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
                 var termJsonPath = Path.Combine(basinRoot, course.FolderName, "term.json");
-                long termTicks = File.Exists(termJsonPath) ? File.GetLastWriteTimeUtc(termJsonPath).Ticks : 0L;
+                long termTicks = File.Exists(termJsonPath)
+                    ? File.GetLastWriteTimeUtc(termJsonPath).Ticks
+                    : 0L;
                 var currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks ^ termTicks;
-                if (!indexedTicks.TryGetValue(tasksPath, out var savedTicks) || savedTicks != currentTicks)
+                if (
+                    !indexedTicks.TryGetValue(tasksPath, out var savedTicks)
+                    || savedTicks != currentTicks
+                )
                 {
-                    var courseTasks = (await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct)).ToList();
+                    var courseTasks = (
+                        await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct)
+                    ).ToList();
                     bool anyEnriched = false;
 
                     foreach (var t in courseTasks)
@@ -71,11 +92,25 @@ public static partial class ScholarFlowDatabase
                     if (anyEnriched)
                     {
                         BasinWatcher.SuppressGlobal(TimeSpan.FromMilliseconds(750));
-                        await MarkdownTaskCodec.SaveDocumentAsync(tasksPath, courseTasks, course.Title, ct, syncToDb: false);
+                        await MarkdownTaskCodec.SaveDocumentAsync(
+                            tasksPath,
+                            courseTasks,
+                            course.Title,
+                            false,
+                            ct
+                        );
                         currentTicks = File.GetLastWriteTimeUtc(tasksPath).Ticks ^ termTicks;
                     }
 
-                    await ReplaceFileTasksInConnectionAsync(conn, basinRoot, tasksPath, course.FolderName, courseTasks, currentTicks, ct);
+                    await ReplaceFileTasksInConnectionAsync(
+                        conn,
+                        basinRoot,
+                        tasksPath,
+                        course.FolderName,
+                        courseTasks,
+                        currentTicks,
+                        ct
+                    );
                 }
             }
 
@@ -96,13 +131,16 @@ public static partial class ScholarFlowDatabase
         string filePath,
         string? courseFolder,
         IReadOnlyList<TaskItem> tasks,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot) || !Directory.Exists(basinRoot))
             return;
 
         var fullPath = Path.GetFullPath(filePath);
-        var ticks = File.Exists(fullPath) ? File.GetLastWriteTimeUtc(fullPath).Ticks : DateTime.UtcNow.Ticks;
+        var ticks = File.Exists(fullPath)
+            ? File.GetLastWriteTimeUtc(fullPath).Ticks
+            : DateTime.UtcNow.Ticks;
 
         await DbLock.WaitAsync(ct);
         try
@@ -110,7 +148,15 @@ public static partial class ScholarFlowDatabase
             await using var conn = new SqliteConnection(BuildConnectionString(basinRoot));
             await conn.OpenAsync(ct);
             await EnsureSchemaOnConnectionAsync(conn, ct);
-            await ReplaceFileTasksInConnectionAsync(conn, basinRoot, fullPath, courseFolder, tasks, ticks, ct);
+            await ReplaceFileTasksInConnectionAsync(
+                conn,
+                basinRoot,
+                fullPath,
+                courseFolder,
+                tasks,
+                ticks,
+                ct
+            );
         }
         finally
         {
@@ -121,7 +167,11 @@ public static partial class ScholarFlowDatabase
     /// <summary>
     /// Performs a ranked SQLite FTS5 full-text search across task titles, subtasks, course aliases, terms, sections, tags, and Markdown notes.
     /// </summary>
-    public static IReadOnlyList<string> SearchTaskIdsFts(string basinRoot, string rawQuery, int limit = 25)
+    public static IReadOnlyList<string> SearchTaskIdsFts(
+        string basinRoot,
+        string rawQuery,
+        int limit = 25
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot) || string.IsNullOrWhiteSpace(rawQuery))
             return [];
@@ -166,9 +216,13 @@ public static partial class ScholarFlowDatabase
 
     private static string BuildFts5PrefixQuery(string raw)
     {
-        var tokens = raw
-            .Split([' ', '\t', '\r', '\n', '#', '@', '/'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => new string(t.Where(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-').ToArray()))
+        var tokens = raw.Split(
+                [' ', '\t', '\r', '\n', '#', '@', '/'],
+                StringSplitOptions.RemoveEmptyEntries
+            )
+            .Select(t => new string([
+                .. t.Where(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-'),
+            ]))
             .Where(t => t.Length > 0)
             .ToList();
 
@@ -178,7 +232,10 @@ public static partial class ScholarFlowDatabase
         return string.Join(" AND ", tokens.Select(t => $"\"{t}\"*"));
     }
 
-    private static async Task<Dictionary<string, long>> LoadIndexedFileTicksAsync(SqliteConnection conn, CancellationToken ct)
+    private static async Task<Dictionary<string, long>> LoadIndexedFileTicksAsync(
+        SqliteConnection conn,
+        CancellationToken ct
+    )
     {
         var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = conn.CreateCommand();
@@ -198,14 +255,16 @@ public static partial class ScholarFlowDatabase
         string? courseFolder,
         IReadOnlyList<TaskItem> rootTasks,
         long lastWriteTicks,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         await using (var delLabels = conn.CreateCommand())
         {
             delLabels.Transaction = tx;
-            delLabels.CommandText = "DELETE FROM task_labels WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
+            delLabels.CommandText =
+                "DELETE FROM task_labels WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
             delLabels.Parameters.AddWithValue("$path", fullSourcePath);
             await delLabels.ExecuteNonQueryAsync(ct);
         }
@@ -213,7 +272,8 @@ public static partial class ScholarFlowDatabase
         await using (var delFiles = conn.CreateCommand())
         {
             delFiles.Transaction = tx;
-            delFiles.CommandText = "DELETE FROM task_files WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
+            delFiles.CommandText =
+                "DELETE FROM task_files WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
             delFiles.Parameters.AddWithValue("$path", fullSourcePath);
             await delFiles.ExecuteNonQueryAsync(ct);
         }
@@ -221,7 +281,8 @@ public static partial class ScholarFlowDatabase
         await using (var delFts = conn.CreateCommand())
         {
             delFts.Transaction = tx;
-            delFts.CommandText = "DELETE FROM tasks_fts WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
+            delFts.CommandText =
+                "DELETE FROM tasks_fts WHERE task_id IN (SELECT id FROM tasks WHERE source_path = $path);";
             delFts.Parameters.AddWithValue("$path", fullSourcePath);
             await delFts.ExecuteNonQueryAsync(ct);
         }
@@ -248,7 +309,8 @@ public static partial class ScholarFlowDatabase
                 parentId: null,
                 sortOrder: i,
                 usedIds,
-                ct);
+                ct
+            );
         }
 
         await using (var upsertFile = conn.CreateCommand())
@@ -280,16 +342,19 @@ public static partial class ScholarFlowDatabase
         string? parentId,
         int sortOrder,
         HashSet<string> usedIds,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         var effectiveCourse = task.CourseFolder ?? defaultCourseFolder;
         var baseId = string.IsNullOrWhiteSpace(task.Id)
             ? $"{effectiveCourse ?? "inbox"}:{task.LineNumber}:{sortOrder}"
             : task.Id;
 
-        if (!string.IsNullOrWhiteSpace(effectiveCourse) &&
-            !baseId.StartsWith($"{effectiveCourse}:", StringComparison.OrdinalIgnoreCase) &&
-            !baseId.StartsWith("lms-", StringComparison.OrdinalIgnoreCase))
+        if (
+            !string.IsNullOrWhiteSpace(effectiveCourse)
+            && !baseId.StartsWith($"{effectiveCourse}:", StringComparison.OrdinalIgnoreCase)
+            && !baseId.StartsWith("lms-", StringComparison.OrdinalIgnoreCase)
+        )
         {
             baseId = $"{effectiveCourse}:{baseId}";
         }
@@ -333,29 +398,55 @@ public static partial class ScholarFlowDatabase
             cmd.Parameters.AddWithValue("$course_alias", (object?)task.CourseAlias ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$title", task.Title);
             cmd.Parameters.AddWithValue("$is_completed", task.IsCompleted ? 1 : 0);
-            cmd.Parameters.AddWithValue("$due_date", task.DueDate.HasValue ? task.DueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : DBNull.Value);
-            cmd.Parameters.AddWithValue("$due_time", task.DueTime.HasValue ? task.DueTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture) : DBNull.Value);
-            cmd.Parameters.AddWithValue("$completed_date", task.CompletedDate.HasValue ? task.CompletedDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : DBNull.Value);
+            cmd.Parameters.AddWithValue(
+                "$due_date",
+                task.DueDate.HasValue
+                    ? task.DueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    : DBNull.Value
+            );
+            cmd.Parameters.AddWithValue(
+                "$due_time",
+                task.DueTime.HasValue
+                    ? task.DueTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture)
+                    : DBNull.Value
+            );
+            cmd.Parameters.AddWithValue(
+                "$completed_date",
+                task.CompletedDate.HasValue
+                    ? task.CompletedDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    : DBNull.Value
+            );
             cmd.Parameters.AddWithValue("$priority", (int)task.Priority);
             cmd.Parameters.AddWithValue("$difficulty", task.Difficulty);
             cmd.Parameters.AddWithValue("$term", (object?)task.Term ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$section", (object?)task.Section ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lms_kind", (object?)task.LmsKind ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$weight_percent", task.WeightPercent.HasValue ? task.WeightPercent.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue(
+                "$weight_percent",
+                task.WeightPercent.HasValue ? task.WeightPercent.Value : DBNull.Value
+            );
             cmd.Parameters.AddWithValue("$lms_id", (object?)task.LmsId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lms_status", (object?)task.LmsStatus ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lms_score", (object?)task.LmsScore ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lms_url", (object?)task.LmsUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$note_path", (object?)task.NotePath ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$updated_at_utc", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            cmd.Parameters.AddWithValue(
+                "$updated_at_utc",
+                DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+            );
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        foreach (var lbl in task.Labels.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var lbl in task
+                .Labels.Where(l => !string.IsNullOrWhiteSpace(l))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        )
         {
             await using var lblCmd = conn.CreateCommand();
             lblCmd.Transaction = tx;
-            lblCmd.CommandText = "INSERT OR IGNORE INTO task_labels (task_id, label) VALUES ($tid, $lbl);";
+            lblCmd.CommandText =
+                "INSERT OR IGNORE INTO task_labels (task_id, label) VALUES ($tid, $lbl);";
             lblCmd.Parameters.AddWithValue("$tid", uniqueId);
             lblCmd.Parameters.AddWithValue("$lbl", lbl.Trim());
             await lblCmd.ExecuteNonQueryAsync(ct);
@@ -363,11 +454,16 @@ public static partial class ScholarFlowDatabase
 
         async Task InsertFilesOfKindAsync(IEnumerable<string> paths, string kind)
         {
-            foreach (var p in paths.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (
+                var p in paths
+                    .Where(f => !string.IsNullOrWhiteSpace(f))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+            )
             {
                 await using var fCmd = conn.CreateCommand();
                 fCmd.Transaction = tx;
-                fCmd.CommandText = "INSERT OR IGNORE INTO task_files (task_id, kind, rel_path) VALUES ($tid, $kind, $path);";
+                fCmd.CommandText =
+                    "INSERT OR IGNORE INTO task_files (task_id, kind, rel_path) VALUES ($tid, $kind, $path);";
                 fCmd.Parameters.AddWithValue("$tid", uniqueId);
                 fCmd.Parameters.AddWithValue("$kind", kind);
                 fCmd.Parameters.AddWithValue("$path", p.Trim());
@@ -409,7 +505,8 @@ public static partial class ScholarFlowDatabase
                 parentId: uniqueId,
                 sortOrder: cIdx,
                 usedIds,
-                ct);
+                ct
+            );
         }
     }
 
@@ -438,7 +535,8 @@ public static partial class ScholarFlowDatabase
     private static async Task<IReadOnlyList<TaskItem>> LoadAllTasksFromConnectionAsync(
         SqliteConnection conn,
         HashSet<string> activeSourcePaths,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         var byId = new Dictionary<string, TaskItem>(StringComparer.OrdinalIgnoreCase);
         var orderedNodes = new List<TaskItem>();
@@ -473,9 +571,39 @@ public static partial class ScholarFlowDatabase
                     CourseAlias = r.IsDBNull(6) ? null : r.GetString(6),
                     Title = r.GetString(7),
                     IsCompleted = r.GetInt32(8) != 0,
-                    DueDate = !r.IsDBNull(9) && DateOnly.TryParseExact(r.GetString(9), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dd) ? dd : null,
-                    DueTime = !r.IsDBNull(10) && TimeOnly.TryParseExact(r.GetString(10), "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ? dt : null,
-                    CompletedDate = !r.IsDBNull(11) && DateOnly.TryParseExact(r.GetString(11), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var cd) ? cd : null,
+                    DueDate =
+                        !r.IsDBNull(9)
+                        && DateOnly.TryParseExact(
+                            r.GetString(9),
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out var dd
+                        )
+                            ? dd
+                            : null,
+                    DueTime =
+                        !r.IsDBNull(10)
+                        && TimeOnly.TryParseExact(
+                            r.GetString(10),
+                            "HH:mm",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out var dt
+                        )
+                            ? dt
+                            : null,
+                    CompletedDate =
+                        !r.IsDBNull(11)
+                        && DateOnly.TryParseExact(
+                            r.GetString(11),
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out var cd
+                        )
+                            ? cd
+                            : null,
                     Priority = (TaskPriority)Math.Clamp(r.GetInt32(12), 1, 4),
                     Difficulty = Math.Clamp(r.GetInt32(13), 1, 5),
                     Term = r.IsDBNull(14) ? null : r.GetString(14),
@@ -486,7 +614,7 @@ public static partial class ScholarFlowDatabase
                     LmsStatus = r.IsDBNull(19) ? null : r.GetString(19),
                     LmsScore = r.IsDBNull(20) ? null : r.GetString(20),
                     LmsUrl = r.IsDBNull(21) ? null : r.GetString(21),
-                    NotePath = r.IsDBNull(22) ? null : r.GetString(22)
+                    NotePath = r.IsDBNull(22) ? null : r.GetString(22),
                 };
 
                 byId[item.Id] = item;
@@ -533,8 +661,10 @@ public static partial class ScholarFlowDatabase
         var roots = new List<TaskItem>();
         foreach (var node in orderedNodes)
         {
-            if (!string.IsNullOrWhiteSpace(node.ParentTaskId) &&
-                byId.TryGetValue(node.ParentTaskId, out var parent))
+            if (
+                !string.IsNullOrWhiteSpace(node.ParentTaskId)
+                && byId.TryGetValue(node.ParentTaskId, out var parent)
+            )
             {
                 parent.ChildTasks.Add(node);
             }
@@ -549,9 +679,4 @@ public static partial class ScholarFlowDatabase
 
         return roots;
     }
-
-    // =========================================================================
-    // QUIZ & SPACED REPETITION (SM-2 / FSRS) DATABASE OPERATIONS
-    // =========================================================================
-
 }

@@ -28,7 +28,16 @@ public static class CourseAliasGenerator
 {
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        "and", "or", "in", "of", "the", "for", "to", "a", "an", "with"
+        "and",
+        "or",
+        "in",
+        "of",
+        "the",
+        "for",
+        "to",
+        "a",
+        "an",
+        "with",
     };
 
     /// <summary>
@@ -40,8 +49,9 @@ public static class CourseAliasGenerator
 
         // Well-known compact acronym/word heuristics
         var clean = titleOrFolder.Replace('_', ' ').Replace('-', ' ');
-        var words = clean.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-            .Select(w => new string(w.Where(char.IsLetterOrDigit).ToArray()))
+        var words = clean
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => new string([.. w.Where(char.IsLetterOrDigit)]))
             .Where(w => !string.IsNullOrEmpty(w) && !StopWords.Contains(w))
             .ToList();
 
@@ -57,8 +67,9 @@ public static class CourseAliasGenerator
         }
         else
         {
-            candidate = string.Concat(words.Select(w =>
-                char.IsDigit(w[0]) ? w : char.ToLowerInvariant(w[0]).ToString()));
+            candidate = string.Concat(
+                words.Select(w => char.IsDigit(w[0]) ? w : char.ToLowerInvariant(w[0]).ToString())
+            );
 
             if (candidate.Length < 2)
                 candidate = words[0].ToLowerInvariant()[..Math.Min(4, words[0].Length)];

@@ -39,7 +39,11 @@ public static partial class MarkdownTaskCodec
     [GeneratedRegex(@"(?<!\S)@([A-Za-z0-9_\-]+)", RegexOptions.Compiled)]
     private static partial Regex LabelTagRegex();
 
-    public static IReadOnlyList<TaskItem> Parse(string markdown, string sourcePath, string? defaultCourseFolder = null)
+    public static IReadOnlyList<TaskItem> Parse(
+        string markdown,
+        string sourcePath,
+        string? defaultCourseFolder = null
+    )
     {
         var tasks = new List<TaskItem>();
         if (string.IsNullOrEmpty(markdown))
@@ -106,11 +110,18 @@ public static partial class MarkdownTaskCodec
                 task.CourseAlias ??= parent.CourseAlias;
                 task.Term ??= parent.Term ?? currentHeadingTerm;
                 task.Section ??= parent.Section ?? currentHeadingSection;
-                if (task.Id.StartsWith($"{Path.GetFileName(sourcePath)}:", StringComparison.OrdinalIgnoreCase))
+                if (
+                    task.Id.StartsWith(
+                        $"{Path.GetFileName(sourcePath)}:",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                     task.Id = $"{parent.Id}:sub-{parent.ChildTasks.Count + 1}";
 
                 parent.ChildTasks.Add(task);
-                parent.SubTasks.Add(new TaskSubItem(task.Title, task.IsCompleted, task.CompletedDate));
+                parent.SubTasks.Add(
+                    new TaskSubItem(task.Title, task.IsCompleted, task.CompletedDate)
+                );
                 parentStack.Add((indent, task));
                 continue;
             }
@@ -131,7 +142,8 @@ public static partial class MarkdownTaskCodec
     public static async Task<IReadOnlyList<TaskItem>> LoadFileAsync(
         string filePath,
         string? defaultCourseFolder = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (!File.Exists(filePath))
             return [];
@@ -140,7 +152,11 @@ public static partial class MarkdownTaskCodec
         return Parse(text, filePath, defaultCourseFolder);
     }
 
-    public static string SerializeTask(TaskItem task, int indentLevel = 0, TaskItem? parentTask = null)
+    public static string SerializeTask(
+        TaskItem task,
+        int indentLevel = 0,
+        TaskItem? parentTask = null
+    )
     {
         task.EnsureChildTasksSynced();
 
@@ -168,14 +184,28 @@ public static partial class MarkdownTaskCodec
 
         var normTerm = TaskItem.NormalizeTerm(task.Term) ?? task.Term?.Trim();
         var parentTerm = TaskItem.NormalizeTerm(parentTask?.Term) ?? parentTask?.Term?.Trim();
-        if (!string.IsNullOrWhiteSpace(normTerm) &&
-            (parentTask is null || !string.Equals(normTerm, parentTerm, StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(normTerm)
+            && (
+                parentTask is null
+                || !string.Equals(normTerm, parentTerm, StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             sb.Append($" [term:: {normTerm}]");
         }
 
-        if (!string.IsNullOrWhiteSpace(task.Section) &&
-            (parentTask is null || !string.Equals(task.Section.Trim(), parentTask.Section?.Trim(), StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(task.Section)
+            && (
+                parentTask is null
+                || !string.Equals(
+                    task.Section.Trim(),
+                    parentTask.Section?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
         {
             sb.Append($" [section:: {task.Section.Trim()}]");
         }
@@ -184,32 +214,59 @@ public static partial class MarkdownTaskCodec
             sb.Append($" [kind:: {task.LmsKind.Trim()}]");
 
         if (task.WeightPercent.HasValue && task.WeightPercent.Value > 0)
-            sb.Append($" [weight:: {task.WeightPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}]");
+            sb.Append(
+                $" [weight:: {task.WeightPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}]"
+            );
 
-        if (!string.IsNullOrWhiteSpace(task.CourseAlias) &&
-            (parentTask is null || !string.Equals(task.CourseAlias.Trim(), parentTask.CourseAlias?.Trim(), StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(task.CourseAlias)
+            && (
+                parentTask is null
+                || !string.Equals(
+                    task.CourseAlias.Trim(),
+                    parentTask.CourseAlias?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
         {
             sb.Append($" #{task.CourseAlias.Trim().TrimStart('#')}");
         }
 
-        foreach (var label in task.Labels.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var label in task
+                .Labels.Where(l => !string.IsNullOrWhiteSpace(l))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        )
             sb.Append($" @{label.Trim().TrimStart('@')}");
 
         var emittedAttachments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var att in task.InstructionFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var att in task
+                .InstructionFiles.Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        )
         {
             sb.Append($" [attachment:: {att}]");
             emittedAttachments.Add(att);
         }
 
         var emittedSubmissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var subFile in task.SubmissionFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var subFile in task
+                .SubmissionFiles.Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        )
         {
             sb.Append($" [submission:: {subFile}]");
             emittedSubmissions.Add(subFile);
         }
 
-        foreach (var file in task.LinkedFiles.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var file in task
+                .LinkedFiles.Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        )
         {
             if (!emittedAttachments.Contains(file) && !emittedSubmissions.Contains(file))
                 sb.Append($" [file:: {file}]");
@@ -280,7 +337,13 @@ public static partial class MarkdownTaskCodec
         foreach (var term in OrderedTerms)
         {
             var termTasks = items
-                .Where(t => string.Equals(TaskItem.NormalizeTerm(t.Term), term, StringComparison.OrdinalIgnoreCase))
+                .Where(t =>
+                    string.Equals(
+                        TaskItem.NormalizeTerm(t.Term),
+                        term,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                 .ToList();
             if (termTasks.Count == 0)
                 continue;
@@ -311,8 +374,9 @@ public static partial class MarkdownTaskCodec
         string filePath,
         IEnumerable<TaskItem> tasks,
         string? headerTitle = null,
-        CancellationToken ct = default,
-        bool syncToDb = true)
+        bool syncToDb = true,
+        CancellationToken ct = default
+    )
     {
         var list = tasks.ToList();
         foreach (var t in list)
@@ -336,7 +400,13 @@ public static partial class MarkdownTaskCodec
             {
                 var courseFolder = list.FirstOrDefault()?.CourseFolder;
                 var reparsedWithLineNumbers = Parse(content, filePath, courseFolder);
-                await Database.ScholarFlowDatabase.SyncMarkdownFileToDbAsync(basinRoot, filePath, courseFolder, reparsedWithLineNumbers, ct);
+                await Database.ScholarFlowDatabase.SyncMarkdownFileToDbAsync(
+                    basinRoot,
+                    filePath,
+                    courseFolder,
+                    reparsedWithLineNumbers,
+                    ct
+                );
             }
         }
     }
@@ -355,7 +425,10 @@ public static partial class MarkdownTaskCodec
                 return Path.GetDirectoryName(dir);
 
             var parent = Path.GetDirectoryName(dir);
-            if (!string.IsNullOrEmpty(parent) && Directory.Exists(Path.Combine(parent, ".scholarflow")))
+            if (
+                !string.IsNullOrEmpty(parent)
+                && Directory.Exists(Path.Combine(parent, ".scholarflow"))
+            )
                 return parent;
         }
         catch
@@ -369,18 +442,20 @@ public static partial class MarkdownTaskCodec
     public static async Task UpdateTaskInFileAsync(
         string basinRoot,
         TaskItem updatedTask,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         await FileMutationLock.WaitAsync(ct);
         try
         {
             updatedTask.EnsureChildTasksSynced();
 
-            var sourcePath = !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
-                ? updatedTask.SourceMarkdownPath
+            var sourcePath =
+                !string.IsNullOrWhiteSpace(updatedTask.SourceMarkdownPath)
+                    ? updatedTask.SourceMarkdownPath
                 : string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
                     ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
-                    : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
+                : Path.Combine(basinRoot, updatedTask.CourseFolder, "tasks.md");
 
             var tasks = (await LoadFileAsync(sourcePath, updatedTask.CourseFolder, ct)).ToList();
             if (!TryReplaceTaskRecursive(tasks, updatedTask))
@@ -391,7 +466,7 @@ public static partial class MarkdownTaskCodec
             var header = string.IsNullOrWhiteSpace(updatedTask.CourseFolder)
                 ? "Inbox"
                 : updatedTask.CourseFolder.Replace('_', ' ');
-            await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+            await SaveDocumentAsync(sourcePath, tasks, header, true, ct);
         }
         finally
         {
@@ -409,7 +484,10 @@ public static partial class MarkdownTaskCodec
                 return true;
             }
 
-            if (nodes[i].ChildTasks.Count > 0 && TryReplaceTaskRecursive(nodes[i].ChildTasks, updatedTask))
+            if (
+                nodes[i].ChildTasks.Count > 0
+                && TryReplaceTaskRecursive(nodes[i].ChildTasks, updatedTask)
+            )
             {
                 nodes[i].EnsureChildTasksSynced();
                 return true;
@@ -417,12 +495,21 @@ public static partial class MarkdownTaskCodec
         }
 
         // Fallback for non-LMS tasks whose in-memory/SQLite Guid Id differs from file-parsed line Id
-        if (string.IsNullOrWhiteSpace(updatedTask.LmsId) && string.IsNullOrWhiteSpace(updatedTask.ParentTaskId))
+        if (
+            string.IsNullOrWhiteSpace(updatedTask.LmsId)
+            && string.IsNullOrWhiteSpace(updatedTask.ParentTaskId)
+        )
         {
             for (int i = 0; i < nodes.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(nodes[i].LmsId) &&
-                    string.Equals(nodes[i].Title.Trim(), updatedTask.Title.Trim(), StringComparison.OrdinalIgnoreCase))
+                if (
+                    string.IsNullOrWhiteSpace(nodes[i].LmsId)
+                    && string.Equals(
+                        nodes[i].Title.Trim(),
+                        updatedTask.Title.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                 {
                     nodes[i] = updatedTask;
                     return true;
@@ -436,13 +523,15 @@ public static partial class MarkdownTaskCodec
     public static async Task DeleteTaskFromFileAsync(
         string basinRoot,
         TaskItem targetTask,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
-        var sourcePath = !string.IsNullOrWhiteSpace(targetTask.SourceMarkdownPath)
-            ? targetTask.SourceMarkdownPath
+        var sourcePath =
+            !string.IsNullOrWhiteSpace(targetTask.SourceMarkdownPath)
+                ? targetTask.SourceMarkdownPath
             : string.IsNullOrWhiteSpace(targetTask.CourseFolder)
                 ? Path.Combine(basinRoot, ".scholarflow", "inbox.md")
-                : Path.Combine(basinRoot, targetTask.CourseFolder, "tasks.md");
+            : Path.Combine(basinRoot, targetTask.CourseFolder, "tasks.md");
 
         var tasks = (await LoadFileAsync(sourcePath, targetTask.CourseFolder, ct)).ToList();
         RemoveTaskRecursive(tasks, targetTask);
@@ -450,7 +539,7 @@ public static partial class MarkdownTaskCodec
         var header = string.IsNullOrWhiteSpace(targetTask.CourseFolder)
             ? "Inbox"
             : targetTask.CourseFolder.Replace('_', ' ');
-        await SaveDocumentAsync(sourcePath, tasks, header, ct, syncToDb: true);
+        await SaveDocumentAsync(sourcePath, tasks, header, true, ct);
     }
 
     private static void RemoveTaskRecursive(List<TaskItem> nodes, TaskItem targetTask)
@@ -468,8 +557,10 @@ public static partial class MarkdownTaskCodec
 
     internal static bool IsMatchingTaskIdentity(TaskItem candidate, TaskItem target)
     {
-        if (!string.IsNullOrWhiteSpace(target.LmsId) &&
-            string.Equals(candidate.LmsId, target.LmsId, StringComparison.OrdinalIgnoreCase))
+        if (
+            !string.IsNullOrWhiteSpace(target.LmsId)
+            && string.Equals(candidate.LmsId, target.LmsId, StringComparison.OrdinalIgnoreCase)
+        )
         {
             return true;
         }
@@ -479,8 +570,14 @@ public static partial class MarkdownTaskCodec
 
         // Also match when one ID is prefixed with CourseFolder: or inbox: (from SQLite) and the other is file-local
         var prefix = string.IsNullOrWhiteSpace(target.CourseFolder) ? "inbox" : target.CourseFolder;
-        if (string.Equals($"{prefix}:{candidate.Id}", target.Id, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(candidate.Id, $"{prefix}:{target.Id}", StringComparison.OrdinalIgnoreCase))
+        if (
+            string.Equals($"{prefix}:{candidate.Id}", target.Id, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                candidate.Id,
+                $"{prefix}:{target.Id}",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
         {
             return true;
         }
@@ -488,8 +585,10 @@ public static partial class MarkdownTaskCodec
         if (candidate.LineNumber == target.LineNumber && target.LineNumber > 0)
             return true;
 
-        if (!string.IsNullOrWhiteSpace(target.ParentTaskId) &&
-            string.Equals(candidate.Title, target.Title, StringComparison.OrdinalIgnoreCase))
+        if (
+            !string.IsNullOrWhiteSpace(target.ParentTaskId)
+            && string.Equals(candidate.Title, target.Title, StringComparison.OrdinalIgnoreCase)
+        )
         {
             return true;
         }
@@ -503,17 +602,19 @@ public static partial class MarkdownTaskCodec
     /// </summary>
     public static List<TaskItem> MergeLmsTasks(
         IEnumerable<TaskItem> existingTasks,
-        IEnumerable<TaskItem> incomingLmsTasks)
+        IEnumerable<TaskItem> incomingLmsTasks
+    )
     {
         var list = existingTasks.ToList();
-        var byLmsId = list
-            .Where(t => !string.IsNullOrWhiteSpace(t.LmsId))
+        var byLmsId = list.Where(t => !string.IsNullOrWhiteSpace(t.LmsId))
             .ToDictionary(t => t.LmsId!, StringComparer.OrdinalIgnoreCase);
 
         foreach (var incoming in incomingLmsTasks)
         {
-            if (!string.IsNullOrWhiteSpace(incoming.LmsId) &&
-                byLmsId.TryGetValue(incoming.LmsId, out var existing))
+            if (
+                !string.IsNullOrWhiteSpace(incoming.LmsId)
+                && byLmsId.TryGetValue(incoming.LmsId, out var existing)
+            )
             {
                 existing.Title = incoming.Title;
                 existing.DueDate = incoming.DueDate ?? existing.DueDate;
@@ -556,7 +657,8 @@ public static partial class MarkdownTaskCodec
                 if (incoming.IsCompleted && !existing.IsCompleted)
                 {
                     existing.IsCompleted = true;
-                    existing.CompletedDate ??= incoming.CompletedDate ?? DateOnly.FromDateTime(DateTime.Today);
+                    existing.CompletedDate ??=
+                        incoming.CompletedDate ?? DateOnly.FromDateTime(DateTime.Today);
                 }
             }
             else
@@ -575,13 +677,23 @@ public static partial class MarkdownTaskCodec
         bool isCompleted,
         string sourcePath,
         int lineNumber,
-        string? defaultCourseFolder)
+        string? defaultCourseFolder
+    )
     {
         var working = body;
 
         DateOnly? dueDate = null;
         var dueMatch = LegacyDueDateRegex().Match(working);
-        if (dueMatch.Success && DateOnly.TryParseExact(dueMatch.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dd))
+        if (
+            dueMatch.Success
+            && DateOnly.TryParseExact(
+                dueMatch.Groups[1].Value,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var dd
+            )
+        )
         {
             dueDate = dd;
             working = working.Remove(dueMatch.Index, dueMatch.Length);
@@ -589,7 +701,16 @@ public static partial class MarkdownTaskCodec
 
         TimeOnly? dueTime = null;
         var timeMatch = LegacyDueTimeRegex().Match(working);
-        if (timeMatch.Success && TimeOnly.TryParseExact(timeMatch.Groups[1].Value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+        if (
+            timeMatch.Success
+            && TimeOnly.TryParseExact(
+                timeMatch.Groups[1].Value,
+                "HH:mm",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var dt
+            )
+        )
         {
             dueTime = dt;
             working = working.Remove(timeMatch.Index, timeMatch.Length);
@@ -598,101 +719,171 @@ public static partial class MarkdownTaskCodec
         var completedDate = ExtractCompletedDate(working, out working);
 
         var priority = TaskPriority.P4;
-        if (working.Contains("🔺")) { priority = TaskPriority.P1; working = working.Replace("🔺", ""); }
-        else if (working.Contains("⏫")) { priority = TaskPriority.P2; working = working.Replace("⏫", ""); }
-        else if (working.Contains("🔼")) { priority = TaskPriority.P3; working = working.Replace("🔼", ""); }
-        else if (working.Contains("🔽")) { priority = TaskPriority.P4; working = working.Replace("🔽", ""); }
+        if (working.Contains("🔺"))
+        {
+            priority = TaskPriority.P1;
+            working = working.Replace("🔺", "");
+        }
+        else if (working.Contains('⏫'))
+        {
+            priority = TaskPriority.P2;
+            working = working.Replace("⏫", "");
+        }
+        else if (working.Contains("🔼"))
+        {
+            priority = TaskPriority.P3;
+            working = working.Replace("🔼", "");
+        }
+        else if (working.Contains("🔽"))
+        {
+            priority = TaskPriority.P4;
+            working = working.Replace("🔽", "");
+        }
 
         int difficulty = 1;
-        string? term = null, section = null, lmsKind = null;
+        string? term = null,
+            section = null,
+            lmsKind = null;
         double? weightPercent = null;
-        string? lmsId = null, lmsStatus = null, lmsScore = null, lmsUrl = null, notePath = null;
+        string? lmsId = null,
+            lmsStatus = null,
+            lmsScore = null,
+            lmsUrl = null,
+            notePath = null;
         var instructionFiles = new List<string>();
         var submissionFiles = new List<string>();
         var linkedFiles = new List<string>();
 
-        working = InlineFieldRegex().Replace(working, m =>
-        {
-            var key = m.Groups[1].Value.ToLowerInvariant();
-            var val = m.Groups[2].Value.Trim();
-            switch (key)
-            {
-                case "due" when DateOnly.TryParseExact(val, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDue):
-                    dueDate = parsedDue;
-                    break;
-                case "time" when TimeOnly.TryParseExact(val, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedTime):
-                    dueTime = parsedTime;
-                    break;
-                case "done" when DateOnly.TryParseExact(val, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDone):
-                    completedDate = parsedDone;
-                    break;
-                case "p" or "priority" when int.TryParse(val.TrimStart('p', 'P'), out var pVal) && pVal is >= 1 and <= 4:
-                    priority = (TaskPriority)pVal;
-                    break;
-                case "diff" when int.TryParse(val, out var d):
-                    difficulty = Math.Clamp(d, 1, 5);
-                    break;
-                case "term":
-                    term = TaskItem.NormalizeTerm(val) ?? val;
-                    break;
-                case "section":
-                    section = val;
-                    break;
-                case "kind":
-                    lmsKind = val;
-                    break;
-                case "weight" when double.TryParse(val.TrimEnd('%'), NumberStyles.Any, CultureInfo.InvariantCulture, out var w):
-                    weightPercent = w;
-                    break;
-                case "attachment":
-                    instructionFiles.Add(val);
-                    break;
-                case "submission":
-                    submissionFiles.Add(val);
-                    break;
-                case "file":
-                    linkedFiles.Add(val);
-                    break;
-                case "note":
-                    notePath = val;
-                    break;
-                case "lms_id":
-                    lmsId = val;
-                    break;
-                case "lms_status":
-                    lmsStatus = val;
-                    break;
-                case "lms_score":
-                    lmsScore = val;
-                    break;
-                case "lms_url":
-                    lmsUrl = val;
-                    break;
-            }
-            return string.Empty;
-        });
+        working = InlineFieldRegex()
+            .Replace(
+                working,
+                m =>
+                {
+                    var key = m.Groups[1].Value.ToLowerInvariant();
+                    var val = m.Groups[2].Value.Trim();
+                    switch (key)
+                    {
+                        case "due"
+                            when DateOnly.TryParseExact(
+                                val,
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out var parsedDue
+                            ):
+                            dueDate = parsedDue;
+                            break;
+                        case "time"
+                            when TimeOnly.TryParseExact(
+                                val,
+                                "HH:mm",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out var parsedTime
+                            ):
+                            dueTime = parsedTime;
+                            break;
+                        case "done"
+                            when DateOnly.TryParseExact(
+                                val,
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out var parsedDone
+                            ):
+                            completedDate = parsedDone;
+                            break;
+                        case "p"
+                        or "priority"
+                            when int.TryParse(val.TrimStart('p', 'P'), out var pVal)
+                                && pVal is >= 1 and <= 4:
+                            priority = (TaskPriority)pVal;
+                            break;
+                        case "diff" when int.TryParse(val, out var d):
+                            difficulty = Math.Clamp(d, 1, 5);
+                            break;
+                        case "term":
+                            term = TaskItem.NormalizeTerm(val) ?? val;
+                            break;
+                        case "section":
+                            section = val;
+                            break;
+                        case "kind":
+                            lmsKind = val;
+                            break;
+                        case "weight"
+                            when double.TryParse(
+                                val.TrimEnd('%'),
+                                NumberStyles.Any,
+                                CultureInfo.InvariantCulture,
+                                out var w
+                            ):
+                            weightPercent = w;
+                            break;
+                        case "attachment":
+                            instructionFiles.Add(val);
+                            break;
+                        case "submission":
+                            submissionFiles.Add(val);
+                            break;
+                        case "file":
+                            linkedFiles.Add(val);
+                            break;
+                        case "note":
+                            notePath = val;
+                            break;
+                        case "lms_id":
+                            lmsId = val;
+                            break;
+                        case "lms_status":
+                            lmsStatus = val;
+                            break;
+                        case "lms_score":
+                            lmsScore = val;
+                            break;
+                        case "lms_url":
+                            lmsUrl = val;
+                            break;
+                    }
+                    return string.Empty;
+                }
+            );
 
         string? courseAlias = null;
-        working = CourseTagRegex().Replace(working, m =>
-        {
-            courseAlias ??= m.Groups[1].Value;
-            return string.Empty;
-        });
+        working = CourseTagRegex()
+            .Replace(
+                working,
+                m =>
+                {
+                    courseAlias ??= m.Groups[1].Value;
+                    return string.Empty;
+                }
+            );
 
         var labels = new List<string>();
-        working = LabelTagRegex().Replace(working, m =>
-        {
-            var lbl = m.Groups[1].Value;
-            labels.Add(lbl);
-            term ??= TaskItem.NormalizeTerm(lbl);
-            return string.Empty;
-        });
+        working = LabelTagRegex()
+            .Replace(
+                working,
+                m =>
+                {
+                    var lbl = m.Groups[1].Value;
+                    labels.Add(lbl);
+                    term ??= TaskItem.NormalizeTerm(lbl);
+                    return string.Empty;
+                }
+            );
 
-        var cleanTitle = string.Join(' ', working.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+        var cleanTitle = string.Join(
+                ' ',
+                working.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            )
+            .Trim();
 
         return new TaskItem
         {
-            Id = !string.IsNullOrWhiteSpace(lmsId) ? $"lms-{lmsId}" : $"{Path.GetFileName(sourcePath)}:{lineNumber}",
+            Id = !string.IsNullOrWhiteSpace(lmsId)
+                ? $"lms-{lmsId}"
+                : $"{Path.GetFileName(sourcePath)}:{lineNumber}",
             Title = cleanTitle,
             IsCompleted = isCompleted,
             DueDate = dueDate,
@@ -716,30 +907,51 @@ public static partial class MarkdownTaskCodec
             LmsScore = lmsScore,
             LmsUrl = lmsUrl,
             SourceMarkdownPath = sourcePath,
-            LineNumber = lineNumber
+            LineNumber = lineNumber,
         };
     }
 
     private static DateOnly? ExtractCompletedDate(string text, out string cleaned)
     {
         var match = LegacyCompletedDateRegex().Match(text);
-        if (match.Success && DateOnly.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var cd))
+        if (
+            match.Success
+            && DateOnly.TryParseExact(
+                match.Groups[1].Value,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var cd
+            )
+        )
         {
             cleaned = text.Remove(match.Index, match.Length);
             return cd;
         }
 
         DateOnly? inlineDone = null;
-        cleaned = InlineFieldRegex().Replace(text, m =>
-        {
-            if (m.Groups[1].Value.Equals("done", StringComparison.OrdinalIgnoreCase) &&
-                DateOnly.TryParseExact(m.Groups[2].Value.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDone))
-            {
-                inlineDone = parsedDone;
-                return string.Empty;
-            }
-            return m.Value;
-        });
+        cleaned = InlineFieldRegex()
+            .Replace(
+                text,
+                m =>
+                {
+                    if (
+                        m.Groups[1].Value.Equals("done", StringComparison.OrdinalIgnoreCase)
+                        && DateOnly.TryParseExact(
+                            m.Groups[2].Value.Trim(),
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out var parsedDone
+                        )
+                    )
+                    {
+                        inlineDone = parsedDone;
+                        return string.Empty;
+                    }
+                    return m.Value;
+                }
+            );
 
         return inlineDone;
     }

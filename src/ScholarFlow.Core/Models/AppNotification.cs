@@ -9,7 +9,7 @@ public enum NotificationKind
     MaterialDownloaded,
     MasterPdfCompiled,
     SessionExpired,
-    Error
+    Error,
 }
 
 public sealed record AppNotification(
@@ -18,7 +18,8 @@ public sealed record AppNotification(
     string Message,
     string? CourseFolder = null,
     string? LmsUrl = null,
-    DateTimeOffset? Timestamp = null)
+    DateTimeOffset? Timestamp = null
+)
 {
     public DateTimeOffset OccurredAt { get; init; } = Timestamp ?? DateTimeOffset.UtcNow;
 }
@@ -38,5 +39,6 @@ public sealed class PollState
 {
     public DateTimeOffset? LastFastPollAt { get; set; }
     public DateTimeOffset? LastFullSyncAt { get; set; }
-    public Dictionary<string, PollAssignmentSnapshot> AssignmentsByLmsId { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, PollAssignmentSnapshot> AssignmentsByLmsId { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }

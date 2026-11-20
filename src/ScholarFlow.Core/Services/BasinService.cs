@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Tasks;
@@ -9,22 +11,59 @@ namespace ScholarFlow.Core.Services;
 /// <summary>
 /// Manages an Obsidian-style Basin folder (.scholarflow/ config, courses, inbox.md, and per-course tasks.md).
 /// </summary>
-public sealed class BasinService
+public sealed partial class BasinService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public static string GetMetaDir(string basinRoot) => Path.Combine(basinRoot, ".scholarflow");
-    public static string GetBasinConfigPath(string basinRoot) => Path.Combine(GetMetaDir(basinRoot), "basin.json");
-    public static string GetCoursesPath(string basinRoot) => Path.Combine(GetMetaDir(basinRoot), "courses.json");
-    public static string GetInboxPath(string basinRoot) => Path.Combine(GetMetaDir(basinRoot), "inbox.md");
-    public static string GetPollStatePath(string basinRoot) => Path.Combine(GetMetaDir(basinRoot), "poll_state.json");
-    public static string GetCourseTasksPath(string basinRoot, string courseFolder) => Path.Combine(basinRoot, courseFolder, "tasks.md");
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
+    {
+        WriteIndented = true,
+    };
 
-    public async Task<BasinConfig> InitializeOrOpenAsync(string basinRoot, string? name = null, CancellationToken ct = default)
+    [GeneratedRegex(@"[a-z]+")]
+    private static partial Regex LowercaseWordRegex();
+
+    [GeneratedRegex(@"\b(0[1-9]|1[0-9])\b")]
+    private static partial Regex TwoDigitModulePrefixRegex();
+
+    [GeneratedRegex(@"(?:^|[_\-\s]|\d)tp(?:\d|[_\-\s]|$)")]
+    private static partial Regex TpKindRegex();
+
+    [GeneratedRegex(@"(?:^|[_\-\s]|\d)lab(?:\d|[_\-\s]|$)")]
+    private static partial Regex LabKindRegex();
+
+    [GeneratedRegex(@"(?:^|[_\-\s]|\d)act(?:\d|[_\-\s]|$)")]
+    private static partial Regex ActKindRegex();
+
+    [GeneratedRegex(@"\d+")]
+    private static partial Regex DigitsRegex();
+
+    public static string GetMetaDir(string basinRoot) => Path.Combine(basinRoot, ".scholarflow");
+
+    public static string GetBasinConfigPath(string basinRoot) =>
+        Path.Combine(GetMetaDir(basinRoot), "basin.json");
+
+    public static string GetCoursesPath(string basinRoot) =>
+        Path.Combine(GetMetaDir(basinRoot), "courses.json");
+
+    public static string GetInboxPath(string basinRoot) =>
+        Path.Combine(GetMetaDir(basinRoot), "inbox.md");
+
+    public static string GetPollStatePath(string basinRoot) =>
+        Path.Combine(GetMetaDir(basinRoot), "poll_state.json");
+
+    public static string GetCourseTasksPath(string basinRoot, string courseFolder) =>
+        Path.Combine(basinRoot, courseFolder, "tasks.md");
+
+    public async Task<BasinConfig> InitializeOrOpenAsync(
+        string basinRoot,
+        string? name = null,
+        CancellationToken ct = default
+    )
     {
         Directory.CreateDirectory(basinRoot);
         Directory.CreateDirectory(GetMetaDir(basinRoot));
@@ -37,29 +76,62 @@ public sealed class BasinService
         }
         else
         {
-            config = new BasinConfig { Name = name ?? Path.GetFileName(Path.GetFullPath(basinRoot)) };
+            config = new BasinConfig
+            {
+                Name = name ?? Path.GetFileName(Path.GetFullPath(basinRoot)),
+            };
             await SaveJsonAsync(configPath, config, ct);
         }
 
         var inboxPath = GetInboxPath(basinRoot);
         if (!File.Exists(inboxPath))
-            await MarkdownTaskCodec.SaveDocumentAsync(inboxPath, [], "Inbox", ct);
+            await MarkdownTaskCodec.SaveDocumentAsync(inboxPath, [], "Inbox", ct: ct);
 
         await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
         return config;
     }
 
-    public async Task<List<BasinCourseEntry>> LoadCoursesAsync(string basinRoot, CancellationToken ct = default)
-        => await LoadJsonAsync<List<BasinCourseEntry>>(GetCoursesPath(basinRoot), ct) ?? [];
+    [SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Invoked via DI-injected service instance"
+    )]
+    public async Task<List<BasinCourseEntry>> LoadCoursesAsync(
+        string basinRoot,
+        CancellationToken ct = default
+    ) => await LoadJsonAsync<List<BasinCourseEntry>>(GetCoursesPath(basinRoot), ct) ?? [];
 
-    public Task SaveCoursesAsync(string basinRoot, IEnumerable<BasinCourseEntry> courses, CancellationToken ct = default)
-        => SaveJsonAsync(GetCoursesPath(basinRoot), courses.ToList(), ct);
+    [SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Invoked via DI-injected service instance"
+    )]
+    public Task SaveCoursesAsync(
+        string basinRoot,
+        IEnumerable<BasinCourseEntry> courses,
+        CancellationToken ct = default
+    ) => SaveJsonAsync(GetCoursesPath(basinRoot), courses.ToList(), ct);
 
-    public async Task<PollState> LoadPollStateAsync(string basinRoot, CancellationToken ct = default)
-        => await LoadJsonAsync<PollState>(GetPollStatePath(basinRoot), ct) ?? new PollState();
+    [SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Invoked via DI-injected service instance"
+    )]
+    public async Task<PollState> LoadPollStateAsync(
+        string basinRoot,
+        CancellationToken ct = default
+    ) => await LoadJsonAsync<PollState>(GetPollStatePath(basinRoot), ct) ?? new PollState();
 
-    public Task SavePollStateAsync(string basinRoot, PollState state, CancellationToken ct = default)
-        => SaveJsonAsync(GetPollStatePath(basinRoot), state, ct);
+    [SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Invoked via DI-injected service instance"
+    )]
+    public Task SavePollStateAsync(
+        string basinRoot,
+        PollState state,
+        CancellationToken ct = default
+    ) => SaveJsonAsync(GetPollStatePath(basinRoot), state, ct);
 
     /// <summary>
     /// Computes a normalized comparison key for matching legacy course folders (e.g. Platform_Technology_(Operating_System))
@@ -72,7 +144,8 @@ public sealed class BasinService
 
         var s = raw.Replace('_', ' ').ToLowerInvariant();
         // Strip parenthesized qualifiers like "(data privacy)" when comparing base names, or normalize words
-        var tokens = System.Text.RegularExpressions.Regex.Matches(s, @"[a-z]+")
+        var tokens = LowercaseWordRegex()
+            .Matches(s)
             .Select(m => m.Value)
             .Where(w => w is not ("and" or "in" or "of" or "the" or "for"))
             .Select(w => w.Length > 4 && w.EndsWith('s') ? w[..^1] : w)
@@ -94,17 +167,21 @@ public sealed class BasinService
         // Prefix match when one course includes an extra parenthesized subtitle like "(Data Privacy)"
         var shorter = keyA.Length <= keyB.Length ? keyA : keyB;
         var longer = keyA.Length <= keyB.Length ? keyB : keyA;
-        return SplitWordCount(shorter) >= 3 && longer.StartsWith(shorter + " ", StringComparison.Ordinal);
+        return SplitWordCount(shorter) >= 3
+            && longer.StartsWith(shorter + " ", StringComparison.Ordinal);
     }
 
-    private static int SplitWordCount(string s)
-        => s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+    private static int SplitWordCount(string s) =>
+        s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
     /// <summary>
     /// Merges duplicate course entries in courses.json (where a legacy folder without CourseId coexists with a newly
     /// created eLMS folder), copying any newer module files and LMS tasks into the canonical folder and removing the duplicate directory.
     /// </summary>
-    public async Task<List<BasinCourseEntry>> DeduplicateAndMergeCoursesAsync(string basinRoot, CancellationToken ct = default)
+    public async Task<List<BasinCourseEntry>> DeduplicateAndMergeCoursesAsync(
+        string basinRoot,
+        CancellationToken ct = default
+    )
     {
         var courses = await LoadCoursesAsync(basinRoot, ct);
         if (courses.Count <= 1)
@@ -116,10 +193,23 @@ public sealed class BasinService
         foreach (var entry in courses)
         {
             var existingMatch = deduplicated.FirstOrDefault(c =>
-                (!string.IsNullOrWhiteSpace(c.CourseId) && !string.IsNullOrWhiteSpace(entry.CourseId) && c.CourseId == entry.CourseId) ||
-                c.FolderName.Equals(entry.FolderName, StringComparison.OrdinalIgnoreCase) ||
-                ((string.IsNullOrWhiteSpace(c.CourseId) || string.IsNullOrWhiteSpace(entry.CourseId)) &&
-                 (IsSameCourseFuzzy(c.FolderName, entry.FolderName) || IsSameCourseFuzzy(c.Title, entry.Title))));
+                (
+                    !string.IsNullOrWhiteSpace(c.CourseId)
+                    && !string.IsNullOrWhiteSpace(entry.CourseId)
+                    && c.CourseId == entry.CourseId
+                )
+                || c.FolderName.Equals(entry.FolderName, StringComparison.OrdinalIgnoreCase)
+                || (
+                    (
+                        string.IsNullOrWhiteSpace(c.CourseId)
+                        || string.IsNullOrWhiteSpace(entry.CourseId)
+                    )
+                    && (
+                        IsSameCourseFuzzy(c.FolderName, entry.FolderName)
+                        || IsSameCourseFuzzy(c.Title, entry.Title)
+                    )
+                )
+            );
 
             if (existingMatch is null)
             {
@@ -142,7 +232,8 @@ public sealed class BasinService
                     basinRoot,
                     canonicalEntry: existingMatch,
                     duplicateFolderName: dupFolder,
-                    ct);
+                    ct
+                );
             }
         }
 
@@ -158,7 +249,8 @@ public sealed class BasinService
         string basinRoot,
         BasinCourseEntry canonicalEntry,
         string duplicateFolderName,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         var canonicalDir = Path.Combine(basinRoot, canonicalEntry.FolderName);
         var dupDir = Path.Combine(basinRoot, duplicateFolderName);
@@ -172,8 +264,16 @@ public sealed class BasinService
         var canonTasksPath = Path.Combine(canonicalDir, "tasks.md");
         if (File.Exists(dupTasksPath))
         {
-            var canonTasks = await MarkdownTaskCodec.LoadFileAsync(canonTasksPath, canonicalEntry.FolderName, ct);
-            var dupTasks = await MarkdownTaskCodec.LoadFileAsync(dupTasksPath, canonicalEntry.FolderName, ct);
+            var canonTasks = await MarkdownTaskCodec.LoadFileAsync(
+                canonTasksPath,
+                canonicalEntry.FolderName,
+                ct
+            );
+            var dupTasks = await MarkdownTaskCodec.LoadFileAsync(
+                dupTasksPath,
+                canonicalEntry.FolderName,
+                ct
+            );
             foreach (var t in dupTasks)
             {
                 t.CourseFolder = canonicalEntry.FolderName;
@@ -181,15 +281,22 @@ public sealed class BasinService
                 t.SourceMarkdownPath = canonTasksPath;
             }
             var merged = MarkdownTaskCodec.MergeLmsTasks(canonTasks, dupTasks);
-            await MarkdownTaskCodec.SaveDocumentAsync(canonTasksPath, merged, canonicalEntry.Title, ct);
+            await MarkdownTaskCodec.SaveDocumentAsync(
+                canonTasksPath,
+                merged,
+                canonicalEntry.Title,
+                ct: ct
+            );
         }
 
         // 2. Copy all subdirectories/files (new handouts, term.json, ongoing/, completed/) from dupDir into canonicalDir
         foreach (var file in Directory.GetFiles(dupDir, "*", SearchOption.AllDirectories))
         {
             var fileName = Path.GetFileName(file);
-            if (fileName.Equals("tasks.md", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase))
+            if (
+                fileName.Equals("tasks.md", StringComparison.OrdinalIgnoreCase)
+                || fileName.EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
@@ -200,7 +307,10 @@ public sealed class BasinService
             if (!string.IsNullOrEmpty(destParent))
                 Directory.CreateDirectory(destParent);
 
-            if (!File.Exists(dest) || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(dest))
+            if (
+                !File.Exists(dest)
+                || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(dest)
+            )
             {
                 File.Copy(file, dest, overwrite: true);
             }
@@ -223,18 +333,23 @@ public sealed class BasinService
     public async Task<List<BasinCourseEntry>> UpsertCoursesAsync(
         string basinRoot,
         IEnumerable<ElmsCourse> discoveredCourses,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         var existing = await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
-        var usedAliases = existing.Select(c => c.Alias).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+        var usedAliases = existing
+            .Select(c => c.Alias)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToList();
 
         foreach (var elms in discoveredCourses)
         {
             var match = existing.FirstOrDefault(c =>
-                (!string.IsNullOrWhiteSpace(c.CourseId) && c.CourseId == elms.CourseId) ||
-                c.FolderName.Equals(elms.SanitizedFolderName, StringComparison.OrdinalIgnoreCase) ||
-                IsSameCourseFuzzy(c.FolderName, elms.SanitizedFolderName) ||
-                IsSameCourseFuzzy(c.Title, elms.Title));
+                (!string.IsNullOrWhiteSpace(c.CourseId) && c.CourseId == elms.CourseId)
+                || c.FolderName.Equals(elms.SanitizedFolderName, StringComparison.OrdinalIgnoreCase)
+                || IsSameCourseFuzzy(c.FolderName, elms.SanitizedFolderName)
+                || IsSameCourseFuzzy(c.Title, elms.Title)
+            );
 
             if (match is not null)
             {
@@ -262,7 +377,7 @@ public sealed class BasinService
                     CourseCode = elms.CourseCode,
                     SectionCode = elms.TermOrSection,
                     TermSuffix = elms.TermSuffix,
-                    CourseUrl = elms.CourseUrl
+                    CourseUrl = elms.CourseUrl,
                 };
                 existing.Add(match);
             }
@@ -284,21 +399,29 @@ public sealed class BasinService
         string title,
         string? customAlias = null,
         string? courseCode = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Course title cannot be empty.", nameof(title));
 
         var existing = await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
-        var usedAliases = existing.Select(c => c.Alias).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+        var usedAliases = existing
+            .Select(c => c.Alias)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToList();
 
-        var sanitizedFolder = ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(title.Trim(), "").TrimEnd('.');
+        var sanitizedFolder = Elms
+            .Parsing.FilenameSanitizer.SanitizeFileName(title.Trim(), "")
+            .TrimEnd('.');
         if (string.IsNullOrWhiteSpace(sanitizedFolder))
             sanitizedFolder = $"Course_{Guid.NewGuid().ToString("N")[..6]}";
 
         var uniqueFolder = sanitizedFolder;
         int suffix = 2;
-        while (existing.Any(c => c.FolderName.Equals(uniqueFolder, StringComparison.OrdinalIgnoreCase)))
+        while (
+            existing.Any(c => c.FolderName.Equals(uniqueFolder, StringComparison.OrdinalIgnoreCase))
+        )
         {
             uniqueFolder = $"{sanitizedFolder}_{suffix++}";
         }
@@ -313,7 +436,7 @@ public sealed class BasinService
             Title = title.Trim(),
             FolderName = uniqueFolder,
             Alias = alias,
-            CourseCode = string.IsNullOrWhiteSpace(courseCode) ? null : courseCode.Trim()
+            CourseCode = string.IsNullOrWhiteSpace(courseCode) ? null : courseCode.Trim(),
         };
 
         existing.Add(entry);
@@ -330,13 +453,19 @@ public sealed class BasinService
         return entry;
     }
 
-    public async Task<IReadOnlyList<TaskItem>> LoadAllTasksAsync(string basinRoot, CancellationToken ct = default)
+    public async Task<IReadOnlyList<TaskItem>> LoadAllTasksAsync(
+        string basinRoot,
+        CancellationToken ct = default
+    )
     {
         var courses = await LoadCoursesAsync(basinRoot, ct);
         return await Database.ScholarFlowDatabase.SyncAndLoadAllTasksAsync(basinRoot, courses, ct);
     }
 
-    public static Dictionary<string, List<string>> LoadCourseTermMap(string basinRoot, string courseFolder)
+    public static Dictionary<string, List<string>> LoadCourseTermMap(
+        string basinRoot,
+        string courseFolder
+    )
     {
         var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var courseDir = Path.Combine(basinRoot, courseFolder);
@@ -361,24 +490,38 @@ public sealed class BasinService
 
         if (Directory.Exists(courseDir))
         {
-            var assigned = result.Values.SelectMany(x => x).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            bool hasUnmappedLocalModules = Directory.EnumerateDirectories(courseDir)
+            var assigned = result
+                .Values.SelectMany(x => x)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool hasUnmappedLocalModules = Directory
+                .EnumerateDirectories(courseDir)
                 .Select(Path.GetFileName)
-                .Any(n => n is not null && n.Length >= 3 && char.IsDigit(n[0]) && char.IsDigit(n[1]) && n[2] == '_' && !assigned.Contains(n[..2]));
+                .Any(n =>
+                    n is not null
+                    && n.Length >= 3
+                    && char.IsDigit(n[0])
+                    && char.IsDigit(n[1])
+                    && n[2] == '_'
+                    && !assigned.Contains(n[..2])
+                );
 
             if (!File.Exists(path) || hasUnmappedLocalModules)
             {
                 var syllabusPdf = Pdf.SyllabusTermParser.FindSyllabusPdfPath(courseDir);
                 if (syllabusPdf is not null)
                 {
-                    var schedule = Pdf.SyllabusTermParser.ParseTermScheduleFromSyllabus(syllabusPdf, courseDir);
+                    var schedule = Pdf.SyllabusTermParser.ParseTermScheduleFromSyllabus(
+                        syllabusPdf,
+                        courseDir
+                    );
                     bool enriched = false;
                     foreach (var term in Pdf.SyllabusTermParser.TermOrder)
                     {
                         if (!result.ContainsKey(term))
                             result[term] = [];
 
-                        if (!schedule.TermPrefixes.TryGetValue(term, out var mapped)) continue;
+                        if (!schedule.TermPrefixes.TryGetValue(term, out var mapped))
+                            continue;
                         foreach (var prefix in mapped)
                         {
                             if (assigned.Add(prefix))
@@ -393,7 +536,7 @@ public sealed class BasinService
                     {
                         try
                         {
-                            var serialized = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+                            var serialized = JsonSerializer.Serialize(result, IndentedJsonOptions);
                             File.WriteAllText(path, serialized);
                         }
                         catch
@@ -412,16 +555,20 @@ public sealed class BasinService
         Dictionary<string, List<string>>? courseTermMap,
         string? explicitTerm,
         string? title,
-        string? parentModuleOrSection = null)
+        string? parentModuleOrSection = null
+    )
     {
-        var norm = TaskItem.NormalizeTerm(explicitTerm)
-                   ?? TaskItem.NormalizeTerm(title)
-                   ?? TaskItem.NormalizeTerm(parentModuleOrSection);
+        var norm =
+            TaskItem.NormalizeTerm(explicitTerm)
+            ?? TaskItem.NormalizeTerm(title)
+            ?? TaskItem.NormalizeTerm(parentModuleOrSection);
         if (norm is not null)
             return norm;
 
         // Extract leading 2-digit module prefix (e.g. "04 Quiz 1" -> "04", "05 Task Performance 1" -> "05")
-        var prefix = ExtractTwoDigitModulePrefix(title) ?? ExtractTwoDigitModulePrefix(parentModuleOrSection);
+        var prefix =
+            ExtractTwoDigitModulePrefix(title)
+            ?? ExtractTwoDigitModulePrefix(parentModuleOrSection);
         if (prefix is null)
             return null;
 
@@ -441,7 +588,7 @@ public sealed class BasinService
                 <= 2 => "Prelims",
                 <= 4 => "Midterms",
                 <= 6 => "Prefinals",
-                _ => "Finals"
+                _ => "Finals",
             };
         }
 
@@ -453,7 +600,7 @@ public sealed class BasinService
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
-        var m = System.Text.RegularExpressions.Regex.Match(text, @"\b(0[1-9]|1[0-9])\b");
+        var m = TwoDigitModulePrefixRegex().Match(text);
         return m.Success ? m.Groups[1].Value : null;
     }
 
@@ -466,9 +613,15 @@ public sealed class BasinService
             tags.Add(normTerm.ToLowerInvariant());
 
         var t = (title ?? string.Empty).ToLowerInvariant();
-        if (t.Contains("quiz") || string.Equals(lmsKind, "Quiz", StringComparison.OrdinalIgnoreCase))
+        if (
+            t.Contains("quiz") || string.Equals(lmsKind, "Quiz", StringComparison.OrdinalIgnoreCase)
+        )
             tags.Add("quiz");
-        else if (t.Contains("task performance") || t.Contains("performance task") || t.Contains("tp"))
+        else if (
+            t.Contains("task performance")
+            || t.Contains("performance task")
+            || t.Contains("tp")
+        )
             tags.Add("tp");
         else if (t.Contains("laboratory") || t.Contains("lab "))
             tags.Add("lab");
@@ -493,22 +646,32 @@ public sealed class BasinService
         string basinRoot,
         BasinCourseEntry course,
         TaskItem task,
-        Dictionary<string, List<string>>? termMap = null)
+        Dictionary<string, List<string>>? termMap = null
+    )
     {
         bool changed = false;
         termMap ??= LoadCourseTermMap(basinRoot, course.FolderName);
         var courseDir = Path.Combine(basinRoot, course.FolderName);
 
-        var resolvedTerm = ResolveAcademicTerm(termMap, null, task.Title, task.Section)
-                           ?? TaskItem.NormalizeTerm(task.Term);
+        var resolvedTerm =
+            ResolveAcademicTerm(termMap, null, task.Title, task.Section)
+            ?? TaskItem.NormalizeTerm(task.Term);
         if (resolvedTerm is null)
         {
             var syllabusPdf = Pdf.SyllabusTermParser.FindSyllabusPdfPath(courseDir);
             if (syllabusPdf is not null)
-                resolvedTerm = Pdf.SyllabusTermParser.InferTaskTermFromSyllabus(syllabusPdf, courseDir, task.Title, task.Section);
+                resolvedTerm = Pdf.SyllabusTermParser.InferTaskTermFromSyllabus(
+                    syllabusPdf,
+                    courseDir,
+                    task.Title,
+                    task.Section
+                );
         }
 
-        if (resolvedTerm is not null && !string.Equals(task.Term, resolvedTerm, StringComparison.OrdinalIgnoreCase))
+        if (
+            resolvedTerm is not null
+            && !string.Equals(task.Term, resolvedTerm, StringComparison.OrdinalIgnoreCase)
+        )
         {
             task.Term = resolvedTerm;
             changed = true;
@@ -527,7 +690,7 @@ public sealed class BasinService
         if (!Directory.Exists(courseDir))
             return changed;
 
-        var taskStem = ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(task.Title, "").TrimEnd('.');
+        var taskStem = Elms.Parsing.FilenameSanitizer.SanitizeFileName(task.Title, "").TrimEnd('.');
         if (string.IsNullOrWhiteSpace(taskStem))
             return changed;
 
@@ -548,8 +711,9 @@ public sealed class BasinService
                     continue;
 
                 var fileStem = Path.GetFileNameWithoutExtension(file).TrimEnd('_');
-                bool isExactWorksheetMatch = fileStem.Equals(taskStem, StringComparison.OrdinalIgnoreCase) ||
-                                             dirName.Equals(taskStem, StringComparison.OrdinalIgnoreCase);
+                bool isExactWorksheetMatch =
+                    fileStem.Equals(taskStem, StringComparison.OrdinalIgnoreCase)
+                    || dirName.Equals(taskStem, StringComparison.OrdinalIgnoreCase);
 
                 var relPath = Path.GetRelativePath(courseDir, file).Replace('\\', '/');
                 if (isExactWorksheetMatch && ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
@@ -559,15 +723,24 @@ public sealed class BasinService
                         task.InstructionFiles.Add(relPath);
                         changed = true;
                     }
-                    if (task.SubmissionFiles.RemoveAll(s => s.Equals(relPath, StringComparison.OrdinalIgnoreCase)) > 0)
+                    if (
+                        task.SubmissionFiles.RemoveAll(s =>
+                            s.Equals(relPath, StringComparison.OrdinalIgnoreCase)
+                        ) > 0
+                    )
                     {
                         changed = true;
                     }
                 }
-                else if (isCompletedDir && (isExactWorksheetMatch || MatchesDeliverableSignature(task.Title, fileStem)))
+                else if (
+                    isCompletedDir
+                    && (isExactWorksheetMatch || MatchesDeliverableSignature(task.Title, fileStem))
+                )
                 {
-                    if (!task.InstructionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase) &&
-                        !task.SubmissionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase))
+                    if (
+                        !task.InstructionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase)
+                        && !task.SubmissionFiles.Contains(relPath, StringComparer.OrdinalIgnoreCase)
+                    )
                     {
                         task.SubmissionFiles.Add(relPath);
                         changed = true;
@@ -577,7 +750,11 @@ public sealed class BasinService
         }
 
         // Ensure SubmissionFiles never duplicates an InstructionFile
-        if (task.SubmissionFiles.RemoveAll(s => task.InstructionFiles.Contains(s, StringComparer.OrdinalIgnoreCase)) > 0)
+        if (
+            task.SubmissionFiles.RemoveAll(s =>
+                task.InstructionFiles.Contains(s, StringComparer.OrdinalIgnoreCase)
+            ) > 0
+        )
             changed = true;
 
         task.EnsureChildTasksSynced();
@@ -588,20 +765,25 @@ public sealed class BasinService
     {
         var taskMod = ExtractTwoDigitModulePrefix(taskTitle);
         var fileMod = ExtractTwoDigitModulePrefix(candidateFileStem);
-        if (taskMod is null || fileMod is null || !taskMod.Equals(fileMod, StringComparison.OrdinalIgnoreCase))
+        if (
+            taskMod is null
+            || fileMod is null
+            || !taskMod.Equals(fileMod, StringComparison.OrdinalIgnoreCase)
+        )
             return false;
 
         static string ExtractKind(string s)
         {
             var lower = s.ToLowerInvariant();
-            if (lower.Contains("task performance") || lower.Contains("performance task") ||
-                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)tp(?:\d|[_\-\s]|$)"))
+            if (
+                lower.Contains("task performance")
+                || lower.Contains("performance task")
+                || TpKindRegex().IsMatch(lower)
+            )
                 return "tp";
-            if (lower.Contains("laboratory") ||
-                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)lab(?:\d|[_\-\s]|$)"))
+            if (lower.Contains("laboratory") || LabKindRegex().IsMatch(lower))
                 return "lab";
-            if (lower.Contains("activity") ||
-                System.Text.RegularExpressions.Regex.IsMatch(lower, @"(?:^|[_\-\s]|\d)act(?:\d|[_\-\s]|$)"))
+            if (lower.Contains("activity") || ActKindRegex().IsMatch(lower))
                 return "act";
             if (lower.Contains("quiz"))
                 return "quiz";
@@ -614,8 +796,8 @@ public sealed class BasinService
             return false;
 
         // Compare trailing activity number (e.g. "1" in "05 Task Performance 1" vs "05 TP 1")
-        var taskNums = System.Text.RegularExpressions.Regex.Matches(taskTitle, @"\d+");
-        var fileNums = System.Text.RegularExpressions.Regex.Matches(candidateFileStem, @"\d+");
+        var taskNums = DigitsRegex().Matches(taskTitle);
+        var fileNums = DigitsRegex().Matches(candidateFileStem);
         if (taskNums.Count >= 2 && fileNums.Count >= 2)
         {
             int tNum = int.Parse(taskNums[^1].Value);
@@ -635,7 +817,8 @@ public sealed class BasinService
         string basinRoot,
         string quickAddInput,
         DateOnly? todayOverride = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         var courses = await LoadCoursesAsync(basinRoot, ct);
         var parsed = QuickAddParser.Parse(quickAddInput, courses, todayOverride);
@@ -650,13 +833,20 @@ public sealed class BasinService
 
         var header = string.IsNullOrWhiteSpace(task.CourseFolder)
             ? "Inbox"
-            : courses.FirstOrDefault(c => c.FolderName.Equals(task.CourseFolder, StringComparison.OrdinalIgnoreCase))?.Title ?? task.CourseFolder;
+            : courses
+                .FirstOrDefault(c =>
+                    c.FolderName.Equals(task.CourseFolder, StringComparison.OrdinalIgnoreCase)
+                )
+                ?.Title
+                ?? task.CourseFolder;
 
         task.SourceMarkdownPath = targetPath;
 
-        var existing = (await MarkdownTaskCodec.LoadFileAsync(targetPath, task.CourseFolder, ct)).ToList();
+        var existing = (
+            await MarkdownTaskCodec.LoadFileAsync(targetPath, task.CourseFolder, ct)
+        ).ToList();
         existing.Add(task);
-        await MarkdownTaskCodec.SaveDocumentAsync(targetPath, existing, header, ct);
+        await MarkdownTaskCodec.SaveDocumentAsync(targetPath, existing, header, ct: ct);
 
         return task;
     }

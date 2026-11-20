@@ -1,21 +1,17 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using ScholarFlow.Core.Markdown;
-using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Quiz;
-using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Core.Database;
-
 
 public static partial class ScholarFlowDatabase
 {
     public static async Task SaveQuizSessionAsync(
         string basinRoot,
         QuizSessionRecord quiz,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot))
             return;
@@ -47,10 +43,21 @@ public static partial class ScholarFlowDatabase
                 qCmd.Parameters.AddWithValue("$title", quiz.Title);
                 qCmd.Parameters.AddWithValue("$source_pdf_path", quiz.SourcePdfPath);
                 qCmd.Parameters.AddWithValue("$model_used", quiz.ModelUsed);
-                qCmd.Parameters.AddWithValue("$created_at_utc", quiz.CreatedAtUtc.ToString("O", CultureInfo.InvariantCulture));
+                qCmd.Parameters.AddWithValue(
+                    "$created_at_utc",
+                    quiz.CreatedAtUtc.ToString("O", CultureInfo.InvariantCulture)
+                );
                 qCmd.Parameters.AddWithValue("$attempt_count", quiz.AttemptCount);
-                qCmd.Parameters.AddWithValue("$last_score_percent", quiz.LastScorePercent.HasValue ? quiz.LastScorePercent.Value : DBNull.Value);
-                qCmd.Parameters.AddWithValue("$source_pdf_mtime_ticks", quiz.SourcePdfMtimeTicks.HasValue ? quiz.SourcePdfMtimeTicks.Value : DBNull.Value);
+                qCmd.Parameters.AddWithValue(
+                    "$last_score_percent",
+                    quiz.LastScorePercent.HasValue ? quiz.LastScorePercent.Value : DBNull.Value
+                );
+                qCmd.Parameters.AddWithValue(
+                    "$source_pdf_mtime_ticks",
+                    quiz.SourcePdfMtimeTicks.HasValue
+                        ? quiz.SourcePdfMtimeTicks.Value
+                        : DBNull.Value
+                );
                 await qCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -93,26 +100,60 @@ public static partial class ScholarFlowDatabase
                 itemCmd.Parameters.AddWithValue("$difficulty", q.Difficulty);
                 itemCmd.Parameters.AddWithValue("$topic_tag", q.TopicTag);
                 itemCmd.Parameters.AddWithValue("$prompt", q.Prompt);
-                itemCmd.Parameters.AddWithValue("$options_json", JsonSerializer.Serialize(q.Options));
+                itemCmd.Parameters.AddWithValue(
+                    "$options_json",
+                    JsonSerializer.Serialize(q.Options)
+                );
                 itemCmd.Parameters.AddWithValue("$correct_answer", q.CorrectAnswer);
-                itemCmd.Parameters.AddWithValue("$aliases_json", JsonSerializer.Serialize(q.AcceptedAliases));
+                itemCmd.Parameters.AddWithValue(
+                    "$aliases_json",
+                    JsonSerializer.Serialize(q.AcceptedAliases)
+                );
                 itemCmd.Parameters.AddWithValue("$explanation", q.Explanation);
                 itemCmd.Parameters.AddWithValue("$source_pdf_path", q.SourcePdfPath);
                 itemCmd.Parameters.AddWithValue("$source_page", q.SourcePage);
                 itemCmd.Parameters.AddWithValue("$section_title", q.SectionTitle);
                 itemCmd.Parameters.AddWithValue("$verbatim_quote", q.VerbatimQuote);
-                itemCmd.Parameters.AddWithValue("$highlight_rects_json", JsonSerializer.Serialize(q.HighlightRects));
-                itemCmd.Parameters.AddWithValue("$evidence_anchors_json", JsonSerializer.Serialize(q.EvidenceAnchors));
+                itemCmd.Parameters.AddWithValue(
+                    "$highlight_rects_json",
+                    JsonSerializer.Serialize(q.HighlightRects)
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$evidence_anchors_json",
+                    JsonSerializer.Serialize(q.EvidenceAnchors)
+                );
                 itemCmd.Parameters.AddWithValue("$srs_interval_days", q.SrsIntervalDays);
                 itemCmd.Parameters.AddWithValue("$srs_ease_factor", q.SrsEaseFactor);
-                itemCmd.Parameters.AddWithValue("$srs_due_date", q.SrsDueDate.HasValue ? q.SrsDueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : DBNull.Value);
+                itemCmd.Parameters.AddWithValue(
+                    "$srs_due_date",
+                    q.SrsDueDate.HasValue
+                        ? q.SrsDueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                        : DBNull.Value
+                );
                 itemCmd.Parameters.AddWithValue("$srs_reps", q.SrsReps);
                 itemCmd.Parameters.AddWithValue("$srs_lapses", q.SrsLapses);
-                itemCmd.Parameters.AddWithValue("$last_answered_correct", q.LastAnsweredCorrect.HasValue ? (q.LastAnsweredCorrect.Value ? 1 : 0) : DBNull.Value);
-                itemCmd.Parameters.AddWithValue("$code_snippet", (object?)q.CodeSnippet ?? DBNull.Value);
-                itemCmd.Parameters.AddWithValue("$code_language", (object?)q.CodeLanguage ?? DBNull.Value);
-                itemCmd.Parameters.AddWithValue("$math_latex", (object?)q.MathLatex ?? DBNull.Value);
-                itemCmd.Parameters.AddWithValue("$diagram_text", (object?)q.Diagram ?? DBNull.Value);
+                itemCmd.Parameters.AddWithValue(
+                    "$last_answered_correct",
+                    q.LastAnsweredCorrect.HasValue
+                        ? (q.LastAnsweredCorrect.Value ? 1 : 0)
+                        : DBNull.Value
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$code_snippet",
+                    (object?)q.CodeSnippet ?? DBNull.Value
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$code_language",
+                    (object?)q.CodeLanguage ?? DBNull.Value
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$math_latex",
+                    (object?)q.MathLatex ?? DBNull.Value
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$diagram_text",
+                    (object?)q.Diagram ?? DBNull.Value
+                );
                 await itemCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -127,7 +168,8 @@ public static partial class ScholarFlowDatabase
     public static async Task<IReadOnlyList<QuizSessionRecord>> LoadQuizSessionsAsync(
         string basinRoot,
         string? courseFolder = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot) || !File.Exists(GetDatabasePath(basinRoot)))
             return [];
@@ -162,14 +204,26 @@ public static partial class ScholarFlowDatabase
                         Title = r.GetString(4),
                         SourcePdfPath = r.GetString(5),
                         ModelUsed = r.GetString(6),
-                        CreatedAtUtc = DateTimeOffset.TryParse(r.GetString(7), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) ? dt : DateTimeOffset.UtcNow,
+                        CreatedAtUtc = DateTimeOffset.TryParse(
+                            r.GetString(7),
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.RoundtripKind,
+                            out var dt
+                        )
+                            ? dt
+                            : DateTimeOffset.UtcNow,
                         AttemptCount = r.GetInt32(8),
                         LastScorePercent = r.IsDBNull(9) ? null : r.GetDouble(9),
-                        SourcePdfMtimeTicks = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetInt64(10) : null,
-                        InProgressQuestionIndex = r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetInt32(11) : null,
-                        InProgressAnswers = r.FieldCount > 12 && !r.IsDBNull(12)
-                            ? TryDeserializeDictionary<QuizInProgressAnswer>(r.GetString(12))
-                            : new Dictionary<string, QuizInProgressAnswer>(StringComparer.OrdinalIgnoreCase)
+                        SourcePdfMtimeTicks =
+                            r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetInt64(10) : null,
+                        InProgressQuestionIndex =
+                            r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetInt32(11) : null,
+                        InProgressAnswers =
+                            r.FieldCount > 12 && !r.IsDBNull(12)
+                                ? TryDeserializeDictionary<QuizInProgressAnswer>(r.GetString(12))
+                                : new Dictionary<string, QuizInProgressAnswer>(
+                                    StringComparer.OrdinalIgnoreCase
+                                ),
                     };
                     sessions.Add(s);
                     byId[s.Id] = s;
@@ -204,8 +258,20 @@ public static partial class ScholarFlowDatabase
                         Id = r.GetString(0),
                         QuizId = quizId,
                         OrderIndex = r.GetInt32(2),
-                        Kind = Enum.TryParse<QuizQuestionKind>(r.GetString(3), ignoreCase: true, out var k) ? k : QuizQuestionKind.MultipleChoice,
-                        CognitiveLevel = Enum.TryParse<CognitiveLevel>(r.GetString(4), ignoreCase: true, out var cl) ? cl : CognitiveLevel.Comprehension,
+                        Kind = Enum.TryParse<QuizQuestionKind>(
+                            r.GetString(3),
+                            ignoreCase: true,
+                            out var k
+                        )
+                            ? k
+                            : QuizQuestionKind.MultipleChoice,
+                        CognitiveLevel = Enum.TryParse<CognitiveLevel>(
+                            r.GetString(4),
+                            ignoreCase: true,
+                            out var cl
+                        )
+                            ? cl
+                            : CognitiveLevel.Comprehension,
                         Difficulty = r.GetInt32(5),
                         TopicTag = r.GetString(6),
                         Prompt = r.GetString(7),
@@ -217,20 +283,34 @@ public static partial class ScholarFlowDatabase
                         SourcePage = r.GetInt32(13),
                         SectionTitle = r.GetString(14),
                         VerbatimQuote = r.GetString(15),
-                        HighlightRects = TryDeserializeList<NormalizedHighlightRect>(r.GetString(16)),
-                        EvidenceAnchors = r.FieldCount > 27 && !r.IsDBNull(27)
-                            ? TryDeserializeList<GroundedEvidenceAnchor>(r.GetString(27))
-                            : [],
+                        HighlightRects = TryDeserializeList<NormalizedHighlightRect>(
+                            r.GetString(16)
+                        ),
+                        EvidenceAnchors =
+                            r.FieldCount > 27 && !r.IsDBNull(27)
+                                ? TryDeserializeList<GroundedEvidenceAnchor>(r.GetString(27))
+                                : [],
                         SrsIntervalDays = r.GetDouble(17),
                         SrsEaseFactor = r.GetDouble(18),
-                        SrsDueDate = !r.IsDBNull(19) && DateOnly.TryParseExact(r.GetString(19), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var sd) ? sd : null,
+                        SrsDueDate =
+                            !r.IsDBNull(19)
+                            && DateOnly.TryParseExact(
+                                r.GetString(19),
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out var sd
+                            )
+                                ? sd
+                                : null,
                         SrsReps = r.GetInt32(20),
                         SrsLapses = r.GetInt32(21),
                         LastAnsweredCorrect = r.IsDBNull(22) ? null : r.GetInt32(22) != 0,
                         CodeSnippet = r.FieldCount > 23 && !r.IsDBNull(23) ? r.GetString(23) : null,
-                        CodeLanguage = r.FieldCount > 24 && !r.IsDBNull(24) ? r.GetString(24) : null,
+                        CodeLanguage =
+                            r.FieldCount > 24 && !r.IsDBNull(24) ? r.GetString(24) : null,
                         MathLatex = r.FieldCount > 25 && !r.IsDBNull(25) ? r.GetString(25) : null,
-                        Diagram = r.FieldCount > 26 && !r.IsDBNull(26) ? r.GetString(26) : null
+                        Diagram = r.FieldCount > 26 && !r.IsDBNull(26) ? r.GetString(26) : null,
                     };
 
                     parentQuiz.Questions.Add(q);
@@ -255,7 +335,8 @@ public static partial class ScholarFlowDatabase
         string userAnswer,
         bool isCorrect,
         int qualityRating = 4,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot))
             return;
@@ -279,11 +360,16 @@ public static partial class ScholarFlowDatabase
             else if (question.SrsReps == 2)
                 question.SrsIntervalDays = q == 5 ? 6.0 : 4.0;
             else
-                question.SrsIntervalDays = Math.Round(question.SrsIntervalDays * question.SrsEaseFactor, 1);
+                question.SrsIntervalDays = Math.Round(
+                    question.SrsIntervalDays * question.SrsEaseFactor,
+                    1
+                );
 
             double easeDelta = 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02);
             question.SrsEaseFactor = Math.Clamp(question.SrsEaseFactor + easeDelta, 1.3, 3.2);
-            question.SrsDueDate = today.AddDays(Math.Max(1, (int)Math.Round(question.SrsIntervalDays)));
+            question.SrsDueDate = today.AddDays(
+                Math.Max(1, (int)Math.Round(question.SrsIntervalDays))
+            );
         }
 
         question.LastAnsweredCorrect = isCorrect;
@@ -309,7 +395,10 @@ public static partial class ScholarFlowDatabase
                     """;
                 upd.Parameters.AddWithValue("$ivl", question.SrsIntervalDays);
                 upd.Parameters.AddWithValue("$ef", question.SrsEaseFactor);
-                upd.Parameters.AddWithValue("$due", question.SrsDueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                upd.Parameters.AddWithValue(
+                    "$due",
+                    question.SrsDueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                );
                 upd.Parameters.AddWithValue("$reps", question.SrsReps);
                 upd.Parameters.AddWithValue("$lapses", question.SrsLapses);
                 upd.Parameters.AddWithValue("$ok", isCorrect ? 1 : 0);
@@ -317,21 +406,22 @@ public static partial class ScholarFlowDatabase
                 await upd.ExecuteNonQueryAsync(ct);
             }
 
-            await using (var att = conn.CreateCommand())
-            {
-                att.CommandText = """
-                    INSERT INTO quiz_attempts (id, quiz_id, question_id, user_answer, is_correct, quality_rating, answered_at_utc)
-                    VALUES ($id, $qid, $question_id, $ans, $ok, $qual, $ts);
-                    """;
-                att.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N")[..12]);
-                att.Parameters.AddWithValue("$qid", question.QuizId);
-                att.Parameters.AddWithValue("$question_id", question.Id);
-                att.Parameters.AddWithValue("$ans", userAnswer ?? string.Empty);
-                att.Parameters.AddWithValue("$ok", isCorrect ? 1 : 0);
-                att.Parameters.AddWithValue("$qual", q);
-                att.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-                await att.ExecuteNonQueryAsync(ct);
-            }
+            await using var att = conn.CreateCommand();
+            att.CommandText = """
+                INSERT INTO quiz_attempts (id, quiz_id, question_id, user_answer, is_correct, quality_rating, answered_at_utc)
+                VALUES ($id, $qid, $question_id, $ans, $ok, $qual, $ts);
+                """;
+            att.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N")[..12]);
+            att.Parameters.AddWithValue("$qid", question.QuizId);
+            att.Parameters.AddWithValue("$question_id", question.Id);
+            att.Parameters.AddWithValue("$ans", userAnswer ?? string.Empty);
+            att.Parameters.AddWithValue("$ok", isCorrect ? 1 : 0);
+            att.Parameters.AddWithValue("$qual", q);
+            att.Parameters.AddWithValue(
+                "$ts",
+                DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+            );
+            await att.ExecuteNonQueryAsync(ct);
         }
         finally
         {
@@ -344,9 +434,14 @@ public static partial class ScholarFlowDatabase
         string quizId,
         int currentQuestionIndex,
         IReadOnlyDictionary<string, QuizInProgressAnswer> answers,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
-        if (string.IsNullOrWhiteSpace(basinRoot) || string.IsNullOrWhiteSpace(quizId) || quizId == "srs-deck")
+        if (
+            string.IsNullOrWhiteSpace(basinRoot)
+            || string.IsNullOrWhiteSpace(quizId)
+            || quizId == "srs-deck"
+        )
             return;
 
         await DbLock.WaitAsync(ct);
@@ -377,9 +472,14 @@ public static partial class ScholarFlowDatabase
     public static async Task ClearQuizInProgressAsync(
         string basinRoot,
         string quizId,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
-        if (string.IsNullOrWhiteSpace(basinRoot) || string.IsNullOrWhiteSpace(quizId) || quizId == "srs-deck")
+        if (
+            string.IsNullOrWhiteSpace(basinRoot)
+            || string.IsNullOrWhiteSpace(quizId)
+            || quizId == "srs-deck"
+        )
             return;
 
         await DbLock.WaitAsync(ct);
@@ -427,7 +527,8 @@ public static partial class ScholarFlowDatabase
         string basinRoot,
         QuizSessionRecord quiz,
         double scorePercent,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot))
             return;
@@ -463,7 +564,8 @@ public static partial class ScholarFlowDatabase
     public static async Task DeleteQuizSessionAsync(
         string basinRoot,
         string quizId,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot))
             return;
@@ -490,7 +592,11 @@ public static partial class ScholarFlowDatabase
         }
     }
 
-    public static IReadOnlyList<string> GetWeakTopicTags(string basinRoot, string? courseFolder = null, int limit = 8)
+    public static IReadOnlyList<string> GetWeakTopicTags(
+        string basinRoot,
+        string? courseFolder = null,
+        int limit = 8
+    )
     {
         if (string.IsNullOrWhiteSpace(basinRoot) || !File.Exists(GetDatabasePath(basinRoot)))
             return [];
@@ -503,22 +609,22 @@ public static partial class ScholarFlowDatabase
             using var cmd = conn.CreateCommand();
             cmd.CommandText = string.IsNullOrWhiteSpace(courseFolder)
                 ? """
-                  SELECT topic_tag
-                  FROM quiz_questions
-                  WHERE srs_lapses > 0 OR last_answered_correct = 0
-                  GROUP BY topic_tag
-                  ORDER BY SUM(srs_lapses) DESC, COUNT(*) DESC
-                  LIMIT $limit;
-                  """
+                    SELECT topic_tag
+                    FROM quiz_questions
+                    WHERE srs_lapses > 0 OR last_answered_correct = 0
+                    GROUP BY topic_tag
+                    ORDER BY SUM(srs_lapses) DESC, COUNT(*) DESC
+                    LIMIT $limit;
+                    """
                 : """
-                  SELECT qq.topic_tag
-                  FROM quiz_questions qq
-                  JOIN quizzes q ON q.id = qq.quiz_id
-                  WHERE q.course_folder = $cf AND (qq.srs_lapses > 0 OR qq.last_answered_correct = 0)
-                  GROUP BY qq.topic_tag
-                  ORDER BY SUM(qq.srs_lapses) DESC, COUNT(*) DESC
-                  LIMIT $limit;
-                  """;
+                    SELECT qq.topic_tag
+                    FROM quiz_questions qq
+                    JOIN quizzes q ON q.id = qq.quiz_id
+                    WHERE q.course_folder = $cf AND (qq.srs_lapses > 0 OR qq.last_answered_correct = 0)
+                    GROUP BY qq.topic_tag
+                    ORDER BY SUM(qq.srs_lapses) DESC, COUNT(*) DESC
+                    LIMIT $limit;
+                    """;
 
             if (!string.IsNullOrWhiteSpace(courseFolder))
                 cmd.Parameters.AddWithValue("$cf", courseFolder);

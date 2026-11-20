@@ -1,11 +1,11 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Fonts;
 using PdfSharpCore.Pdf;
-using ScholarFlow.Core.Models;
-using UglyToad.PdfPig;
 using PdfPigDocument = UglyToad.PdfPig.PdfDocument;
 using PdfSharpDocument = PdfSharpCore.Pdf.PdfDocument;
 
@@ -15,7 +15,8 @@ public sealed record MasterPdfCompileResult(
     string CourseFolder,
     string OutputPdfPath,
     bool WasRegenerated,
-    int PageCount);
+    int PageCount
+);
 
 /// <summary>
 /// Pure C# (.NET 10) port of Compile_School using PDFsharp + PdfPig.
@@ -23,19 +24,27 @@ public sealed record MasterPdfCompileResult(
 /// into 2 portrait A4 pages (or rotates syllabi), builds Cover/Term/TOC pages + PDF bookmarks,
 /// and caches source fingerprints so unchanged courses are skipped automatically.
 /// </summary>
-public sealed class MasterPdfService
+public sealed partial class MasterPdfService
 {
     private const double TargetWidth = 595.0;
     private const double TargetHeight = 842.0;
     private const double SafetyPadding = 30.0;
 
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
+    {
+        WriteIndented = true,
+    };
+
     private static int _fontResolverInitialized;
 
-    public static string GetPdfStatePath(string basinRoot)
-        => Path.Combine(basinRoot, ".scholarflow", "pdf_state.json");
+    [GeneratedRegex(@"/P\s+(\d{10})\b")]
+    private static partial Regex UnsignedPdfPermissionRegex();
 
-    public static string GetExpectedMasterPdfPath(string basinRoot, string courseFolder)
-        => Path.Combine(basinRoot, courseFolder, $"{courseFolder}_Master.pdf");
+    public static string GetPdfStatePath(string basinRoot) =>
+        Path.Combine(basinRoot, ".scholarflow", "pdf_state.json");
+
+    public static string GetExpectedMasterPdfPath(string basinRoot, string courseFolder) =>
+        Path.Combine(basinRoot, courseFolder, $"{courseFolder}_Master.pdf");
 
     public static string? FindExistingMasterPdfPath(string basinRoot, string courseFolder)
     {
@@ -47,17 +56,24 @@ public sealed class MasterPdfService
         if (File.Exists(exact))
             return exact;
 
-        return Directory.EnumerateFiles(coursePath, "*_Master.pdf", SearchOption.TopDirectoryOnly)
+        return Directory
+            .EnumerateFiles(coursePath, "*_Master.pdf", SearchOption.TopDirectoryOnly)
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }
 
+    [SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Invoked via DI-injected service instance"
+    )]
     public async Task<MasterPdfCompileResult> CompileIfStaleAsync(
         string basinRoot,
         string courseFolder,
         string? displayTitle = null,
         bool force = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         EnsureFontResolver();
 
@@ -69,12 +85,19 @@ public sealed class MasterPdfService
         var statePath = GetPdfStatePath(basinRoot);
         var state = await LoadStateAsync(statePath, ct);
 
-        if (!force &&
-            File.Exists(outPath) &&
-            state.TryGetValue(courseFolder, out var prevHash) &&
-            string.Equals(prevHash, fingerprint, StringComparison.Ordinal))
+        if (
+            !force
+            && File.Exists(outPath)
+            && state.TryGetValue(courseFolder, out var prevHash)
+            && string.Equals(prevHash, fingerprint, StringComparison.Ordinal)
+        )
         {
-            return new MasterPdfCompileResult(courseFolder, outPath, WasRegenerated: false, PageCount: 0);
+            return new MasterPdfCompileResult(
+                courseFolder,
+                outPath,
+                WasRegenerated: false,
+                PageCount: 0
+            );
         }
 
         int pageCount = await Task.Run(() => CompileCourseSync(coursePath, title, outPath, ct), ct);
@@ -82,10 +105,20 @@ public sealed class MasterPdfService
         state[courseFolder] = ComputeCourseFingerprint(coursePath);
         await SaveStateAsync(statePath, state, ct);
 
-        return new MasterPdfCompileResult(courseFolder, outPath, WasRegenerated: true, PageCount: pageCount);
+        return new MasterPdfCompileResult(
+            courseFolder,
+            outPath,
+            WasRegenerated: true,
+            PageCount: pageCount
+        );
     }
 
-    private static int CompileCourseSync(string subjectPath, string subjectName, string outPath, CancellationToken ct)
+    private static int CompileCourseSync(
+        string subjectPath,
+        string subjectName,
+        string outPath,
+        CancellationToken ct
+    )
     {
         using var destDoc = new PdfSharpDocument();
         destDoc.Info.Title = $"{subjectName} - Master Study Packet";
@@ -99,17 +132,23 @@ public sealed class MasterPdfService
         sidebarToc.Add((1, "Cover Page", 1));
 
         var allDirs = Directory.Exists(subjectPath)
-            ? Directory.GetDirectories(subjectPath)
+            ? Directory
+                .GetDirectories(subjectPath)
                 .Select(Path.GetFileName)
-                .Where(n => !string.IsNullOrEmpty(n) && !n.StartsWith('.') &&
-                            !n.Equals("ongoing", StringComparison.OrdinalIgnoreCase) &&
-                            !n.Equals("completed", StringComparison.OrdinalIgnoreCase))
+                .Where(n =>
+                    !string.IsNullOrEmpty(n)
+                    && !n.StartsWith('.')
+                    && !n.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                    && !n.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                )
                 .Select(n => n!)
                 .ToList()
             : [];
 
         // 2. Syllabus
-        var syllabusDir = allDirs.FirstOrDefault(d => d.Contains("syllabus", StringComparison.OrdinalIgnoreCase));
+        var syllabusDir = allDirs.FirstOrDefault(d =>
+            d.Contains("syllabus", StringComparison.OrdinalIgnoreCase)
+        );
         if (syllabusDir is not null)
         {
             var startLogical = destDoc.PageCount;
@@ -137,14 +176,21 @@ public sealed class MasterPdfService
 
             foreach (var prefix in prefixes)
             {
-                var matches = allDirs.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !categorized.Contains(d)).ToList();
+                var matches = allDirs
+                    .Where(d =>
+                        d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                        && !categorized.Contains(d)
+                    )
+                    .ToList();
                 foreach (var m in matches)
                 {
-                    if (m.Contains("activity", StringComparison.OrdinalIgnoreCase) ||
-                        m.Contains("quiz", StringComparison.OrdinalIgnoreCase) ||
-                        m.Contains("seatwork", StringComparison.OrdinalIgnoreCase) ||
-                        m.Contains("exercise", StringComparison.OrdinalIgnoreCase) ||
-                        m.Contains("task", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        m.Contains("activity", StringComparison.OrdinalIgnoreCase)
+                        || m.Contains("quiz", StringComparison.OrdinalIgnoreCase)
+                        || m.Contains("seatwork", StringComparison.OrdinalIgnoreCase)
+                        || m.Contains("exercise", StringComparison.OrdinalIgnoreCase)
+                        || m.Contains("task", StringComparison.OrdinalIgnoreCase)
+                    )
                     {
                         activities.Add(m);
                     }
@@ -255,7 +301,8 @@ public sealed class MasterPdfService
                 footerFont,
                 XBrushes.Black,
                 new XRect(0, TargetHeight - 36, TargetWidth, 20),
-                XStringFormats.TopCenter);
+                XStringFormats.TopCenter
+            );
         }
 
         // 7. PDF Outline Bookmarks
@@ -268,9 +315,20 @@ public sealed class MasterPdfService
         return destDoc.PageCount;
     }
 
-    private readonly record struct ContentBox(double X0, double Y0, double X1, double Y1, double W, double H);
+    private readonly record struct ContentBox(
+        double X0,
+        double Y0,
+        double X1,
+        double Y1,
+        double W,
+        double H
+    );
 
-    private static void AppendScaledOrSplit(PdfSharpDocument destDoc, string srcPath, bool forceRotate)
+    private static void AppendScaledOrSplit(
+        PdfSharpDocument destDoc,
+        string srcPath,
+        bool forceRotate
+    )
     {
         List<ContentBox>? pigBoxes = null;
         try
@@ -298,9 +356,10 @@ public sealed class MasterPdfService
                 if (w <= 0 || h <= 0)
                     continue;
 
-                var contentBox = (pigBoxes is not null && idx < pigBoxes.Count)
-                    ? pigBoxes[idx]
-                    : new ContentBox(0.0, 0.0, w, h, w, h);
+                var contentBox =
+                    (pigBoxes is not null && idx < pigBoxes.Count)
+                        ? pigBoxes[idx]
+                        : new ContentBox(0.0, 0.0, w, h, w, h);
 
                 if (contentBox.W < 50 || contentBox.H < 50)
                     contentBox = new ContentBox(0, 0, w, h, w, h);
@@ -314,15 +373,29 @@ public sealed class MasterPdfService
                         var target = GetTargetRectForContent(contentBox.H, contentBox.W);
 
                         gfx.Save();
-                        gfx.TranslateTransform(target.X + target.Width / 2, target.Y + target.Height / 2);
+                        gfx.TranslateTransform(
+                            target.X + target.Width / 2,
+                            target.Y + target.Height / 2
+                        );
                         gfx.RotateTransform(90);
                         gfx.TranslateTransform(-(target.Height / 2), -(target.Width / 2));
 
-                        var scale = Math.Min(target.Height / contentBox.W, target.Width / contentBox.H);
-                        gfx.IntersectClip(new XRect(0, 0, contentBox.W * scale, contentBox.H * scale));
+                        var scale = Math.Min(
+                            target.Height / contentBox.W,
+                            target.Width / contentBox.H
+                        );
+                        gfx.IntersectClip(
+                            new XRect(0, 0, contentBox.W * scale, contentBox.H * scale)
+                        );
                         gfx.DrawImage(
                             form,
-                            new XRect(-contentBox.X0 * scale, -contentBox.Y0 * scale, w * scale, h * scale));
+                            new XRect(
+                                -contentBox.X0 * scale,
+                                -contentBox.Y0 * scale,
+                                w * scale,
+                                h * scale
+                            )
+                        );
                         gfx.Restore();
                     }
                     else
@@ -334,7 +407,13 @@ public sealed class MasterPdfService
                 }
                 else
                 {
-                    DrawClippedRegion(destDoc, form, w, h, new XRect(contentBox.X0, contentBox.Y0, contentBox.W, contentBox.H));
+                    DrawClippedRegion(
+                        destDoc,
+                        form,
+                        w,
+                        h,
+                        new XRect(contentBox.X0, contentBox.Y0, contentBox.W, contentBox.H)
+                    );
                 }
             }
         }
@@ -342,7 +421,13 @@ public sealed class MasterPdfService
         {
             if (tempNormPath is not null && File.Exists(tempNormPath))
             {
-                try { File.Delete(tempNormPath); } catch { /* ignore */ }
+                try
+                {
+                    File.Delete(tempNormPath);
+                }
+                catch
+                { /* ignore */
+                }
             }
         }
     }
@@ -367,24 +452,25 @@ public sealed class MasterPdfService
 
         var bytes = File.ReadAllBytes(pdfPath);
         var text = Encoding.Latin1.GetString(bytes);
-        if (!System.Text.RegularExpressions.Regex.IsMatch(text, @"/P\s+\d{10}\b"))
+        if (!UnsignedPdfPermissionRegex().IsMatch(text))
             return false;
 
         bool modified = false;
-        var patched = System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"/P\s+(\d{10})\b",
-            m =>
-            {
-                if (uint.TryParse(m.Groups[1].Value, out uint u) && u > int.MaxValue)
+        var patched = UnsignedPdfPermissionRegex()
+            .Replace(
+                text,
+                m =>
                 {
-                    modified = true;
-                    int signed = unchecked((int)u);
-                    var rep = $"/P {signed}";
-                    return rep.PadRight(m.Value.Length, ' ');
+                    if (uint.TryParse(m.Groups[1].Value, out uint u) && u > int.MaxValue)
+                    {
+                        modified = true;
+                        int signed = unchecked((int)u);
+                        var rep = $"/P {signed}";
+                        return rep.PadRight(m.Value.Length, ' ');
+                    }
+                    return m.Value;
                 }
-                return m.Value;
-            });
+            );
 
         if (modified)
         {
@@ -399,7 +485,8 @@ public sealed class MasterPdfService
         if (!Directory.Exists(dirPath))
             return [];
 
-        var allFiles = Directory.GetFiles(dirPath, "*.pdf", SearchOption.TopDirectoryOnly)
+        var allFiles = Directory
+            .GetFiles(dirPath, "*.pdf", SearchOption.TopDirectoryOnly)
             .OrderBy(f => Path.GetFileNameWithoutExtension(f).EndsWith('_') ? 1 : 0)
             .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -429,7 +516,13 @@ public sealed class MasterPdfService
                 // If this is a legacy trailing-underscore duplicate (e.g. 05_Handout_1_.pdf alongside 05_Handout_1.pdf), clean it up
                 if (rawStem.EndsWith('_'))
                 {
-                    try { File.Delete(file); } catch { /* ignore */ }
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch
+                    { /* ignore */
+                    }
                 }
                 continue;
             }
@@ -440,7 +533,13 @@ public sealed class MasterPdfService
         return unique;
     }
 
-    private static void DrawClippedRegion(PdfSharpDocument destDoc, XPdfForm form, double fullW, double fullH, XRect srcClip)
+    private static void DrawClippedRegion(
+        PdfSharpDocument destDoc,
+        XPdfForm form,
+        double fullW,
+        double fullH,
+        XRect srcClip
+    )
     {
         var page = AddA4Page(destDoc);
         using var gfx = XGraphics.FromPdfPage(page);
@@ -455,7 +554,9 @@ public sealed class MasterPdfService
                 target.X - srcClip.X * scale,
                 target.Y - srcClip.Y * scale,
                 fullW * scale,
-                fullH * scale));
+                fullH * scale
+            )
+        );
         gfx.Restore();
     }
 
@@ -464,8 +565,10 @@ public sealed class MasterPdfService
         double pageW = page.Width;
         double pageH = page.Height;
 
-        double minX = double.MaxValue, minY = double.MaxValue;
-        double maxX = double.MinValue, maxY = double.MinValue;
+        double minX = double.MaxValue,
+            minY = double.MaxValue;
+        double maxX = double.MinValue,
+            maxY = double.MinValue;
         bool hasContent = false;
 
         foreach (var word in page.GetWords())
@@ -501,7 +604,14 @@ public sealed class MasterPdfService
         maxX = Math.Min(pageW, maxX + 2);
         maxY = Math.Min(pageH, maxY + 2);
 
-        return new ContentBox(minX, minY, maxX, maxY, Math.Max(1, maxX - minX), Math.Max(1, maxY - minY));
+        return new ContentBox(
+            minX,
+            minY,
+            maxX,
+            maxY,
+            Math.Max(1, maxX - minX),
+            Math.Max(1, maxY - minY)
+        );
     }
 
     private static XRect GetTargetRectForContent(double contentW, double contentH)
@@ -526,7 +636,11 @@ public sealed class MasterPdfService
     {
         var page = AddA4Page(doc);
         using var gfx = XGraphics.FromPdfPage(page);
-        var font = new XFont("Sans", isMainCover ? 36 : 30, isMainCover ? XFontStyle.Bold : XFontStyle.Regular);
+        var font = new XFont(
+            "Sans",
+            isMainCover ? 36 : 30,
+            isMainCover ? XFontStyle.Bold : XFontStyle.Regular
+        );
 
         double usableWidth = TargetWidth - (SafetyPadding * 2);
         var lines = WrapText(gfx, title, font, usableWidth);
@@ -536,7 +650,13 @@ public sealed class MasterPdfService
 
         foreach (var line in lines)
         {
-            gfx.DrawString(line, font, XBrushes.Black, new XRect(SafetyPadding, y, usableWidth, lineHeight), XStringFormats.TopCenter);
+            gfx.DrawString(
+                line,
+                font,
+                XBrushes.Black,
+                new XRect(SafetyPadding, y, usableWidth, lineHeight),
+                XStringFormats.TopCenter
+            );
             y += lineHeight;
         }
     }
@@ -544,7 +664,8 @@ public sealed class MasterPdfService
     private static int InsertTocPages(
         PdfSharpDocument doc,
         List<(int Level, string Text, int LogicalPage)> entries,
-        int insertionIndex)
+        int insertionIndex
+    )
     {
         int pagesCreated = 1;
         var tocPage = doc.Pages.Insert(insertionIndex);
@@ -557,7 +678,13 @@ public sealed class MasterPdfService
         var l2Font = new XFont("Sans", 10.5, XFontStyle.Regular);
         var l3Font = new XFont("Sans", 9, XFontStyle.Regular);
 
-        gfx.DrawString("Table of Contents", titleFont, XBrushes.Black, new XRect(0, 45, TargetWidth, 36), XStringFormats.TopCenter);
+        gfx.DrawString(
+            "Table of Contents",
+            titleFont,
+            XBrushes.Black,
+            new XRect(0, 45, TargetWidth, 36),
+            XStringFormats.TopCenter
+        );
 
         double y = 110;
         double textMargin = SafetyPadding + 10;
@@ -575,11 +702,25 @@ public sealed class MasterPdfService
                 y = 60;
             }
 
-            double indent = textMargin + (level == 1 ? 0 : level == 2 ? 20 : 40);
-            var font = level == 1 ? l1Font : level == 2 ? l2Font : l3Font;
+            double indent =
+                textMargin
+                + (
+                    level == 1 ? 0
+                    : level == 2 ? 20
+                    : 40
+                );
+            var font =
+                level == 1 ? l1Font
+                : level == 2 ? l2Font
+                : l3Font;
 
             gfx.DrawString(text, font, XBrushes.Black, new XPoint(indent, y));
-            gfx.DrawString(logicalPage.ToString(), font, XBrushes.Black, new XPoint(TargetWidth - textMargin - 25, y));
+            gfx.DrawString(
+                logicalPage.ToString(),
+                font,
+                XBrushes.Black,
+                new XPoint(TargetWidth - textMargin - 25, y)
+            );
             y += level == 1 ? 24 : 17;
         }
 
@@ -590,7 +731,8 @@ public sealed class MasterPdfService
     private static void BuildOutlines(
         PdfSharpDocument doc,
         List<(int Level, string Title, int PhysicalPageOneBased)> sidebarToc,
-        int tocPagesAdded)
+        int tocPagesAdded
+    )
     {
         doc.Outlines.Add("Table of Contents", doc.Pages[1], true);
 
@@ -649,14 +791,17 @@ public sealed class MasterPdfService
         return lines;
     }
 
-    private static Dictionary<string, List<string>> LoadOrInferTermConfig(string termJsonPath, List<string> allDirs)
+    private static Dictionary<string, List<string>> LoadOrInferTermConfig(
+        string termJsonPath,
+        List<string> allDirs
+    )
     {
         var config = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
         {
             ["Prelims"] = [],
             ["Midterms"] = [],
             ["Prefinals"] = [],
-            ["Finals"] = []
+            ["Finals"] = [],
         };
 
         if (File.Exists(termJsonPath))
@@ -677,7 +822,9 @@ public sealed class MasterPdfService
             }
         }
 
-        var assignedPrefixes = config.Values.SelectMany(x => x).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assignedPrefixes = config
+            .Values.SelectMany(x => x)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Discover any numbered module folders (e.g., 01_Handout_1 .. 09_Handout_1) not covered by term.json
         var numberedPrefixes = allDirs
@@ -691,17 +838,24 @@ public sealed class MasterPdfService
         if (unassigned.Count > 0)
         {
             var courseDir = Path.GetDirectoryName(termJsonPath);
-            var syllabusPdf = courseDir is not null ? SyllabusTermParser.FindSyllabusPdfPath(courseDir) : null;
+            var syllabusPdf = courseDir is not null
+                ? SyllabusTermParser.FindSyllabusPdfPath(courseDir)
+                : null;
             if (syllabusPdf is not null && courseDir is not null)
             {
-                var schedule = SyllabusTermParser.ParseTermScheduleFromSyllabus(syllabusPdf, courseDir);
+                var schedule = SyllabusTermParser.ParseTermScheduleFromSyllabus(
+                    syllabusPdf,
+                    courseDir
+                );
                 bool enriched = false;
                 foreach (var term in SyllabusTermParser.TermOrder)
                 {
-                    if (!schedule.TermPrefixes.TryGetValue(term, out var mapped)) continue;
+                    if (!schedule.TermPrefixes.TryGetValue(term, out var mapped))
+                        continue;
                     foreach (var prefix in mapped)
                     {
-                        if (assignedPrefixes.Contains(prefix)) continue;
+                        if (assignedPrefixes.Contains(prefix))
+                            continue;
                         if (!config.TryGetValue(term, out var list))
                         {
                             list = [];
@@ -717,7 +871,7 @@ public sealed class MasterPdfService
                 {
                     try
                     {
-                        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+                        var json = JsonSerializer.Serialize(config, IndentedJsonOptions);
                         File.WriteAllText(termJsonPath, json);
                     }
                     catch
@@ -742,7 +896,7 @@ public sealed class MasterPdfService
                 <= 2 => "Prelims",
                 <= 4 => "Midterms",
                 <= 6 => "Prefinals",
-                _ => "Finals"
+                _ => "Finals",
             };
 
             if (!config.TryGetValue(targetTerm, out var list))
@@ -770,13 +924,25 @@ public sealed class MasterPdfService
             entries.Add($"term.json|{termHash}");
         }
 
-        foreach (var dir in Directory.GetDirectories(coursePath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var dir in Directory
+                .GetDirectories(coursePath)
+                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+        )
         {
             var name = Path.GetFileName(dir);
-            if (name.StartsWith('.') || name.Equals("ongoing", StringComparison.OrdinalIgnoreCase) || name.Equals("completed", StringComparison.OrdinalIgnoreCase))
+            if (
+                name.StartsWith('.')
+                || name.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("completed", StringComparison.OrdinalIgnoreCase)
+            )
                 continue;
 
-            foreach (var pdf in Directory.GetFiles(dir, "*.pdf", SearchOption.TopDirectoryOnly).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            foreach (
+                var pdf in Directory
+                    .GetFiles(dir, "*.pdf", SearchOption.TopDirectoryOnly)
+                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            )
             {
                 var info = new FileInfo(pdf);
                 entries.Add($"{name}/{info.Name}|{info.Length}|{info.LastWriteTimeUtc.Ticks}");
@@ -787,17 +953,26 @@ public sealed class MasterPdfService
         return Convert.ToHexStringLower(hash);
     }
 
-    private static async Task<Dictionary<string, string>> LoadStateAsync(string statePath, CancellationToken ct)
+    private static async Task<Dictionary<string, string>> LoadStateAsync(
+        string statePath,
+        CancellationToken ct
+    )
     {
         if (!File.Exists(statePath))
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         await using var stream = File.OpenRead(statePath);
-        return await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(stream, cancellationToken: ct)
-               ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        return await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(
+                stream,
+                cancellationToken: ct
+            ) ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
-    private static async Task SaveStateAsync(string statePath, Dictionary<string, string> state, CancellationToken ct)
+    private static async Task SaveStateAsync(
+        string statePath,
+        Dictionary<string, string> state,
+        CancellationToken ct
+    )
     {
         var dir = Path.GetDirectoryName(statePath);
         if (!string.IsNullOrEmpty(dir))
@@ -806,7 +981,7 @@ public sealed class MasterPdfService
         var temp = $"{statePath}.tmp.{Guid.NewGuid():N}";
         await using (var stream = File.Create(temp))
         {
-            await JsonSerializer.SerializeAsync(stream, state, new JsonSerializerOptions { WriteIndented = true }, ct);
+            await JsonSerializer.SerializeAsync(stream, state, IndentedJsonOptions, ct);
         }
         File.Move(temp, statePath, overwrite: true);
     }
@@ -831,19 +1006,21 @@ public sealed class MasterPdfService
             var list = new List<string>();
             if (OperatingSystem.IsWindows())
             {
-                var winFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
+                var winFonts = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "Fonts"
+                );
                 list.Add(Path.Combine(winFonts, "segoeui.ttf"));
                 list.Add(Path.Combine(winFonts, "arial.ttf"));
                 list.Add(Path.Combine(winFonts, "calibri.ttf"));
                 list.Add(Path.Combine(winFonts, "tahoma.ttf"));
             }
-            list.AddRange(
-            [
+            list.AddRange([
                 "/usr/share/fonts/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/TTF/DejaVuSans.ttf",
                 "/usr/share/fonts/dejavu/DejaVuSans.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             ]);
             return [.. list];
         }
@@ -853,19 +1030,21 @@ public sealed class MasterPdfService
             var list = new List<string>();
             if (OperatingSystem.IsWindows())
             {
-                var winFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
+                var winFonts = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "Fonts"
+                );
                 list.Add(Path.Combine(winFonts, "segoeuib.ttf"));
                 list.Add(Path.Combine(winFonts, "arialbd.ttf"));
                 list.Add(Path.Combine(winFonts, "calibrib.ttf"));
                 list.Add(Path.Combine(winFonts, "tahomabd.ttf"));
             }
-            list.AddRange(
-            [
+            list.AddRange([
                 "/usr/share/fonts/noto/NotoSans-Bold.ttf",
                 "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
                 "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             ]);
             return [.. list];
         }
@@ -882,17 +1061,29 @@ public sealed class MasterPdfService
 
             // Fallback: scan system fonts directory for any .ttf
             var fontDirs = OperatingSystem.IsWindows()
-                ? new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts") }
-                : new[] { "/usr/share/fonts", "/usr/local/share/fonts" };
+                ? new[]
+                {
+                    Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                        "Fonts"
+                    ),
+                }
+                : ["/usr/share/fonts", "/usr/local/share/fonts"];
 
             foreach (var dir in fontDirs)
             {
                 if (!Directory.Exists(dir))
                     continue;
 
-                var anyTtf = Directory.EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories)
-                    .FirstOrDefault(f => f.Contains("Regular", StringComparison.OrdinalIgnoreCase))
-                    ?? Directory.EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories).FirstOrDefault();
+                var anyTtf =
+                    Directory
+                        .EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories)
+                        .FirstOrDefault(f =>
+                            f.Contains("Regular", StringComparison.OrdinalIgnoreCase)
+                        )
+                    ?? Directory
+                        .EnumerateFiles(dir, "*.ttf", SearchOption.AllDirectories)
+                        .FirstOrDefault();
 
                 if (anyTtf is not null)
                     return File.ReadAllBytes(anyTtf);
@@ -901,7 +1092,7 @@ public sealed class MasterPdfService
             return null;
         }
 
-        public FontResolverInfo? ResolveTypeface(string familyName, bool isBold, bool isItalic)
-            => new(isBold ? "Sans-Bold" : "Sans-Regular");
+        public FontResolverInfo? ResolveTypeface(string familyName, bool isBold, bool isItalic) =>
+            new(isBold ? "Sans-Bold" : "Sans-Regular");
     }
 }

@@ -11,7 +11,7 @@ public enum SmartViewKind
     Completed,
     Course,
     Label,
-    Term
+    Term,
 }
 
 /// <summary>
@@ -25,22 +25,42 @@ public static class TaskQueryService
         string? targetValue = null,
         string? searchQuery = null,
         DateOnly? todayOverride = null,
-        string? termFilter = null)
+        string? termFilter = null
+    )
     {
         var today = todayOverride ?? DateOnly.FromDateTime(DateTime.Today);
 
         IEnumerable<TaskItem> query = view switch
         {
             SmartViewKind.Inbox => allTasks.Where(t => !t.IsCompleted && t.IsInbox),
-            SmartViewKind.Today => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value <= today),
-            SmartViewKind.Upcoming => allTasks.Where(t => !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value > today),
+            SmartViewKind.Today => allTasks.Where(t =>
+                !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value <= today
+            ),
+            SmartViewKind.Upcoming => allTasks.Where(t =>
+                !t.IsCompleted && t.DueDate.HasValue && t.DueDate.Value > today
+            ),
             SmartViewKind.Completed => string.IsNullOrWhiteSpace(targetValue)
                 ? allTasks.Where(t => t.IsCompleted)
-                : allTasks.Where(t => t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
-            SmartViewKind.Course => allTasks.Where(t => !t.IsCompleted && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)),
-            SmartViewKind.Label => allTasks.Where(t => !t.IsCompleted && t.Labels.Contains(targetValue ?? "", StringComparer.OrdinalIgnoreCase)),
-            SmartViewKind.Term => allTasks.Where(t => !t.IsCompleted && MatchesTerm(t, targetValue)),
-            _ => allTasks.Where(t => !t.IsCompleted)
+                : allTasks.Where(t =>
+                    t.IsCompleted
+                    && string.Equals(
+                        t.CourseFolder,
+                        targetValue,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                ),
+            SmartViewKind.Course => allTasks.Where(t =>
+                !t.IsCompleted
+                && string.Equals(t.CourseFolder, targetValue, StringComparison.OrdinalIgnoreCase)
+            ),
+            SmartViewKind.Label => allTasks.Where(t =>
+                !t.IsCompleted
+                && t.Labels.Contains(targetValue ?? "", StringComparer.OrdinalIgnoreCase)
+            ),
+            SmartViewKind.Term => allTasks.Where(t =>
+                !t.IsCompleted && MatchesTerm(t, targetValue)
+            ),
+            _ => allTasks.Where(t => !t.IsCompleted),
         };
 
         if (!string.IsNullOrWhiteSpace(termFilter))
@@ -52,19 +72,33 @@ public static class TaskQueryService
         {
             var term = searchQuery.Trim();
             query = query.Where(t =>
-                t.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                (t.CourseFolder?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (t.CourseAlias?.Contains(term.TrimStart('#'), StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (t.Term?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (t.Section?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                t.Labels.Any(l => l.Contains(term.TrimStart('@'), StringComparison.OrdinalIgnoreCase)));
+                t.Title.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (t.CourseFolder?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (
+                    t.CourseAlias?.Contains(term.TrimStart('#'), StringComparison.OrdinalIgnoreCase)
+                    ?? false
+                )
+                || (t.Term?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (t.Section?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                || t.Labels.Any(l =>
+                    l.Contains(term.TrimStart('@'), StringComparison.OrdinalIgnoreCase)
+                )
+            );
         }
 
         return view == SmartViewKind.Completed
-            ? query.OrderByDescending(t => t.CompletedDate).ThenBy(t => t.Title).ToList()
+                ? [.. query.OrderByDescending(t => t.CompletedDate).ThenBy(t => t.Title)]
             : view == SmartViewKind.Upcoming
-                ? query.OrderBy(t => t.DueDate).ThenByDescending(t => UrgencyCalculator.CalculateScore(t, today)).ToList()
-                : query.OrderByDescending(t => UrgencyCalculator.CalculateScore(t, today)).ThenBy(t => t.DueDate).ToList();
+                ?
+                [
+                    .. query
+                        .OrderBy(t => t.DueDate)
+                        .ThenByDescending(t => UrgencyCalculator.CalculateScore(t, today)),
+                ]
+            : query
+                .OrderByDescending(t => UrgencyCalculator.CalculateScore(t, today))
+                .ThenBy(t => t.DueDate)
+                .ToList();
     }
 
     public static bool MatchesTerm(TaskItem task, string? expectedTerm)
@@ -77,13 +111,20 @@ public static class TaskQueryService
         if (string.Equals(taskTerm, normalizedExpected, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return task.Labels.Any(l => string.Equals(TaskItem.NormalizeTerm(l), normalizedExpected, StringComparison.OrdinalIgnoreCase));
+        return task.Labels.Any(l =>
+            string.Equals(
+                TaskItem.NormalizeTerm(l),
+                normalizedExpected,
+                StringComparison.OrdinalIgnoreCase
+            )
+        );
     }
 
     public static IReadOnlyList<UnregisteredOngoingFile> FindUnregisteredOngoingFiles(
         string basinRoot,
         IReadOnlyList<BasinCourseEntry> courses,
-        IReadOnlyList<TaskItem> allTasks)
+        IReadOnlyList<TaskItem> allTasks
+    )
     {
         var trackedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in allTasks)
@@ -104,21 +145,26 @@ public static class TaskQueryService
             foreach (var filePath in Directory.EnumerateFiles(ongoingDir))
             {
                 var name = Path.GetFileName(filePath);
-                if (name.StartsWith('.') || name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                if (
+                    name.StartsWith('.') || name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                )
                     continue;
 
                 if (trackedFiles.Contains(name))
                     continue;
 
                 var info = new FileInfo(filePath);
-                results.Add(new UnregisteredOngoingFile(
-                    CourseFolder: course.FolderName,
-                    CourseTitle: course.Title,
-                    FileName: name,
-                    RelativePath: $"ongoing/{name}",
-                    FullPath: filePath,
-                    SizeBytes: info.Length,
-                    DateTimeOffset.FromFileTime(info.LastWriteTimeUtc.ToFileTimeUtc())));
+                results.Add(
+                    new UnregisteredOngoingFile(
+                        CourseFolder: course.FolderName,
+                        CourseTitle: course.Title,
+                        FileName: name,
+                        RelativePath: $"ongoing/{name}",
+                        FullPath: filePath,
+                        SizeBytes: info.Length,
+                        DateTimeOffset.FromFileTime(info.LastWriteTimeUtc.ToFileTimeUtc())
+                    )
+                );
             }
         }
 

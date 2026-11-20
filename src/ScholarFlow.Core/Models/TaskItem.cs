@@ -5,13 +5,10 @@ public enum TaskPriority
     P1 = 1,
     P2 = 2,
     P3 = 3,
-    P4 = 4
+    P4 = 4,
 }
 
-public sealed record TaskSubItem(
-    string Title,
-    bool IsCompleted,
-    DateOnly? CompletedDate = null);
+public sealed record TaskSubItem(string Title, bool IsCompleted, DateOnly? CompletedDate = null);
 
 public sealed class TaskItem
 {
@@ -93,19 +90,21 @@ public sealed class TaskItem
             for (int i = 0; i < SubTasks.Count; i++)
             {
                 var sub = SubTasks[i];
-                ChildTasks.Add(new TaskItem
-                {
-                    Id = $"{Id}:sub-{i + 1}",
-                    ParentTaskId = Id,
-                    Title = sub.Title,
-                    IsCompleted = sub.IsCompleted,
-                    CompletedDate = sub.CompletedDate,
-                    CourseFolder = CourseFolder,
-                    CourseAlias = CourseAlias,
-                    Term = Term,
-                    Section = Section,
-                    SourceMarkdownPath = SourceMarkdownPath
-                });
+                ChildTasks.Add(
+                    new TaskItem
+                    {
+                        Id = $"{Id}:sub-{i + 1}",
+                        ParentTaskId = Id,
+                        Title = sub.Title,
+                        IsCompleted = sub.IsCompleted,
+                        CompletedDate = sub.CompletedDate,
+                        CourseFolder = CourseFolder,
+                        CourseAlias = CourseAlias,
+                        Term = Term,
+                        Section = Section,
+                        SourceMarkdownPath = SourceMarkdownPath,
+                    }
+                );
             }
         }
         else if (ChildTasks.Count > 0)
@@ -121,9 +120,10 @@ public sealed class TaskItem
                 child.EnsureChildTasksSynced();
             }
 
-            SubTasks = ChildTasks
-                .Select(c => new TaskSubItem(c.Title, c.IsCompleted, c.CompletedDate))
-                .ToList();
+            SubTasks =
+            [
+                .. ChildTasks.Select(c => new TaskSubItem(c.Title, c.IsCompleted, c.CompletedDate)),
+            ];
         }
     }
 
@@ -151,7 +151,11 @@ public sealed class TaskItem
 
         foreach (var t in roots)
         {
-            if (t.ChildTasks.Any(c => string.Equals(c.Id, childId, StringComparison.OrdinalIgnoreCase)))
+            if (
+                t.ChildTasks.Any(c =>
+                    string.Equals(c.Id, childId, StringComparison.OrdinalIgnoreCase)
+                )
+            )
                 return t;
             var nested = FindParentOf(t.ChildTasks, childId);
             if (nested is not null)
@@ -162,16 +166,19 @@ public sealed class TaskItem
     }
 
     public IReadOnlyList<string> AllFiles =>
-        InstructionFiles
-            .Concat(SubmissionFiles)
-            .Concat(LinkedFiles)
-            .Where(f => !string.IsNullOrWhiteSpace(f))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        [
+            .. InstructionFiles
+                .Concat(SubmissionFiles)
+                .Concat(LinkedFiles)
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase),
+        ];
 
     public string? PrimaryPdfFile =>
         InstructionFiles.FirstOrDefault(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-        ?? SubmissionFiles.FirstOrDefault(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        ?? SubmissionFiles.FirstOrDefault(f =>
+            f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+        )
         ?? LinkedFiles.FirstOrDefault(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
 
     public static string? NormalizeTerm(string? raw)
@@ -200,4 +207,5 @@ public sealed record UnregisteredOngoingFile(
     string RelativePath,
     string FullPath,
     long SizeBytes,
-    DateTimeOffset LastModifiedAt);
+    DateTimeOffset LastModifiedAt
+);

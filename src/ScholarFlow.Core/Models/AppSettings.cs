@@ -3,7 +3,7 @@ namespace ScholarFlow.Core.Models;
 public enum ThemeMode
 {
     Dark,
-    Light
+    Light,
 }
 
 public sealed class KnownBasinEntry
@@ -31,7 +31,8 @@ public sealed class AppSettings
 
     // AI Quiz & Active Recall Provider Configuration (OpenAI-compatible & Custom Profiles)
     public string AiProviderPreset { get; set; } = "GeminiAiStudio";
-    public string AiBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    public string AiBaseUrl { get; set; } =
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
     public string? AiApiKey { get; set; }
     public string AiModelName { get; set; } = "gemini-2.5-flash";
     public string? ActiveAiProfileId { get; set; }

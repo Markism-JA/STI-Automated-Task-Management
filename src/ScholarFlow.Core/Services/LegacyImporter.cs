@@ -8,44 +8,49 @@ namespace ScholarFlow.Core.Services;
 public sealed record LegacyImportSummary(
     int CoursesImported,
     int OngoingTasksImported,
-    int MetadataEntriesMatched);
+    int MetadataEntriesMatched
+);
 
 /// <summary>
 /// Non-destructively imports an existing School-Files semester folder (e.g. YR4_01)
 /// and legacy task-manager metadata.yaml into .scholarflow/courses.json and per-course tasks.md.
 /// </summary>
-public sealed class LegacyImporter
+public sealed class LegacyImporter(BasinService? basinService = null)
 {
-    private readonly BasinService _basinService;
-
-    public LegacyImporter(BasinService? basinService = null)
-    {
-        _basinService = basinService ?? new BasinService();
-    }
+    private readonly BasinService _basinService = basinService ?? new BasinService();
 
     public async Task<LegacyImportSummary> ImportAsync(
         string basinRoot,
         string? legacyMetadataYamlPath = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         await _basinService.InitializeOrOpenAsync(basinRoot, ct: ct);
 
         var yamlByRelPath = LoadLegacyMetadata(legacyMetadataYamlPath);
         var existingCourses = await _basinService.LoadCoursesAsync(basinRoot, ct);
-        var usedAliases = existingCourses.Select(c => c.Alias).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+        var usedAliases = existingCourses
+            .Select(c => c.Alias)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToList();
 
         int coursesAdded = 0;
         int tasksImported = 0;
         int metadataMatched = 0;
 
-        foreach (var dir in Directory.GetDirectories(basinRoot).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+        foreach (
+            var dir in Directory
+                .GetDirectories(basinRoot)
+                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+        )
         {
             var folderName = Path.GetFileName(dir);
             if (folderName.StartsWith('.'))
                 continue;
 
             var courseEntry = existingCourses.FirstOrDefault(c =>
-                c.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase));
+                c.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase)
+            );
 
             if (courseEntry is null)
             {
@@ -57,7 +62,7 @@ public sealed class LegacyImporter
                 {
                     Title = displayTitle,
                     FolderName = folderName,
-                    Alias = alias
+                    Alias = alias,
                 };
                 existingCourses.Add(courseEntry);
                 coursesAdded++;
@@ -68,7 +73,9 @@ public sealed class LegacyImporter
                 continue;
 
             var tasksPath = BasinService.GetCourseTasksPath(basinRoot, folderName);
-            var existingTasks = (await MarkdownTaskCodec.LoadFileAsync(tasksPath, folderName, ct)).ToList();
+            var existingTasks = (
+                await MarkdownTaskCodec.LoadFileAsync(tasksPath, folderName, ct)
+            ).ToList();
             var trackedNames = existingTasks
                 .SelectMany(t => t.LinkedFiles)
                 .Select(Path.GetFileName)
@@ -89,32 +96,50 @@ public sealed class LegacyImporter
                 {
                     metadataMatched++;
                     difficulty = Math.Clamp(meta.Difficulty, 1, 5);
-                    if (!string.IsNullOrWhiteSpace(meta.DueDate) &&
-                        DateOnly.TryParseExact(meta.DueDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDue))
+                    if (
+                        !string.IsNullOrWhiteSpace(meta.DueDate)
+                        && DateOnly.TryParseExact(
+                            meta.DueDate,
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out var parsedDue
+                        )
+                    )
                     {
                         dueDate = parsedDue;
                     }
                 }
 
-                var priority = difficulty >= 4 ? TaskPriority.P1 : difficulty == 3 ? TaskPriority.P2 : TaskPriority.P3;
-                existingTasks.Add(new TaskItem
-                {
-                    Title = Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ').Trim(),
-                    DueDate = dueDate,
-                    Priority = priority,
-                    Difficulty = difficulty,
-                    CourseFolder = folderName,
-                    CourseAlias = courseEntry.Alias,
-                    LinkedFiles = [$"ongoing/{fileName}"],
-                    SourceMarkdownPath = tasksPath
-                });
+                var priority =
+                    difficulty >= 4 ? TaskPriority.P1
+                    : difficulty == 3 ? TaskPriority.P2
+                    : TaskPriority.P3;
+                existingTasks.Add(
+                    new TaskItem
+                    {
+                        Title = Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ').Trim(),
+                        DueDate = dueDate,
+                        Priority = priority,
+                        Difficulty = difficulty,
+                        CourseFolder = folderName,
+                        CourseAlias = courseEntry.Alias,
+                        LinkedFiles = [$"ongoing/{fileName}"],
+                        SourceMarkdownPath = tasksPath,
+                    }
+                );
 
                 tasksImported++;
                 changed = true;
             }
 
             if (changed)
-                await MarkdownTaskCodec.SaveDocumentAsync(tasksPath, existingTasks, courseEntry.Title, ct);
+                await MarkdownTaskCodec.SaveDocumentAsync(
+                    tasksPath,
+                    existingTasks,
+                    courseEntry.Title,
+                    ct: ct
+                );
         }
 
         await _basinService.SaveCoursesAsync(basinRoot, existingCourses, ct);

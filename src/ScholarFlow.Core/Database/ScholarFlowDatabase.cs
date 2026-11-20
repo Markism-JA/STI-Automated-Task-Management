@@ -1,10 +1,4 @@
-using System.Globalization;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using ScholarFlow.Core.Markdown;
-using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Core.Database;
@@ -37,18 +31,24 @@ public static partial class ScholarFlowDatabase
         {
             DataSource = dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            Cache = SqliteCacheMode.Shared,
         }.ToString();
     }
 
-    public static async Task EnsureInitializedAsync(string basinRoot, CancellationToken ct = default)
+    public static async Task EnsureInitializedAsync(
+        string basinRoot,
+        CancellationToken ct = default
+    )
     {
         await using var conn = new SqliteConnection(BuildConnectionString(basinRoot));
         await conn.OpenAsync(ct);
         await EnsureSchemaOnConnectionAsync(conn, ct);
     }
 
-    private static async Task EnsureSchemaOnConnectionAsync(SqliteConnection conn, CancellationToken ct)
+    private static async Task EnsureSchemaOnConnectionAsync(
+        SqliteConnection conn,
+        CancellationToken ct
+    )
     {
         const string sql = """
             PRAGMA journal_mode = WAL;
@@ -178,17 +178,19 @@ public static partial class ScholarFlowDatabase
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(ct);
 
-        foreach (var alterSql in new[]
-                 {
-                     "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;",
-                     "ALTER TABLE quizzes ADD COLUMN in_progress_index INTEGER NULL;",
-                     "ALTER TABLE quizzes ADD COLUMN in_progress_answers_json TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN code_snippet TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN code_language TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN math_latex TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;",
-                     "ALTER TABLE quiz_questions ADD COLUMN evidence_anchors_json TEXT NOT NULL DEFAULT '[]';"
-                 })
+        foreach (
+            var alterSql in new[]
+            {
+                "ALTER TABLE quizzes ADD COLUMN source_pdf_mtime_ticks INTEGER NULL;",
+                "ALTER TABLE quizzes ADD COLUMN in_progress_index INTEGER NULL;",
+                "ALTER TABLE quizzes ADD COLUMN in_progress_answers_json TEXT NULL;",
+                "ALTER TABLE quiz_questions ADD COLUMN code_snippet TEXT NULL;",
+                "ALTER TABLE quiz_questions ADD COLUMN code_language TEXT NULL;",
+                "ALTER TABLE quiz_questions ADD COLUMN math_latex TEXT NULL;",
+                "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;",
+                "ALTER TABLE quiz_questions ADD COLUMN evidence_anchors_json TEXT NOT NULL DEFAULT '[]';",
+            }
+        )
         {
             try
             {
@@ -202,9 +204,4 @@ public static partial class ScholarFlowDatabase
             }
         }
     }
-
-    /// <summary>
-    /// Synchronizes all Markdown task files (inbox.md + each course's tasks.md) with the SQLite database
-    /// incrementally based on file modification timestamps, and loads the canonical hierarchical TaskItem tree from SQLite.
-    /// </summary>
 }
