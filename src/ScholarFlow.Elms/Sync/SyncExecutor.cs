@@ -39,6 +39,13 @@ public sealed class SyncExecutor : ISyncExecutor
             if (action.Kind == SyncActionKind.Unchanged)
             {
                 unchanged++;
+                if (!options.DryRun &&
+                    (localState.ResourcesByUrl.TryGetValue(action.Resource.CanonicalUrl, out var rec) ||
+                     localState.ResourcesByUrl.TryGetValue(action.Resource.Url, out rec)) &&
+                    !string.Equals(rec.RelativePath, action.TargetRelativePath, StringComparison.Ordinal))
+                {
+                    rec.RelativePath = action.TargetRelativePath;
+                }
             }
             else if (action.Kind == SyncActionKind.SkippedExternal)
             {

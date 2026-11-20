@@ -60,7 +60,7 @@ public static class CourseArtifactWriter
         if (termMap.Values.Any(v => v.Count > 0))
         {
             var json = JsonSerializer.Serialize(termMap, JsonOptions);
-            await File.WriteAllTextAsync(termJsonPath, json + "\n", ct);
+            await WriteIfChangedAsync(termJsonPath, json + "\n", ct);
         }
 
         // 2. Ensure ongoing/ and completed/ folders exist and write Markdown notes for assignments
@@ -80,7 +80,7 @@ public static class CourseArtifactWriter
             var staleOtherPath = Path.Combine(otherDir, noteFileName);
 
             var markdown = HtmlToMarkdownConverter.FormatAssignmentNote(assignment);
-            await File.WriteAllTextAsync(targetPath, markdown, ct);
+            await WriteIfChangedAsync(targetPath, markdown, ct);
 
             // If an assignment transitioned from ongoing -> completed on eLMS, remove the stale note in ongoing/
             if (isDone && File.Exists(staleOtherPath))
@@ -88,5 +88,24 @@ public static class CourseArtifactWriter
                 try { File.Delete(staleOtherPath); } catch { /* ignore */ }
             }
         }
+    }
+
+    public static async Task WriteIfChangedAsync(string path, string content, CancellationToken ct = default)
+    {
+        if (File.Exists(path))
+        {
+            try
+            {
+                var existing = await File.ReadAllTextAsync(path, ct);
+                if (string.Equals(existing, content, StringComparison.Ordinal))
+                    return;
+            }
+            catch
+            {
+                // Fall through and rewrite if unreadable
+            }
+        }
+
+        await File.WriteAllTextAsync(path, content, ct);
     }
 }

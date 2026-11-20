@@ -757,7 +757,7 @@ public sealed class MasterPdfService
         return config;
     }
 
-    internal static string ComputeCourseFingerprint(string coursePath)
+    public static string ComputeCourseFingerprint(string coursePath)
     {
         if (!Directory.Exists(coursePath))
             return string.Empty;
@@ -766,8 +766,8 @@ public sealed class MasterPdfService
         var termJson = Path.Combine(coursePath, "term.json");
         if (File.Exists(termJson))
         {
-            var info = new FileInfo(termJson);
-            entries.Add($"term.json|{info.Length}|{info.LastWriteTimeUtc.Ticks}");
+            var termHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(termJson)));
+            entries.Add($"term.json|{termHash}");
         }
 
         foreach (var dir in Directory.GetDirectories(coursePath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))

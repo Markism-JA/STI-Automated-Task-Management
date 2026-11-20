@@ -91,6 +91,16 @@ public static class CourseWorkspaceViewBuilder
         addBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(addBtn);
 
+        if (vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(course.CourseId))
+        {
+            var syncCourseBtn = UiBuilder.GhostButton(
+                "Sync Course",
+                MaterialIconKind.CloudSyncOutline,
+                async () => await vm.RunCourseSyncAsync(course));
+            syncCourseBtn.Margin = new Thickness(0, 0, 6, 6);
+            actionWrap.Children.Add(syncCourseBtn);
+        }
+
         var importPdfBtn = UiBuilder.GhostButton(
             "Import PDFs",
             MaterialIconKind.FilePlusOutline,

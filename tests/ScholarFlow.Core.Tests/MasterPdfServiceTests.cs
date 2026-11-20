@@ -138,6 +138,25 @@ public sealed class MasterPdfServiceTests : IDisposable
         doc.Save(path);
     }
 
+    [Fact]
+    public void ComputeCourseFingerprint_IgnoresTermJsonTimestampWhenContentUnchanged()
+    {
+        var courseDir = Path.Combine(_tempRoot, "InfoAssurance");
+        Directory.CreateDirectory(courseDir);
+        var termJson = Path.Combine(courseDir, "term.json");
+        File.WriteAllText(termJson, "{\"Prelims\":[\"01\"]}\n");
+
+        var fp1 = MasterPdfService.ComputeCourseFingerprint(courseDir);
+        File.SetLastWriteTimeUtc(termJson, DateTime.UtcNow.AddHours(2));
+        var fp2 = MasterPdfService.ComputeCourseFingerprint(courseDir);
+
+        Assert.Equal(fp1, fp2);
+
+        File.WriteAllText(termJson, "{\"Prelims\":[\"01\",\"02\"]}\n");
+        var fp3 = MasterPdfService.ComputeCourseFingerprint(courseDir);
+        Assert.NotEqual(fp1, fp3);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))

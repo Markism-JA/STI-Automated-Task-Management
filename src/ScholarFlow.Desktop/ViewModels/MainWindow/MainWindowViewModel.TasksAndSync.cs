@@ -422,6 +422,76 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    public async Task RunCourseSyncAsync(BasinCourseEntry course)
+    {
+        if (IsSyncing)
+            return;
+
+        IsSyncing = true;
+        StatusText = $"Syncing {course.Title} from eLMS...";
+        NotifyStateChanged(UiChangeKind.StatusOnly);
+
+        try
+        {
+            var progress = new Progress<Elms.Models.SyncProgress>(p =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = p.Message;
+                    NotifyStateChanged(UiChangeKind.StatusOnly);
+                });
+            });
+
+            var report = await _syncService.SyncCourseAsync(BasinRoot, course.FolderName, progress: progress);
+            foreach (var n in report.Notifications)
+                AddNotification(n);
+
+            StatusText = report.Errors.Count > 0
+                ? $"{course.Title} sync finished with {report.Errors.Count} warning(s): {report.Errors[0]}"
+                : $"Synced {course.Title}: {report.FilesDownloaded} new, {report.FilesUpdated} updated, {report.MasterPdfsCompiled} PDF(s) compiled";
+            await ReloadBasinDataAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"{course.Title} sync failed: {ex.Message}";
+            NotifyStateChanged(UiChangeKind.StatusOnly);
+        }
+        finally
+        {
+            IsSyncing = false;
+            NotifyStateChanged(UiChangeKind.FullLayout);
+        }
+    }
+
+    public async Task RefreshTaskFromElmsAsync(TaskItem task)
+    {
+        if (IsSyncing || string.IsNullOrWhiteSpace(task.LmsUrl))
+            return;
+
+        IsSyncing = true;
+        StatusText = $"Refreshing '{task.Title}' from eLMS...";
+        NotifyStateChanged(UiChangeKind.StatusOnly);
+
+        try
+        {
+            var ok = await _syncService.SyncSingleAssignmentAsync(BasinRoot, task);
+            StatusText = ok
+                ? $"Refreshed '{task.Title}' from eLMS"
+                : $"Could not refresh '{task.Title}'";
+            await ReloadBasinDataAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Refresh failed: {ex.Message}";
+            NotifyStateChanged(UiChangeKind.StatusOnly);
+        }
+        finally
+        {
+            IsSyncing = false;
+            NotifyStateChanged(UiChangeKind.FullLayout);
+        }
+    }
+
     public async Task ToggleThemeAsync()
     {
         var next = ThemeService.Toggle();

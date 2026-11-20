@@ -777,6 +777,16 @@ public static class InspectorPaneBuilder
 
         if (!string.IsNullOrWhiteSpace(task.LmsUrl) || !string.IsNullOrWhiteSpace(task.LmsId))
         {
+            if (vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(task.LmsUrl))
+            {
+                var refreshElmsBtn = UiBuilder.GhostButton(
+                    "Refresh from eLMS",
+                    MaterialIconKind.Refresh,
+                    async () => await vm.RefreshTaskFromElmsAsync(task));
+                refreshElmsBtn.Margin = new Thickness(0, 2, 6, 2);
+                actionWrap.Children.Add(refreshElmsBtn);
+            }
+
             var elmsBtn = UiBuilder.ActionButton(
                 "Submit in eLMS (O)",
                 MaterialIconKind.OpenInApp,
