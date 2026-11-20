@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
 using Material.Icons.Avalonia;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Desktop.Theme;
@@ -20,6 +21,12 @@ public sealed class App : Application
 {
     private MainWindowViewModel? _mainVm;
     private TrayIcon? _trayIcon;
+    private NativeMenuItem? _trayPauseItem;
+    private NativeMenuItem? _trayPollItem;
+    private NativeMenuItem? _trayCourseSyncItem;
+    private NativeMenuItem? _trayFullSyncItem;
+    private NativeMenuItemSeparator? _trayElmsSeparator;
+    private string? _lastTrayStateSignature;
     private bool _isExplicitExit;
 
     public override void Initialize()
@@ -87,6 +94,8 @@ public sealed class App : Application
 
             desktop.Exit += async (_, _) =>
             {
+                if (_mainVm is not null)
+                    _mainVm.StateChanged -= OnMainVmStateChanged;
                 _trayIcon?.Dispose();
                 if (_mainVm is not null)
                     await _mainVm.DisposeAsync();
@@ -115,13 +124,34 @@ public sealed class App : Application
             showItem.Click += (_, _) => RestoreMainWindow(window);
             menu.Items.Add(showItem);
 
-            var syncItem = new NativeMenuItem("Sync eLMS Now");
-            syncItem.Click += async (_, _) =>
+            _trayElmsSeparator = new NativeMenuItemSeparator();
+            menu.Items.Add(_trayElmsSeparator);
+
+            _trayPauseItem = new NativeMenuItem("Pause Background Polling");
+            _trayPauseItem.Click += (_, _) => _mainVm?.TogglePollingPaused();
+            menu.Items.Add(_trayPauseItem);
+
+            _trayPollItem = new NativeMenuItem("Fast Poll Assignments");
+            _trayPollItem.Click += async (_, _) =>
+            {
+                if (_mainVm is not null)
+                    await _mainVm.RunFastPollAsync();
+            };
+            menu.Items.Add(_trayPollItem);
+
+            _trayCourseSyncItem = new NativeMenuItem("Sync Course")
+            {
+                Menu = new NativeMenu()
+            };
+            menu.Items.Add(_trayCourseSyncItem);
+
+            _trayFullSyncItem = new NativeMenuItem("Full eLMS Sync (All Courses)");
+            _trayFullSyncItem.Click += async (_, _) =>
             {
                 if (_mainVm is not null)
                     await _mainVm.RunFullSyncAsync();
             };
-            menu.Items.Add(syncItem);
+            menu.Items.Add(_trayFullSyncItem);
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
@@ -141,10 +171,100 @@ public sealed class App : Application
                 IsVisible = true
             };
             _trayIcon.Clicked += (_, _) => RestoreMainWindow(window);
+
+            if (_mainVm is not null)
+            {
+                _mainVm.StateChanged += OnMainVmStateChanged;
+                UpdateTrayMenuState();
+            }
         }
         catch
         {
             // TrayIcon is optional on headless/unsupported window managers
+        }
+    }
+
+    private void OnMainVmStateChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(UpdateTrayMenuState);
+    }
+
+    private void UpdateTrayMenuState()
+    {
+        if (_trayIcon is null || _mainVm is null)
+            return;
+
+        bool elmsEnabled = _mainVm.Settings.EnableElmsIntegration;
+        bool isPaused = _mainVm.IsPollingPaused;
+        bool isSyncing = _mainVm.IsSyncing;
+
+        var syncableCourses = elmsEnabled
+            ? _mainVm.Courses
+                .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
+                .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : [];
+
+        string courseSig = string.Join("|", syncableCourses.Select(c => $"{c.FolderName}:{c.Title}"));
+        string sig = $"{elmsEnabled}:{isPaused}:{isSyncing}:{courseSig}";
+        if (sig == _lastTrayStateSignature)
+            return;
+        _lastTrayStateSignature = sig;
+
+        _trayIcon.ToolTipText = isSyncing
+            ? "ScholarFlow — Syncing eLMS..."
+            : elmsEnabled && isPaused
+                ? "ScholarFlow — eLMS Polling PAUSED"
+                : "ScholarFlow — Academic Workspace";
+
+        if (_trayElmsSeparator is not null)
+            _trayElmsSeparator.IsVisible = elmsEnabled;
+
+        if (_trayPauseItem is not null)
+        {
+            _trayPauseItem.IsVisible = elmsEnabled;
+            _trayPauseItem.Header = isPaused
+                ? "Resume Background Polling"
+                : "Pause Background Polling";
+        }
+
+        if (_trayPollItem is not null)
+        {
+            _trayPollItem.IsVisible = elmsEnabled;
+            _trayPollItem.IsEnabled = !isSyncing;
+        }
+
+        if (_trayFullSyncItem is not null)
+        {
+            _trayFullSyncItem.IsVisible = elmsEnabled;
+            _trayFullSyncItem.IsEnabled = !isSyncing;
+            _trayFullSyncItem.Header = isSyncing
+                ? "Syncing eLMS..."
+                : "Full eLMS Sync (All Courses)";
+        }
+
+        if (_trayCourseSyncItem is not null)
+        {
+            _trayCourseSyncItem.IsVisible = elmsEnabled && syncableCourses.Count > 0;
+            _trayCourseSyncItem.IsEnabled = !isSyncing;
+
+            var subMenu = _trayCourseSyncItem.Menu ?? new NativeMenu();
+            subMenu.Items.Clear();
+            foreach (var course in syncableCourses)
+            {
+                var captured = course;
+                var courseItem = new NativeMenuItem(captured.Title)
+                {
+                    IsEnabled = !isSyncing
+                };
+                courseItem.Click += async (_, _) =>
+                {
+                    if (_mainVm is not null)
+                        await _mainVm.RunCourseSyncAsync(captured);
+                };
+                subMenu.Items.Add(courseItem);
+            }
+            _trayCourseSyncItem.Menu = subMenu;
         }
     }
 

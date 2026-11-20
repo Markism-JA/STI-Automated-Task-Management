@@ -284,16 +284,27 @@ public sealed partial class MainWindow
                 _vm.ActiveMode == WorkspaceTabMode.CourseWorkspace
                 && _vm.ActiveCourse?.FolderName == course.FolderName;
 
-            coursesStack.Children.Add(
-                BuildNavButton(
-                    course.Title,
-                    MaterialIconKind.Pound,
-                    courseTaskCount,
-                    isSelected,
-                    () => _vm.SelectCourse(course),
-                    compact
-                )
+            var courseBtn = BuildNavButton(
+                course.Title,
+                MaterialIconKind.Pound,
+                courseTaskCount,
+                isSelected,
+                () => _vm.SelectCourse(course),
+                compact
             );
+
+            if (_vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(course.CourseId))
+            {
+                var capturedCourse = course;
+                var syncCourseItem = new MenuItem { Header = $"Sync {capturedCourse.Title} from eLMS" };
+                syncCourseItem.Click += async (_, _) => await _vm.RunCourseSyncAsync(capturedCourse);
+                courseBtn.ContextMenu = new ContextMenu
+                {
+                    Items = { syncCourseItem }
+                };
+            }
+
+            coursesStack.Children.Add(courseBtn);
         }
 
         // Academic Terms Quick-Filter Section in Sidebar
@@ -392,9 +403,10 @@ public sealed partial class MainWindow
             {
                 var syncCompact = UiBuilder.IconButton(
                     MaterialIconKind.CloudSyncOutline,
-                    async () => await _vm.RunFullSyncAsync()
+                    () => { }
                 );
-                ToolTip.SetTip(syncCompact, "Sync all eLMS courses");
+                syncCompact.Flyout = BuildElmsSyncFlyout();
+                ToolTip.SetTip(syncCompact, "eLMS Sync options (Fast Poll, Course Sync, Full Sync)");
                 footer.Children.Add(CenterCompact(syncCompact));
 
                 var pollCompact = UiBuilder.IconButton(
@@ -513,17 +525,26 @@ public sealed partial class MainWindow
                     : ColumnDefinitions.Parse("*"),
                 ColumnSpacing = 4,
             };
-            var syncBtn = _vm.Settings.EnableElmsIntegration
-                ? UiBuilder.GhostButton(
-                    _vm.IsSyncing ? "Syncing..." : "Sync eLMS",
+            Button syncBtn;
+            if (_vm.Settings.EnableElmsIntegration)
+            {
+                syncBtn = UiBuilder.GhostButton(
+                    _vm.IsSyncing ? "Syncing..." : "eLMS Sync ▾",
                     MaterialIconKind.CloudSyncOutline,
-                    async () => await _vm.RunFullSyncAsync()
-                )
-                : UiBuilder.GhostButton(
+                    () => { }
+                );
+                syncBtn.IsEnabled = !_vm.IsSyncing;
+                syncBtn.Flyout = BuildElmsSyncFlyout();
+                ToolTip.SetTip(syncBtn, "Choose Fast Poll, Per-Course Sync, or Full eLMS Sync");
+            }
+            else
+            {
+                syncBtn = UiBuilder.GhostButton(
                     "Add Course",
                     MaterialIconKind.FolderPlusOutline,
                     () => _vm.ToggleAddCourseModal()
                 );
+            }
             syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
             syncRow.Children.Add(syncBtn);
 
@@ -617,6 +638,60 @@ public sealed partial class MainWindow
             BorderThickness = new Thickness(0, 0, 1, 0),
             Child = grid,
         };
+    }
+
+    private MenuFlyout BuildElmsSyncFlyout()
+    {
+        var flyout = new MenuFlyout();
+
+        var pollItem = new MenuItem
+        {
+            Header = "Fast Poll Assignments (R)",
+            IsEnabled = !_vm.IsSyncing
+        };
+        pollItem.Click += async (_, _) => await _vm.RunFastPollAsync();
+        flyout.Items.Add(pollItem);
+
+        var fullSyncItem = new MenuItem
+        {
+            Header = "Full eLMS Sync (All Courses)",
+            IsEnabled = !_vm.IsSyncing
+        };
+        fullSyncItem.Click += async (_, _) => await _vm.RunFullSyncAsync();
+        flyout.Items.Add(fullSyncItem);
+
+        var syncableCourses = _vm.Courses
+            .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
+            .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (syncableCourses.Count > 0)
+        {
+            flyout.Items.Add(new Separator());
+            foreach (var course in syncableCourses)
+            {
+                var captured = course;
+                var courseItem = new MenuItem
+                {
+                    Header = $"Sync Course: {captured.Title}",
+                    IsEnabled = !_vm.IsSyncing
+                };
+                courseItem.Click += async (_, _) => await _vm.RunCourseSyncAsync(captured);
+                flyout.Items.Add(courseItem);
+            }
+        }
+
+        flyout.Items.Add(new Separator());
+        var pauseItem = new MenuItem
+        {
+            Header = _vm.IsPollingPaused
+                ? "Resume Background Polling (Shift+P)"
+                : "Pause Background Polling (Shift+P)"
+        };
+        pauseItem.Click += (_, _) => _vm.TogglePollingPaused();
+        flyout.Items.Add(pauseItem);
+
+        return flyout;
     }
 
     private static Control BuildNavButton(
