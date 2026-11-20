@@ -19,6 +19,20 @@ public sealed class ElmsPollingService : IAsyncDisposable
     public event EventHandler<AppNotification>? NotificationEmitted;
 
     public bool IsRunning => _loopTask is not null && !_loopTask.IsCompleted;
+    public bool IsPaused { get; private set; }
+    public DateTimeOffset? PausedUntilUtc { get; private set; }
+
+    public void Pause(TimeSpan? duration = null)
+    {
+        IsPaused = true;
+        PausedUntilUtc = duration.HasValue ? DateTimeOffset.UtcNow.Add(duration.Value) : null;
+    }
+
+    public void Resume()
+    {
+        IsPaused = false;
+        PausedUntilUtc = null;
+    }
 
     public ElmsPollingService(ElmsBasinSyncService syncService, ILogger<ElmsPollingService>? logger = null)
     {
@@ -103,6 +117,14 @@ public sealed class ElmsPollingService : IAsyncDisposable
                 // Wait for the first interval tick before polling in the background so app startup never spams eLMS
                 if (!await timer.WaitForNextTickAsync(ct))
                     break;
+
+                if (IsPaused)
+                {
+                    if (PausedUntilUtc.HasValue && DateTimeOffset.UtcNow >= PausedUntilUtc.Value)
+                        Resume();
+                    else
+                        continue;
+                }
 
                 if (DateTimeOffset.UtcNow - lastFullSync >= fullInterval)
                 {

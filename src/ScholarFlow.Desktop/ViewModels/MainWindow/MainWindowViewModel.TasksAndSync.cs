@@ -317,18 +317,41 @@ public sealed partial class MainWindowViewModel
                 url = "/user_dashboard";
         }
 
-        StatusText = $"Opening eLMS app window...";
-        NotifyStateChanged(UiChangeKind.StatusOnly);
+        bool wasManuallyPaused = _pollingService.IsPaused;
+        if (!wasManuallyPaused)
+            _pollingService.Pause(TimeSpan.FromMinutes(90));
+
+        StatusText = "Opening eLMS app window (background polling paused)...";
+        NotifyStateChanged(UiChangeKind.FullLayout);
 
         await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(url, async () =>
         {
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
+                if (!wasManuallyPaused)
+                    _pollingService.Resume();
                 StatusText = "eLMS window closed — refreshing assignments...";
-                NotifyStateChanged(UiChangeKind.StatusOnly);
+                NotifyStateChanged(UiChangeKind.FullLayout);
                 await RunFastPollAsync();
             });
         });
+    }
+
+    public bool IsPollingPaused => _pollingService.IsPaused;
+
+    public void TogglePollingPaused()
+    {
+        if (_pollingService.IsPaused)
+        {
+            _pollingService.Resume();
+            StatusText = "Background eLMS polling resumed.";
+        }
+        else
+        {
+            _pollingService.Pause();
+            StatusText = "Background eLMS polling paused (single-session protection).";
+        }
+        NotifyStateChanged(UiChangeKind.FullLayout);
     }
 
     public async Task RunFastPollAsync()

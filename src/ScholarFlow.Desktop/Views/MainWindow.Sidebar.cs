@@ -401,7 +401,7 @@ public sealed partial class MainWindow
         {
             var bottomRow = new Grid
             {
-                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto,Auto"),
+                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto,Auto,Auto"),
             };
             var syncBtn = _vm.Settings.EnableElmsIntegration
                 ? UiBuilder.GhostButton(
@@ -425,8 +425,29 @@ public sealed partial class MainWindow
                     14.5
                 );
                 pollBtn.Margin = new Thickness(4, 0, 0, 0);
+                ToolTip.SetTip(pollBtn, "Fast poll eLMS assignments now");
                 Grid.SetColumn(pollBtn, 1);
                 bottomRow.Children.Add(pollBtn);
+
+                var pauseBtn = UiBuilder.IconButton(
+                    _vm.IsPollingPaused
+                        ? MaterialIconKind.PlayCircleOutline
+                        : MaterialIconKind.PauseCircleOutline,
+                    () => _vm.TogglePollingPaused(),
+                    14.5,
+                    _vm.IsPollingPaused
+                        ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                        : ThemeService.Brush(ThemeService.TextSecondary)
+                );
+                pauseBtn.Margin = new Thickness(2, 0, 0, 0);
+                ToolTip.SetTip(
+                    pauseBtn,
+                    _vm.IsPollingPaused
+                        ? "Background eLMS polling is PAUSED — click to resume"
+                        : "Pause background eLMS polling (protect active browser quiz session)"
+                );
+                Grid.SetColumn(pauseBtn, 2);
+                bottomRow.Children.Add(pauseBtn);
             }
 
             var themeBtn = UiBuilder.IconButton(
@@ -436,7 +457,7 @@ public sealed partial class MainWindow
                 async () => await _vm.ToggleThemeAsync(),
                 14.5
             );
-            Grid.SetColumn(themeBtn, 2);
+            Grid.SetColumn(themeBtn, 3);
             bottomRow.Children.Add(themeBtn);
 
             var settingsBtn = UiBuilder.IconButton(
@@ -445,7 +466,7 @@ public sealed partial class MainWindow
                 14.5
             );
             ToolTip.SetTip(settingsBtn, "Desktop Settings (Tray, Notifications, Startup, Vault)");
-            Grid.SetColumn(settingsBtn, 3);
+            Grid.SetColumn(settingsBtn, 4);
             bottomRow.Children.Add(settingsBtn);
 
             var helpBtn = UiBuilder.IconButton(
@@ -453,7 +474,7 @@ public sealed partial class MainWindow
                 () => _vm.ToggleShortcutsModal(),
                 14.5
             );
-            Grid.SetColumn(helpBtn, 4);
+            Grid.SetColumn(helpBtn, 5);
             bottomRow.Children.Add(helpBtn);
 
             footer.Children.Add(bottomRow);
