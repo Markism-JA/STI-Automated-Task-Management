@@ -27,14 +27,15 @@ public sealed class CourseFilter
         return false;
     }
 
-    public IReadOnlyList<ElmsCourse> Apply(IEnumerable<ElmsCourse> courses)
-        => courses.Where(c => !IsIgnored(c)).ToList();
+    public IReadOnlyList<ElmsCourse> Apply(IEnumerable<ElmsCourse> courses) =>
+        [.. courses.Where(c => !IsIgnored(c))];
 
     private static bool MatchesWildcardOrSubstring(string text, string pattern)
     {
         if (pattern.Contains('*') || pattern.Contains('?'))
         {
-            var regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            var regexPattern =
+                "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
             return Regex.IsMatch(text, regexPattern, RegexOptions.IgnoreCase);
         }
 

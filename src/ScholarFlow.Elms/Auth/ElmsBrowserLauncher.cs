@@ -13,8 +13,11 @@ public static class ElmsBrowserLauncher
     {
         var authOptions = options ?? new AuthOptions();
         var targetUrl = HtmlParsingHelpers.ToAbsoluteUrl(urlOrPath, authOptions.BaseUrl);
-        var executable = FindChromiumExecutable()
-            ?? throw new FileNotFoundException("Could not locate Playwright Chromium or system chromium executable.");
+        var executable =
+            FindChromiumExecutable()
+            ?? throw new FileNotFoundException(
+                "Could not locate Playwright Chromium or system chromium executable."
+            );
 
         Directory.CreateDirectory(authOptions.BrowserProfileDirectory);
 
@@ -23,7 +26,7 @@ public static class ElmsBrowserLauncher
             FileName = executable,
             UseShellExecute = false,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
         };
 
         psi.ArgumentList.Add($"--user-data-dir={authOptions.BrowserProfileDirectory}");
@@ -38,11 +41,14 @@ public static class ElmsBrowserLauncher
     {
         if (OperatingSystem.IsWindows())
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData
+            );
             var pwWinCache = Path.Combine(localAppData, "ms-playwright");
             if (Directory.Exists(pwWinCache))
             {
-                var candidates = Directory.GetDirectories(pwWinCache, "chromium-*")
+                var candidates = Directory
+                    .GetDirectories(pwWinCache, "chromium-*")
                     .OrderByDescending(d => d)
                     .Select(d => Path.Combine(d, "chrome-win64", "chrome.exe"))
                     .Where(File.Exists)
@@ -59,8 +65,14 @@ public static class ElmsBrowserLauncher
                 Path.Combine(progFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
                 Path.Combine(progFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
                 Path.Combine(progFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
-                Path.Combine(progFiles, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-                Path.Combine(localAppData, "Google", "Chrome", "Application", "chrome.exe")
+                Path.Combine(
+                    progFiles,
+                    "BraveSoftware",
+                    "Brave-Browser",
+                    "Application",
+                    "brave.exe"
+                ),
+                Path.Combine(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
             ];
             return winSystemBinaries.FirstOrDefault(File.Exists);
         }
@@ -68,11 +80,13 @@ public static class ElmsBrowserLauncher
         var pwCache = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".cache",
-            "ms-playwright");
+            "ms-playwright"
+        );
 
         if (Directory.Exists(pwCache))
         {
-            var candidates = Directory.GetDirectories(pwCache, "chromium-*")
+            var candidates = Directory
+                .GetDirectories(pwCache, "chromium-*")
                 .OrderByDescending(d => d)
                 .Select(d => Path.Combine(d, "chrome-linux64", "chrome"))
                 .Where(File.Exists)
@@ -82,7 +96,13 @@ public static class ElmsBrowserLauncher
                 return candidates[0];
         }
 
-        string[] systemBinaries = ["/usr/bin/chromium", "/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/brave"];
+        string[] systemBinaries =
+        [
+            "/usr/bin/chromium",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/brave",
+        ];
         return systemBinaries.FirstOrDefault(File.Exists);
     }
 }

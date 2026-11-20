@@ -31,10 +31,16 @@ public static partial class FilenameSanitizer
     /// <summary>
     /// Sanitizes a file display name while preserving or appending its extension cleanly.
     /// </summary>
-    public static string SanitizeFileName(string rawName, string? fallbackExtension = null, string fallback = "file")
+    public static string SanitizeFileName(
+        string rawName,
+        string? fallbackExtension = null,
+        string fallback = "file"
+    )
     {
         if (string.IsNullOrWhiteSpace(rawName))
-            return string.IsNullOrEmpty(fallbackExtension) ? fallback : $"{fallback}{NormalizeExt(fallbackExtension)}";
+            return string.IsNullOrEmpty(fallbackExtension)
+                ? fallback
+                : $"{fallback}{NormalizeExt(fallbackExtension)}";
 
         var trimmed = rawName.Trim();
         var ext = Path.GetExtension(trimmed);

@@ -11,38 +11,50 @@ namespace ScholarFlow.Elms.Sync;
 /// Executes a <see cref="SyncPlan"/> with bounded concurrency, MIME/extension filtering,
 /// path-traversal protection, transient retry, atomic file writes, and SHA-256 state tracking.
 /// </summary>
-public sealed class SyncExecutor : ISyncExecutor
+public sealed class SyncExecutor(HttpClient httpClient) : ISyncExecutor
 {
     private const int MaxRetries = 3;
-    private readonly HttpClient _httpClient;
-
-    public SyncExecutor(HttpClient httpClient)
-    {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-    }
+    private readonly HttpClient _httpClient =
+        httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 
     public async Task<SyncResult> ExecuteAsync(
         SyncPlan plan,
         SyncOptions options,
         LocalSyncState localState,
         IProgress<SyncProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         var errors = new List<string>();
         var stateLock = new object();
 
-        int downloaded = 0, updated = 0, relocated = 0, unchanged = 0, skipped = 0, failed = 0;
+        int downloaded = 0,
+            updated = 0,
+            relocated = 0,
+            unchanged = 0,
+            skipped = 0,
+            failed = 0;
 
         foreach (var action in plan.Actions)
         {
             if (action.Kind == SyncActionKind.Unchanged)
             {
                 unchanged++;
-                if (!options.DryRun &&
-                    (localState.ResourcesByUrl.TryGetValue(action.Resource.CanonicalUrl, out var rec) ||
-                     localState.ResourcesByUrl.TryGetValue(action.Resource.Url, out rec)) &&
-                    !string.Equals(rec.RelativePath, action.TargetRelativePath, StringComparison.Ordinal))
+                if (
+                    !options.DryRun
+                    && (
+                        localState.ResourcesByUrl.TryGetValue(
+                            action.Resource.CanonicalUrl,
+                            out var rec
+                        ) || localState.ResourcesByUrl.TryGetValue(action.Resource.Url, out rec)
+                    )
+                    && !string.Equals(
+                        rec.RelativePath,
+                        action.TargetRelativePath,
+                        StringComparison.Ordinal
+                    )
+                )
                 {
                     rec.RelativePath = action.TargetRelativePath;
                 }
@@ -51,12 +63,21 @@ public sealed class SyncExecutor : ISyncExecutor
             {
                 skipped++;
             }
-            else if (action.Kind == SyncActionKind.MovedLocally && action.ExistingRelocatedPath is not null)
+            else if (
+                action.Kind == SyncActionKind.MovedLocally
+                && action.ExistingRelocatedPath is not null
+            )
             {
                 relocated++;
-                if (!options.DryRun &&
-                    (localState.ResourcesByUrl.TryGetValue(action.Resource.CanonicalUrl, out var rec) ||
-                     localState.ResourcesByUrl.TryGetValue(action.Resource.Url, out rec)))
+                if (
+                    !options.DryRun
+                    && (
+                        localState.ResourcesByUrl.TryGetValue(
+                            action.Resource.CanonicalUrl,
+                            out var rec
+                        ) || localState.ResourcesByUrl.TryGetValue(action.Resource.Url, out rec)
+                    )
+                )
                 {
                     rec.RelativePath = action.ExistingRelocatedPath;
                     rec.LastSyncedAt = DateTimeOffset.UtcNow;
@@ -64,14 +85,23 @@ public sealed class SyncExecutor : ISyncExecutor
             }
         }
 
-        var workItems = plan.Actions
-            .Where(a => a.Kind is SyncActionKind.New or SyncActionKind.Updated)
+        var workItems = plan
+            .Actions.Where(a => a.Kind is SyncActionKind.New or SyncActionKind.Updated)
             .ToList();
 
         if (options.DryRun || workItems.Count == 0)
         {
             return new SyncResult(
-                plan.Course, downloaded, updated, relocated, unchanged, skipped, failed, errors, sw.Elapsed);
+                plan.Course,
+                downloaded,
+                updated,
+                relocated,
+                unchanged,
+                skipped,
+                failed,
+                errors,
+                sw.Elapsed
+            );
         }
 
         var concurrency = Math.Max(1, options.MaxConcurrentDownloads);
@@ -102,12 +132,15 @@ public sealed class SyncExecutor : ISyncExecutor
                 }
 
                 var done = Interlocked.Increment(ref completedCount);
-                progress?.Report(new SyncProgress(
-                    "Download",
-                    $"{action.Resource.SanitizedFileName}",
-                    done,
-                    workItems.Count,
-                    plan.Course.Title));
+                progress?.Report(
+                    new SyncProgress(
+                        "Download",
+                        $"{action.Resource.SanitizedFileName}",
+                        done,
+                        workItems.Count,
+                        plan.Course.Title
+                    )
+                );
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -126,13 +159,23 @@ public sealed class SyncExecutor : ISyncExecutor
         await Task.WhenAll(tasks);
 
         return new SyncResult(
-            plan.Course, downloaded, updated, relocated, unchanged, skipped, failed, errors, sw.Elapsed);
+            plan.Course,
+            downloaded,
+            updated,
+            relocated,
+            unchanged,
+            skipped,
+            failed,
+            errors,
+            sw.Elapsed
+        );
     }
 
     private async Task<(bool SkippedByFilter, SyncedResourceRecord? Record)> DownloadWithRetryAsync(
         SyncAction action,
         SyncOptions options,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         for (int attempt = 1; ; attempt++)
         {
@@ -140,7 +183,8 @@ public sealed class SyncExecutor : ISyncExecutor
             {
                 return await DownloadOneAsync(action, options, ct);
             }
-            catch (HttpRequestException ex) when (attempt < MaxRetries && IsTransientStatus(ex.StatusCode))
+            catch (HttpRequestException ex)
+                when (attempt < MaxRetries && IsTransientStatus(ex.StatusCode))
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt * attempt), ct);
             }
@@ -152,16 +196,25 @@ public sealed class SyncExecutor : ISyncExecutor
     }
 
     private static bool IsTransientStatus(HttpStatusCode? status) =>
-        status is null or HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway
-            or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout;
+        status
+            is null
+                or HttpStatusCode.TooManyRequests
+                or HttpStatusCode.BadGateway
+                or HttpStatusCode.ServiceUnavailable
+                or HttpStatusCode.GatewayTimeout;
 
     private async Task<(bool SkippedByFilter, SyncedResourceRecord? Record)> DownloadOneAsync(
         SyncAction action,
         SyncOptions options,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         var resource = action.Resource;
-        using var response = await _httpClient.GetAsync(resource.Url, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await _httpClient.GetAsync(
+            resource.Url,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct
+        );
         response.EnsureSuccessStatusCode();
 
         var mediaType = response.Content.Headers.ContentType?.MediaType;
@@ -176,7 +229,9 @@ public sealed class SyncExecutor : ISyncExecutor
 
         // Defense-in-depth path traversal guard
         if (!destPath.StartsWith(rootFullPath, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Refusing to write outside output root directory: {relPath}");
+            throw new InvalidOperationException(
+                $"Refusing to write outside output root directory: {relPath}"
+            );
 
         var destDir = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrEmpty(destDir))
@@ -222,7 +277,7 @@ public sealed class SyncExecutor : ISyncExecutor
             LastModified = response.Content.Headers.LastModified,
             ContentLength = response.Content.Headers.ContentLength ?? totalBytes,
             Sha256 = sha256Hex,
-            LastSyncedAt = DateTimeOffset.UtcNow
+            LastSyncedAt = DateTimeOffset.UtcNow,
         };
 
         return (false, record);
@@ -234,7 +289,8 @@ public sealed class SyncExecutor : ISyncExecutor
         if (!string.IsNullOrEmpty(ext))
             return resource.SanitizedFileName;
 
-        var cdName = headers.ContentDisposition?.FileNameStar ?? headers.ContentDisposition?.FileName;
+        var cdName =
+            headers.ContentDisposition?.FileNameStar ?? headers.ContentDisposition?.FileName;
         if (!string.IsNullOrEmpty(cdName))
         {
             var cdExt = Path.GetExtension(cdName.Trim('"'));
@@ -251,7 +307,7 @@ public sealed class SyncExecutor : ISyncExecutor
             "application/zip" => ".zip",
             "text/plain" => ".txt",
             "text/markdown" => ".md",
-            _ => string.Empty
+            _ => string.Empty,
         };
 
         return $"{resource.SanitizedFileName}{mimeExt}";
@@ -278,6 +334,8 @@ public sealed class SyncExecutor : ISyncExecutor
     private static string ReplaceFileNameInRelativePath(string relPath, string newFileName)
     {
         var dir = Path.GetDirectoryName(relPath);
-        return string.IsNullOrEmpty(dir) ? newFileName : Path.Combine(dir, newFileName).Replace('\\', '/');
+        return string.IsNullOrEmpty(dir)
+            ? newFileName
+            : Path.Combine(dir, newFileName).Replace('\\', '/');
     }
 }

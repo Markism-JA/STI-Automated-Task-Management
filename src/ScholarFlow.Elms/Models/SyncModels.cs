@@ -7,24 +7,38 @@ public sealed record ResourceFilter
 {
     public static ResourceFilter AcademicDefault { get; } = new();
 
-    public IReadOnlySet<string> AllowedExtensions { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
-        ".zip", ".rar", ".7z", ".txt", ".md", ".csv", ".json"
-    };
+    public IReadOnlySet<string> AllowedExtensions { get; init; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf",
+            ".docx",
+            ".doc",
+            ".pptx",
+            ".ppt",
+            ".xlsx",
+            ".xls",
+            ".zip",
+            ".rar",
+            ".7z",
+            ".txt",
+            ".md",
+            ".csv",
+            ".json",
+        };
 
-    public IReadOnlySet<string> AllowedMimePrefixes { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument",
-        "application/msword",
-        "application/vnd.ms-",
-        "application/zip",
-        "application/x-zip",
-        "text/plain",
-        "text/markdown",
-        "text/csv"
-    };
+    public IReadOnlySet<string> AllowedMimePrefixes { get; init; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument",
+            "application/msword",
+            "application/vnd.ms-",
+            "application/zip",
+            "application/x-zip",
+            "text/plain",
+            "text/markdown",
+            "text/csv",
+        };
 
     public bool AllowUnknownExtensionWhenMimeMatches { get; init; } = true;
 }
@@ -38,7 +52,7 @@ public enum SyncActionKind
     Updated,
     MovedLocally,
     Unchanged,
-    SkippedExternal
+    SkippedExternal,
 }
 
 public sealed record SyncAction(
@@ -46,14 +60,17 @@ public sealed record SyncAction(
     SyncActionKind Kind,
     string TargetRelativePath,
     string? ExistingRelocatedPath = null,
-    string? Reason = null);
+    string? Reason = null
+);
 
 public sealed record SyncPlan(
     ElmsCourse Course,
     IReadOnlyList<SyncAction> Actions,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt
+)
 {
-    public int DownloadCount => Actions.Count(a => a.Kind is SyncActionKind.New or SyncActionKind.Updated);
+    public int DownloadCount =>
+        Actions.Count(a => a.Kind is SyncActionKind.New or SyncActionKind.Updated);
     public int RelocatedCount => Actions.Count(a => a.Kind == SyncActionKind.MovedLocally);
     public int UnchangedCount => Actions.Count(a => a.Kind == SyncActionKind.Unchanged);
     public int SkippedCount => Actions.Count(a => a.Kind == SyncActionKind.SkippedExternal);
@@ -73,7 +90,8 @@ public sealed record SyncProgress(
     string Message,
     int? Completed = null,
     int? Total = null,
-    string? CourseTitle = null);
+    string? CourseTitle = null
+);
 
 public sealed record SyncResult(
     ElmsCourse Course,
@@ -84,7 +102,8 @@ public sealed record SyncResult(
     int Skipped,
     int Failed,
     IReadOnlyList<string> Errors,
-    TimeSpan Duration);
+    TimeSpan Duration
+);
 
 /// <summary>
 /// Persistent metadata for a single downloaded resource, keyed by canonical URL.
@@ -109,5 +128,6 @@ public sealed class LocalSyncState
 {
     public int SchemaVersion { get; set; } = 1;
     public DateTimeOffset? LastFullSyncAt { get; set; }
-    public Dictionary<string, SyncedResourceRecord> ResourcesByUrl { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, SyncedResourceRecord> ResourcesByUrl { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }

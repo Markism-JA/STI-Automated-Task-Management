@@ -20,7 +20,9 @@ public static class HtmlToMarkdownConverter
             return string.Empty;
 
         // Remove dangerous or non-content tags
-        foreach (var node in body.QuerySelectorAll("script, style, svg, nav, button, noscript").ToList())
+        foreach (
+            var node in body.QuerySelectorAll("script, style, svg, nav, button, noscript").ToList()
+        )
             node.Remove();
 
         var sb = new StringBuilder();
@@ -113,18 +115,30 @@ public static class HtmlToMarkdownConverter
         }
 
         var sub = assignment.SubmissionInfo;
-        if (sub.IsSubmitted || sub.SubmittedFiles.Count > 0 || sub.Comments.Count > 0 ||
-            assignment.Kind == ElmsAssignmentKind.Quiz || sub.MaxAttempts.HasValue)
+        if (
+            sub.IsSubmitted
+            || sub.SubmittedFiles.Count > 0
+            || sub.Comments.Count > 0
+            || assignment.Kind == ElmsAssignmentKind.Quiz
+            || sub.MaxAttempts.HasValue
+        )
         {
             sb.AppendLine("## Submission");
             sb.AppendLine();
             if (!string.IsNullOrWhiteSpace(sub.SubmittedAtText))
                 sb.AppendLine($"- **Submitted:** {sub.SubmittedAtText}");
-            sb.AppendLine($"- **Attempts:** {sub.Attempts}" + (sub.MaxAttempts.HasValue ? $" / {sub.MaxAttempts.Value}" : ""));
+            sb.AppendLine(
+                $"- **Attempts:** {sub.Attempts}"
+                    + (sub.MaxAttempts.HasValue ? $" / {sub.MaxAttempts.Value}" : "")
+            );
             if (assignment.Kind == ElmsAssignmentKind.Quiz || sub.MaxAttempts.HasValue)
-                sb.AppendLine($"- **Allow Late Submissions:** {(sub.AllowLateSubmissions ? "Yes" : "No")}");
+                sb.AppendLine(
+                    $"- **Allow Late Submissions:** {(sub.AllowLateSubmissions ? "Yes" : "No")}"
+                );
             foreach (var file in sub.SubmittedFiles)
-                sb.AppendLine($"- **Submitted File:** [{file.DisplayName}]({file.SanitizedFileName})");
+                sb.AppendLine(
+                    $"- **Submitted File:** [{file.DisplayName}]({file.SanitizedFileName})"
+                );
             foreach (var comment in sub.Comments)
                 sb.AppendLine($"- **Comment:** {comment}");
             sb.AppendLine();
@@ -162,7 +176,11 @@ public static class HtmlToMarkdownConverter
                 var level = tag[1] - '0';
                 var heading = HtmlParsingHelpers.NormalizeWhitespace(el.TextContent);
                 if (!string.IsNullOrEmpty(heading))
-                    sb.Append('\n').Append(new string('#', level)).Append(' ').Append(heading).Append("\n\n");
+                    sb.Append('\n')
+                        .Append(new string('#', level))
+                        .Append(' ')
+                        .Append(heading)
+                        .Append("\n\n");
                 break;
 
             case "p":
@@ -198,7 +216,10 @@ public static class HtmlToMarkdownConverter
             case "a":
                 var href = el.GetAttribute("href");
                 var label = HtmlParsingHelpers.NormalizeWhitespace(el.TextContent);
-                if (!string.IsNullOrWhiteSpace(href) && !href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+                if (
+                    !string.IsNullOrWhiteSpace(href)
+                    && !href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+                )
                 {
                     var display = string.IsNullOrEmpty(label) ? href : label;
                     sb.Append($"[{display}]({href}) ");

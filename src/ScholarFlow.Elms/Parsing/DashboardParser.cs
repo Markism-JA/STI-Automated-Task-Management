@@ -14,10 +14,16 @@ public static partial class DashboardParser
     [GeneratedRegex(@"/student_class/show/(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex CourseIdRegex();
 
-    [GeneratedRegex(@"\s+-\s+(SY\d{4}-\d+T|SY\s*\d{4}-\d{2,4}(?:-\d+T)?|[A-Z]{2,6}\d{3,5})\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"\s+-\s+(SY\d{4}-\d+T|SY\s*\d{4}-\d{2,4}(?:-\d+T)?|[A-Z]{2,6}\d{3,5})\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    )]
     private static partial Regex TrailingTermOrSectionSuffixRegex();
 
-    [GeneratedRegex(@"Course\s+code\s*([A-Za-z0-9\-\s]+?)(?:·|&middot;|Section\s+code|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"Course\s+code\s*([A-Za-z0-9\-\s]+?)(?:·|&middot;|Section\s+code|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    )]
     private static partial Regex CourseCodeMetaRegex();
 
     [GeneratedRegex(@"Section\s+code\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
@@ -32,14 +38,15 @@ public static partial class DashboardParser
         "Guidance and Counseling",
         "Grade Monitoring",
         "Student Orientation",
-        "Course Curriculum"
+        "Course Curriculum",
     ];
 
     public static IReadOnlyList<ElmsCourse> ParseEnrolledCourses(
         string html,
         string baseUrl = "https://elms.sti.edu",
         bool includeCompleted = false,
-        bool includeAdministrative = false)
+        bool includeAdministrative = false
+    )
     {
         var doc = HtmlParsingHelpers.ParseDocument(html);
         var courses = new List<ElmsCourse>();
@@ -63,7 +70,8 @@ public static partial class DashboardParser
             if (string.IsNullOrWhiteSpace(rawTitle))
                 continue;
 
-            var isCompleted = anchor.Closest("#left_nav_classes_panel_completed, .scroll.completed") is not null;
+            var isCompleted =
+                anchor.Closest("#left_nav_classes_panel_completed, .scroll.completed") is not null;
             var (courseCode, sectionCode) = ExtractMetaCodes(anchor);
             var (cleanTitle, termSuffix) = SplitTrailingTermSuffix(rawTitle);
 
@@ -78,17 +86,20 @@ public static partial class DashboardParser
             var courseUrl = HtmlParsingHelpers.ToAbsoluteUrl(href, baseUrl);
             var folder = FilenameSanitizer.SanitizeFolderName(cleanTitle, $"Course_{courseId}");
 
-            courses.Add(new ElmsCourse(
-                CourseId: courseId,
-                Title: cleanTitle,
-                CourseUrl: courseUrl,
-                SanitizedFolderName: folder,
-                CourseCode: courseCode,
-                TermOrSection: sectionCode,
-                RawTitle: rawTitle,
-                TermSuffix: termSuffix,
-                IsCompleted: isCompleted,
-                IsAdministrativeShell: isAdmin));
+            courses.Add(
+                new ElmsCourse(
+                    CourseId: courseId,
+                    Title: cleanTitle,
+                    CourseUrl: courseUrl,
+                    SanitizedFolderName: folder,
+                    CourseCode: courseCode,
+                    TermOrSection: sectionCode,
+                    RawTitle: rawTitle,
+                    TermSuffix: termSuffix,
+                    IsCompleted: isCompleted,
+                    IsAdministrativeShell: isAdmin
+                )
+            );
         }
 
         return courses;
@@ -96,7 +107,9 @@ public static partial class DashboardParser
 
     private static string ExtractCourseTitle(IElement anchor)
     {
-        var titleNode = anchor.QuerySelector(".course-title, .class-name, h2, h3, h4, .title, strong");
+        var titleNode = anchor.QuerySelector(
+            ".course-title, .class-name, h2, h3, h4, .title, strong"
+        );
         var raw = titleNode?.TextContent ?? anchor.GetAttribute("title") ?? anchor.TextContent;
         return HtmlParsingHelpers.NormalizeWhitespace(raw);
     }
@@ -133,7 +146,11 @@ public static partial class DashboardParser
         return (courseCode, sectionCode);
     }
 
-    private static bool ClassifyAdministrativeShell(string rawTitle, string? courseCode, string? sectionCode)
+    private static bool ClassifyAdministrativeShell(
+        string rawTitle,
+        string? courseCode,
+        string? sectionCode
+    )
     {
         foreach (var keyword in AdminShellKeywords)
         {
@@ -141,17 +158,25 @@ public static partial class DashboardParser
                 return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(sectionCode) &&
-            (sectionCode.Contains("Survey", StringComparison.OrdinalIgnoreCase) ||
-             sectionCode.Contains("STI College", StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(sectionCode)
+            && (
+                sectionCode.Contains("Survey", StringComparison.OrdinalIgnoreCase)
+                || sectionCode.Contains("STI College", StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(courseCode) &&
-            (courseCode.Equals("GCO", StringComparison.OrdinalIgnoreCase) ||
-             courseCode.Contains("Community Corner", StringComparison.OrdinalIgnoreCase) ||
-             courseCode.Contains("Course Curriculum", StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(courseCode)
+            && (
+                courseCode.Equals("GCO", StringComparison.OrdinalIgnoreCase)
+                || courseCode.Contains("Community Corner", StringComparison.OrdinalIgnoreCase)
+                || courseCode.Contains("Course Curriculum", StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             return true;
         }

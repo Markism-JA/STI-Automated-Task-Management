@@ -13,7 +13,10 @@ public static partial class AssignmentParser
     [GeneratedRegex(@"\b(20\d{2})\b", RegexOptions.Compiled)]
     private static partial Regex FourDigitYearRegex();
 
-    [GeneratedRegex(@"^([A-Za-z]{3,9})\s+(\d{1,2})(?:\s*,?\s*(\d{1,2}:\d{2}\s*(?:am|pm)))?", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"^([A-Za-z]{3,9})\s+(\d{1,2})(?:\s*,?\s*(\d{1,2}:\d{2}\s*(?:am|pm)))?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    )]
     private static partial Regex MonthDayOptionalTimeRegex();
 
     [GeneratedRegex(@"Max\s+score:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
@@ -34,7 +37,8 @@ public static partial class AssignmentParser
         string courseId,
         string baseUrl = "https://elms.sti.edu",
         ElmsAssignmentSummary? summary = null,
-        int? referenceYear = null)
+        int? referenceYear = null
+    )
     {
         var doc = HtmlParsingHelpers.ParseDocument(html);
         var centre = doc.QuerySelector("#centreColumn, #mainContent") ?? doc.Body;
@@ -44,7 +48,10 @@ public static partial class AssignmentParser
         var (lmsId, kind) = AssignmentsListParser.ParseIdAndKind(assignmentUrl);
         if (kind == ElmsAssignmentKind.Unknown)
         {
-            var canonicalTabHref = centre.QuerySelector("#tab_instructions[href*=\"_assignment/show/\"], a[href*=\"_assignment/show/\"]")
+            var canonicalTabHref = centre
+                .QuerySelector(
+                    "#tab_instructions[href*=\"_assignment/show/\"], a[href*=\"_assignment/show/\"]"
+                )
                 ?.GetAttribute("href");
             if (!string.IsNullOrWhiteSpace(canonicalTabHref))
             {
@@ -56,20 +63,29 @@ public static partial class AssignmentParser
             kind = summary.Kind;
 
         // Query #fixedSectionHeader h2 first so we don't accidentally match the module h1 ("Standalone assignment")
-        var titleEl = centre.QuerySelector("#fixedSectionHeader h2")
-                      ?? centre.QuerySelector("h2.assignment-title, .assignment-title")
-                      ?? centre.QuerySelector("h2, h3, h1, .page-title");
+        var titleEl =
+            centre.QuerySelector("#fixedSectionHeader h2")
+            ?? centre.QuerySelector("h2.assignment-title, .assignment-title")
+            ?? centre.QuerySelector("h2, h3, h1, .page-title");
 
         var title = HtmlParsingHelpers.NormalizeWhitespace(titleEl?.TextContent);
-        if (string.IsNullOrWhiteSpace(title) || title.Equals("Standalone assignment", StringComparison.OrdinalIgnoreCase))
+        if (
+            string.IsNullOrWhiteSpace(title)
+            || title.Equals("Standalone assignment", StringComparison.OrdinalIgnoreCase)
+        )
             title = summary?.Title ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(title))
             return null;
 
         var moduleHeadingEl = centre.QuerySelector("#fixedSectionHeader h1.centerHeading a");
-        var parentModuleTitle = HtmlParsingHelpers.NormalizeWhitespace(moduleHeadingEl?.TextContent);
-        if (string.IsNullOrWhiteSpace(parentModuleTitle) || parentModuleTitle.Equals("Standalone assignment", StringComparison.OrdinalIgnoreCase))
+        var parentModuleTitle = HtmlParsingHelpers.NormalizeWhitespace(
+            moduleHeadingEl?.TextContent
+        );
+        if (
+            string.IsNullOrWhiteSpace(parentModuleTitle)
+            || parentModuleTitle.Equals("Standalone assignment", StringComparison.OrdinalIgnoreCase)
+        )
             parentModuleTitle = summary?.ParentModuleTitle;
 
         var (termFromModule, _) = HtmlParsingHelpers.ExtractTermAndPrefix(parentModuleTitle);
@@ -78,7 +94,10 @@ public static partial class AssignmentParser
 
         var rightCol = centre.QuerySelector("aside.rightColumn, .grading_fixed_col");
         var rightColText = HtmlParsingHelpers.NormalizeWhitespace(rightCol?.TextContent);
-        if (kind == ElmsAssignmentKind.Unknown && rightColText.Contains("Type: Quiz", StringComparison.OrdinalIgnoreCase))
+        if (
+            kind == ElmsAssignmentKind.Unknown
+            && rightColText.Contains("Type: Quiz", StringComparison.OrdinalIgnoreCase)
+        )
             kind = ElmsAssignmentKind.Quiz;
 
         int? maxScore = null;
@@ -96,9 +115,10 @@ public static partial class AssignmentParser
         }
 
         var year = referenceYear ?? DateTimeOffset.Now.Year;
-        var dueDate = TryParseFlexibleDate(dueRaw, year)
-                      ?? summary?.DueDate
-                      ?? TryParseDueDateFromPageText(centre.TextContent, year);
+        var dueDate =
+            TryParseFlexibleDate(dueRaw, year)
+            ?? summary?.DueDate
+            ?? TryParseDueDateFromPageText(centre.TextContent, year);
 
         DateTimeOffset? startDate = null;
         string? timerText = null;
@@ -125,8 +145,15 @@ public static partial class AssignmentParser
 
         var score = summary?.ScoreText ?? ExtractScoreText(rightCol, centre);
 
-        var instructionsEl = centre.QuerySelector(".leftColumn .materialStyle, .instructions, .assignment-description, .description");
-        if (instructionsEl is not null && string.IsNullOrWhiteSpace(HtmlParsingHelpers.NormalizeWhitespace(instructionsEl.TextContent)))
+        var instructionsEl = centre.QuerySelector(
+            ".leftColumn .materialStyle, .instructions, .assignment-description, .description"
+        );
+        if (
+            instructionsEl is not null
+            && string.IsNullOrWhiteSpace(
+                HtmlParsingHelpers.NormalizeWhitespace(instructionsEl.TextContent)
+            )
+        )
             instructionsEl = null;
         instructionsEl ??= centre.QuerySelector(".leftColumn, main, article") ?? centre;
 
@@ -136,10 +163,17 @@ public static partial class AssignmentParser
             var clone = instructionsEl.Clone(true) as IElement;
             if (clone is not null)
             {
-                foreach (var actionBar in clone.QuerySelectorAll(".action-toolbar, .action-menu, script"))
+                foreach (
+                    var actionBar in clone.QuerySelectorAll(".action-toolbar, .action-menu, script")
+                )
                     actionBar.Remove();
                 var firstH2 = clone.QuerySelector("h2");
-                if (firstH2 is not null && HtmlParsingHelpers.NormalizeWhitespace(firstH2.TextContent).Equals("Instructions", StringComparison.OrdinalIgnoreCase))
+                if (
+                    firstH2 is not null
+                    && HtmlParsingHelpers
+                        .NormalizeWhitespace(firstH2.TextContent)
+                        .Equals("Instructions", StringComparison.OrdinalIgnoreCase)
+                )
                     firstH2.Remove();
                 instructionsHtml = clone.InnerHtml;
             }
@@ -154,7 +188,9 @@ public static partial class AssignmentParser
         }
         var instructionsMd = HtmlToMarkdownConverter.Convert(instructionsHtml);
 
-        var targetFolder = status is AssignmentStatus.Submitted or AssignmentStatus.Graded ? "completed" : "ongoing";
+        var targetFolder = status is AssignmentStatus.Submitted or AssignmentStatus.Graded
+            ? "completed"
+            : "ongoing";
         var attachments = HtmlParsingHelpers.ExtractFileResources(
             instructionsEl,
             baseUrl,
@@ -162,7 +198,8 @@ public static partial class AssignmentParser
             kind: ElmsResourceKind.AssignmentAttachment,
             courseId: courseId,
             sourceTitle: title,
-            includeExternalLinks: true);
+            includeExternalLinks: true
+        );
 
         return new ElmsAssignment(
             LmsId: lmsId,
@@ -182,7 +219,8 @@ public static partial class AssignmentParser
             InstructionsMarkdown: string.IsNullOrWhiteSpace(instructionsMd) ? null : instructionsMd,
             Submission: submissionInfo,
             StartDate: startDate,
-            TimerText: timerText);
+            TimerText: timerText
+        );
     }
 
     /// <summary>
@@ -192,10 +230,12 @@ public static partial class AssignmentParser
         string html,
         string courseId,
         string assignmentTitle,
-        string baseUrl = "https://elms.sti.edu")
+        string baseUrl = "https://elms.sti.edu"
+    )
     {
         var doc = HtmlParsingHelpers.ParseDocument(html);
-        var leftCol = doc.QuerySelector("#centreColumn .leftColumn, #mainContent .leftColumn") ?? doc.Body;
+        var leftCol =
+            doc.QuerySelector("#centreColumn .leftColumn, #mainContent .leftColumn") ?? doc.Body;
 
         return HtmlParsingHelpers.ExtractFileResources(
             leftCol,
@@ -203,7 +243,8 @@ public static partial class AssignmentParser
             relativeTargetFolder: "completed",
             kind: ElmsResourceKind.SubmittedArtifact,
             courseId: courseId,
-            sourceTitle: assignmentTitle);
+            sourceTitle: assignmentTitle
+        );
     }
 
     internal static DateTimeOffset? TryParseFlexibleDate(string? raw, int defaultYear)
@@ -234,15 +275,18 @@ public static partial class AssignmentParser
                     "MMMM d yyyy h:mm tt",
                     "MMMM d yyyy hh:mm tt",
                     "MMM d yyyy",
-                    "MMMM d yyyy"
+                    "MMMM d yyyy",
                 ];
 
-                if (DateTimeOffset.TryParseExact(
-                         HtmlParsingHelpers.NormalizeWhitespace(candidateWithYear),
+                if (
+                    DateTimeOffset.TryParseExact(
+                        HtmlParsingHelpers.NormalizeWhitespace(candidateWithYear),
                         formats,
                         CultureInfo.InvariantCulture,
                         DateTimeStyles.AssumeLocal,
-                        out var exactNoYear))
+                        out var exactNoYear
+                    )
+                )
                 {
                     return exactNoYear;
                 }
@@ -251,7 +295,14 @@ public static partial class AssignmentParser
         }
 
         // 2. Contains a 4-digit year (e.g. "2026-11-25 23:59" or "Nov 25, 2026")
-        if (DateTimeOffset.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var direct))
+        if (
+            DateTimeOffset.TryParse(
+                normalized,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal,
+                out var direct
+            )
+        )
             return direct;
 
         return null;
@@ -263,7 +314,10 @@ public static partial class AssignmentParser
             return ElmsSubmissionInfo.Empty;
 
         var rawText = rightCol.TextContent;
-        var isClosed = rawText.Contains("No more submissions are allowed", StringComparison.OrdinalIgnoreCase);
+        var isClosed = rawText.Contains(
+            "No more submissions are allowed",
+            StringComparison.OrdinalIgnoreCase
+        );
 
         string? submittedAtText = null;
         var subMatch = SubmittedLineRegex().Match(rawText);
@@ -271,26 +325,38 @@ public static partial class AssignmentParser
             submittedAtText = HtmlParsingHelpers.NormalizeWhitespace(subMatch.Groups[1].Value);
 
         var attemptsEl = rightCol.QuerySelector(".number-of-attempts");
-        int attempts = int.TryParse(HtmlParsingHelpers.NormalizeWhitespace(attemptsEl?.TextContent), out var a) ? a : 0;
+        int attempts = int.TryParse(
+            HtmlParsingHelpers.NormalizeWhitespace(attemptsEl?.TextContent),
+            out var a
+        )
+            ? a
+            : 0;
 
         int? maxAttempts = null;
         var maxAttMatch = MaxAttemptsRegex().Match(rawText);
         if (maxAttMatch.Success && int.TryParse(maxAttMatch.Groups[1].Value, out var ma))
             maxAttempts = ma;
 
-        var allowLate = !rawText.Contains("Allow late submissions: No", StringComparison.OrdinalIgnoreCase);
+        var allowLate = !rawText.Contains(
+            "Allow late submissions: No",
+            StringComparison.OrdinalIgnoreCase
+        );
 
-        var detailsLink = rightCol.QuerySelector("a.sectionLink[href*=\"/submissions/\"]")?.GetAttribute("href");
+        var detailsLink = rightCol
+            .QuerySelector("a.sectionLink[href*=\"/submissions/\"]")
+            ?.GetAttribute("href");
         var detailsUrl = string.IsNullOrWhiteSpace(detailsLink)
             ? null
             : HtmlParsingHelpers.ToAbsoluteUrl(detailsLink, baseUrl);
 
-        var comments = rightCol.QuerySelectorAll("#grading-thread-comment-list .comment")
+        var comments = rightCol
+            .QuerySelectorAll("#grading-thread-comment-list .comment")
             .Select(c => HtmlParsingHelpers.NormalizeWhitespace(c.TextContent))
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .ToList();
 
-        var isSubmitted = attempts > 0 || !string.IsNullOrWhiteSpace(submittedAtText) || detailsUrl is not null;
+        var isSubmitted =
+            attempts > 0 || !string.IsNullOrWhiteSpace(submittedAtText) || detailsUrl is not null;
 
         return new ElmsSubmissionInfo(
             IsSubmitted: isSubmitted,
@@ -301,7 +367,8 @@ public static partial class AssignmentParser
             IsClosed: isClosed,
             SubmissionDetailsUrl: detailsUrl,
             Comments: comments,
-            SubmittedFiles: []);
+            SubmittedFiles: []
+        );
     }
 
     private static string? ExtractScoreText(IElement? rightCol, IElement centre)
@@ -322,11 +389,15 @@ public static partial class AssignmentParser
             var h2 = HtmlParsingHelpers.NormalizeWhitespace(block.QuerySelector("h2")?.TextContent);
             if (h2.Equals("Score", StringComparison.OrdinalIgnoreCase))
             {
-                var p = HtmlParsingHelpers.NormalizeWhitespace(block.QuerySelector("p")?.TextContent);
-                if (!string.IsNullOrWhiteSpace(p) &&
-                    !p.Contains("Nothing submitted", StringComparison.OrdinalIgnoreCase) &&
-                    !p.Contains("Waiting for grade", StringComparison.OrdinalIgnoreCase) &&
-                    !p.Contains("submission is used", StringComparison.OrdinalIgnoreCase))
+                var p = HtmlParsingHelpers.NormalizeWhitespace(
+                    block.QuerySelector("p")?.TextContent
+                );
+                if (
+                    !string.IsNullOrWhiteSpace(p)
+                    && !p.Contains("Nothing submitted", StringComparison.OrdinalIgnoreCase)
+                    && !p.Contains("Waiting for grade", StringComparison.OrdinalIgnoreCase)
+                    && !p.Contains("submission is used", StringComparison.OrdinalIgnoreCase)
+                )
                 {
                     return p;
                 }
@@ -340,20 +411,28 @@ public static partial class AssignmentParser
         IElement centre,
         string rightColText,
         ElmsSubmissionInfo submissionInfo,
-        ElmsAssignmentSummary? summary)
+        ElmsAssignmentSummary? summary
+    )
     {
         if (submissionInfo.IsSubmitted)
         {
             if (rightColText.Contains("Waiting for grade", StringComparison.OrdinalIgnoreCase))
                 return AssignmentStatus.Submitted;
-            return summary?.Status == AssignmentStatus.Graded ? AssignmentStatus.Graded : AssignmentStatus.Submitted;
+            return summary?.Status == AssignmentStatus.Graded
+                ? AssignmentStatus.Graded
+                : AssignmentStatus.Submitted;
         }
 
         if (summary is not null && summary.Status != AssignmentStatus.Unknown)
             return summary.Status;
 
         var lower = centre.TextContent.ToLowerInvariant();
-        if (lower.Contains("not submitted") || lower.Contains("nothing submitted yet") || lower.Contains("submit assignment") || lower.Contains("prepare answer"))
+        if (
+            lower.Contains("not submitted")
+            || lower.Contains("nothing submitted yet")
+            || lower.Contains("submit assignment")
+            || lower.Contains("prepare answer")
+        )
             return submissionInfo.IsClosed ? AssignmentStatus.Missing : AssignmentStatus.Pending;
         if (lower.Contains("missing") || lower.Contains("past due"))
             return AssignmentStatus.Missing;

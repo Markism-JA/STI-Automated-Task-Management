@@ -12,7 +12,10 @@ internal static partial class HtmlParsingHelpers
     [GeneratedRegex(@"^\s*(\d{2})\b", RegexOptions.Compiled)]
     private static partial Regex LeadingModuleNumberRegex();
 
-    [GeneratedRegex(@"\((Prelims?|Midterms?|Pre-?finals?|Finals?)\)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"\((Prelims?|Midterms?|Pre-?finals?|Finals?)\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    )]
     private static partial Regex ParenthesizedTermRegex();
 
     public static IDocument ParseDocument(string html) => Parser.ParseDocument(html);
@@ -23,13 +26,21 @@ internal static partial class HtmlParsingHelpers
             return string.Empty;
 
         var trimmed = href.Trim();
-        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        if (
+            trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return trimmed;
         }
 
-        if (Uri.TryCreate(new Uri(baseUrl.TrimEnd('/') + "/"), trimmed.TrimStart('/'), out var resolved))
+        if (
+            Uri.TryCreate(
+                new Uri(baseUrl.TrimEnd('/') + "/"),
+                trimmed.TrimStart('/'),
+                out var resolved
+            )
+        )
         {
             return resolved.ToString();
         }
@@ -42,11 +53,16 @@ internal static partial class HtmlParsingHelpers
         if (finalUri is not null)
         {
             var pathAndQuery = finalUri.PathAndQuery;
-            if (pathAndQuery.Contains("not_logged_in", StringComparison.OrdinalIgnoreCase) ||
-                pathAndQuery.Contains("simultaneous_logins_detected", StringComparison.OrdinalIgnoreCase) ||
-                pathAndQuery.Contains("log_in_required=true", StringComparison.OrdinalIgnoreCase) ||
-                finalUri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase) ||
-                finalUri.AbsolutePath.Contains("log_in", StringComparison.OrdinalIgnoreCase))
+            if (
+                pathAndQuery.Contains("not_logged_in", StringComparison.OrdinalIgnoreCase)
+                || pathAndQuery.Contains(
+                    "simultaneous_logins_detected",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || pathAndQuery.Contains("log_in_required=true", StringComparison.OrdinalIgnoreCase)
+                || finalUri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase)
+                || finalUri.AbsolutePath.Contains("log_in", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 return true;
             }
@@ -57,14 +73,16 @@ internal static partial class HtmlParsingHelpers
             return true;
         }
 
-        if (html.Contains("/site/not_logged_in", StringComparison.OrdinalIgnoreCase) &&
-            html.Contains("log_in_required=true", StringComparison.OrdinalIgnoreCase))
+        if (
+            html.Contains("/site/not_logged_in", StringComparison.OrdinalIgnoreCase)
+            && html.Contains("log_in_required=true", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return true;
         }
 
-        return html.Contains("name=\"password\"", StringComparison.OrdinalIgnoreCase) &&
-               html.Contains("login", StringComparison.OrdinalIgnoreCase);
+        return html.Contains("name=\"password\"", StringComparison.OrdinalIgnoreCase)
+            && html.Contains("login", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -79,9 +97,9 @@ internal static partial class HtmlParsingHelpers
         var numMatch = LeadingModuleNumberRegex().Match(title);
         if (numMatch.Success)
             prefix = numMatch.Groups[1].Value;
-
-        string? term = null;
         var termMatch = ParenthesizedTermRegex().Match(title);
+
+        string? term;
         if (termMatch.Success)
         {
             term = NormalizeTermName(termMatch.Groups[1].Value);
@@ -122,7 +140,8 @@ internal static partial class HtmlParsingHelpers
         ElmsResourceKind kind,
         string? courseId = null,
         string? sourceTitle = null,
-        bool includeExternalLinks = false)
+        bool includeExternalLinks = false
+    )
     {
         var results = new List<ElmsResource>();
         if (scope is null)
@@ -133,13 +152,18 @@ internal static partial class HtmlParsingHelpers
         foreach (var anchor in scope.QuerySelectorAll("a[href]"))
         {
             var href = anchor.GetAttribute("href");
-            if (string.IsNullOrWhiteSpace(href) || href.StartsWith('#') || href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.IsNullOrWhiteSpace(href)
+                || href.StartsWith('#')
+                || href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+            )
                 continue;
 
             var absUrl = ToAbsoluteUrl(href, baseUrl);
-            var isLmsFile = href.Contains("/files/", StringComparison.OrdinalIgnoreCase) ||
-                            href.Contains("/file/", StringComparison.OrdinalIgnoreCase) ||
-                            anchor.HasAttribute("download");
+            var isLmsFile =
+                href.Contains("/files/", StringComparison.OrdinalIgnoreCase)
+                || href.Contains("/file/", StringComparison.OrdinalIgnoreCase)
+                || anchor.HasAttribute("download");
 
             if (!isLmsFile)
             {
@@ -152,14 +176,20 @@ internal static partial class HtmlParsingHelpers
                         if (string.IsNullOrWhiteSpace(extTitle))
                             extTitle = absUrl;
 
-                        results.Add(new ElmsResource(
-                            Url: absUrl,
-                            DisplayName: extTitle,
-                            SanitizedFileName: FilenameSanitizer.SanitizeFolderName(extTitle, "external_link"),
-                            RelativeTargetFolder: relativeTargetFolder,
-                            Kind: ElmsResourceKind.ExternalLink,
-                            CourseId: courseId,
-                            SourceTitle: sourceTitle));
+                        results.Add(
+                            new ElmsResource(
+                                Url: absUrl,
+                                DisplayName: extTitle,
+                                SanitizedFileName: FilenameSanitizer.SanitizeFolderName(
+                                    extTitle,
+                                    "external_link"
+                                ),
+                                RelativeTargetFolder: relativeTargetFolder,
+                                Kind: ElmsResourceKind.ExternalLink,
+                                CourseId: courseId,
+                                SourceTitle: sourceTitle
+                            )
+                        );
                     }
                 }
                 continue;
@@ -171,9 +201,14 @@ internal static partial class HtmlParsingHelpers
 
             var displayText = NormalizeWhitespace(anchor.TextContent);
             // If display text is a raw /files/<id>/<name> path (e.g. on /submissions/ pages), extract just the filename
-            if (string.IsNullOrWhiteSpace(displayText) || displayText.StartsWith("/files/", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.IsNullOrWhiteSpace(displayText)
+                || displayText.StartsWith("/files/", StringComparison.OrdinalIgnoreCase)
+            )
             {
-                displayText = Uri.UnescapeDataString(Path.GetFileName(new Uri(absUrl).AbsolutePath));
+                displayText = Uri.UnescapeDataString(
+                    Path.GetFileName(new Uri(absUrl).AbsolutePath)
+                );
             }
 
             if (string.IsNullOrWhiteSpace(displayText))
@@ -182,14 +217,17 @@ internal static partial class HtmlParsingHelpers
             var urlExt = TryGetExtensionFromUrl(absUrl);
             var sanitized = FilenameSanitizer.SanitizeFileName(displayText, urlExt);
 
-            results.Add(new ElmsResource(
-                Url: absUrl,
-                DisplayName: displayText,
-                SanitizedFileName: sanitized,
-                RelativeTargetFolder: relativeTargetFolder,
-                Kind: kind,
-                CourseId: courseId,
-                SourceTitle: sourceTitle));
+            results.Add(
+                new ElmsResource(
+                    Url: absUrl,
+                    DisplayName: displayText,
+                    SanitizedFileName: sanitized,
+                    RelativeTargetFolder: relativeTargetFolder,
+                    Kind: kind,
+                    CourseId: courseId,
+                    SourceTitle: sourceTitle
+                )
+            );
         }
 
         return results;
@@ -200,7 +238,8 @@ internal static partial class HtmlParsingHelpers
         if (string.IsNullOrWhiteSpace(text))
             return string.Empty;
 
-        return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+        return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            .Trim();
     }
 
     private static bool IsExternalAcademicLink(string absUrl, string baseUrl)
@@ -212,9 +251,15 @@ internal static partial class HtmlParsingHelpers
             return false;
 
         var host = uri.Host.ToLowerInvariant();
-        if (host.Contains("facebook.com") || host.Contains("twitter.com") || host.Contains("instagram.com") ||
-            host.Contains("google.com/chrome") || host.Contains("mozilla.org") || host.Contains("apple.com") ||
-            host.Contains("microsoft.com/en-us/edge"))
+        if (
+            host.Contains("facebook.com")
+            || host.Contains("twitter.com")
+            || host.Contains("instagram.com")
+            || host.Contains("google.com/chrome")
+            || host.Contains("mozilla.org")
+            || host.Contains("apple.com")
+            || host.Contains("microsoft.com/en-us/edge")
+        )
         {
             return false;
         }

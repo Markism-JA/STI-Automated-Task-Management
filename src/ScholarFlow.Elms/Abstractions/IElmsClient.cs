@@ -19,7 +19,8 @@ public interface IElmsClient : IAsyncDisposable
         CourseFilter? filter = null,
         bool includeCompleted = false,
         bool includeAdministrative = false,
-        CancellationToken ct = default);
+        CancellationToken ct = default
+    );
 
     /// <summary>
     /// Captures a complete snapshot of a course: general files, modules/lessons, and assignments (including submitted artifacts).
@@ -27,7 +28,8 @@ public interface IElmsClient : IAsyncDisposable
     Task<ElmsCourseSnapshot> GetCourseSnapshotAsync(
         ElmsCourse course,
         IProgress<SyncProgress>? progress = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default
+    );
 
     /// <summary>
     /// Scrapes a single lesson/handout page for inline content and downloadable resources.
@@ -37,12 +39,16 @@ public interface IElmsClient : IAsyncDisposable
         string courseId,
         string? termHeader = null,
         string? fallbackTitle = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default
+    );
 
     /// <summary>
     /// Scrapes assignments, deadlines, and submission details for the specified course.
     /// </summary>
-    Task<IReadOnlyList<ElmsAssignment>> GetAssignmentsAsync(string courseId, CancellationToken ct = default);
+    Task<IReadOnlyList<ElmsAssignment>> GetAssignmentsAsync(
+        string courseId,
+        CancellationToken ct = default
+    );
 
     /// <summary>
     /// Fetches raw HTML of an authenticated eLMS URL for selector inspection and diagnostics.

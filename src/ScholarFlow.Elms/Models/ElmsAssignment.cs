@@ -6,7 +6,7 @@ public enum AssignmentStatus
     Pending,
     Submitted,
     Missing,
-    Graded
+    Graded,
 }
 
 public enum ElmsAssignmentKind
@@ -17,7 +17,7 @@ public enum ElmsAssignmentKind
     Quiz,
     Discussion,
     Survey,
-    Offline
+    Offline,
 }
 
 /// <summary>
@@ -36,7 +36,8 @@ public sealed record ElmsAssignmentSummary(
     double? WeightPercent,
     AssignmentStatus Status,
     string? ScoreText,
-    string? GradeText);
+    string? GradeText
+);
 
 /// <summary>
 /// Detailed submission and grading metadata scraped from an assignment's right column and /submissions/{id} page.
@@ -50,9 +51,11 @@ public sealed record ElmsSubmissionInfo(
     bool IsClosed,
     string? SubmissionDetailsUrl,
     IReadOnlyList<string> Comments,
-    IReadOnlyList<ElmsResource> SubmittedFiles)
+    IReadOnlyList<ElmsResource> SubmittedFiles
+)
 {
-    public static ElmsSubmissionInfo Empty { get; } = new(false, null, 0, null, true, false, null, [], []);
+    public static ElmsSubmissionInfo Empty { get; } =
+        new(false, null, 0, null, true, false, null, [], []);
 }
 
 /// <summary>
@@ -76,7 +79,8 @@ public sealed record ElmsAssignment(
     string? InstructionsMarkdown = null,
     ElmsSubmissionInfo? Submission = null,
     DateTimeOffset? StartDate = null,
-    string? TimerText = null)
+    string? TimerText = null
+)
 {
     public ElmsSubmissionInfo SubmissionInfo => Submission ?? ElmsSubmissionInfo.Empty;
 

@@ -10,15 +10,13 @@ namespace ScholarFlow.Elms.Sync;
 /// </summary>
 public static class CourseArtifactWriter
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public static async Task WriteCourseArtifactsAsync(
         ElmsCourseSnapshot snapshot,
         string outputRootDirectory,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         var courseRoot = Path.Combine(outputRootDirectory, snapshot.Course.SanitizedFolderName);
         Directory.CreateDirectory(courseRoot);
@@ -31,10 +29,14 @@ public static class CourseArtifactWriter
             try
             {
                 var existingJson = await File.ReadAllTextAsync(termJsonPath, ct);
-                var existingMap = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(existingJson);
+                var existingMap = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(
+                    existingJson
+                );
                 if (existingMap is not null && existingMap.Values.Any(v => v is { Count: > 0 }))
                 {
-                    var alreadyMapped = existingMap.Values.SelectMany(v => v).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var alreadyMapped = existingMap
+                        .Values.SelectMany(v => v)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
                     foreach (var (term, prefixes) in termMap)
                     {
                         if (!existingMap.TryGetValue(term, out var targetList))
@@ -85,12 +87,22 @@ public static class CourseArtifactWriter
             // If an assignment transitioned from ongoing -> completed on eLMS, remove the stale note in ongoing/
             if (isDone && File.Exists(staleOtherPath))
             {
-                try { File.Delete(staleOtherPath); } catch { /* ignore */ }
+                try
+                {
+                    File.Delete(staleOtherPath);
+                }
+                catch
+                { /* ignore */
+                }
             }
         }
     }
 
-    public static async Task WriteIfChangedAsync(string path, string content, CancellationToken ct = default)
+    public static async Task WriteIfChangedAsync(
+        string path,
+        string content,
+        CancellationToken ct = default
+    )
     {
         if (File.Exists(path))
         {

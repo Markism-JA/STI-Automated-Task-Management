@@ -9,7 +9,7 @@ public enum ElmsSectionKind
     Presentation,
     Assignment,
     Quiz,
-    Other
+    Other,
 }
 
 /// <summary>
@@ -23,7 +23,8 @@ public sealed record ElmsModuleSection(
     ElmsSectionKind Kind,
     bool IsCompleted = false,
     string? DueText = null,
-    string? ScoreText = null);
+    string? ScoreText = null
+);
 
 /// <summary>
 /// Represents an enrolled course discovered from the eLMS dashboard.
@@ -38,7 +39,8 @@ public sealed record ElmsCourse(
     string? RawTitle = null,
     string? TermSuffix = null,
     bool IsCompleted = false,
-    bool IsAdministrativeShell = false);
+    bool IsAdministrativeShell = false
+);
 
 /// <summary>
 /// Represents a lesson or module entry inside a course.
@@ -52,7 +54,8 @@ public sealed record ElmsModule(
     bool IsScormOrExternal = false,
     string? LessonId = null,
     string? ModuleNumberPrefix = null,
-    IReadOnlyList<ElmsModuleSection>? Sections = null)
+    IReadOnlyList<ElmsModuleSection>? Sections = null
+)
 {
     public IReadOnlyList<ElmsModuleSection> ModuleSections => Sections ?? [];
 }
@@ -68,7 +71,8 @@ public sealed record ElmsLesson(
     string? HtmlContent,
     IReadOnlyList<ElmsResource> Resources,
     bool HasScormOrEmbeddedPlayer = false,
-    string? MarkdownContent = null);
+    string? MarkdownContent = null
+);
 
 /// <summary>
 /// Aggregated remote state for a single course at a point in time.
@@ -80,11 +84,13 @@ public sealed record ElmsCourseSnapshot(
     IReadOnlyList<ElmsLesson> Lessons,
     IReadOnlyList<ElmsAssignment> Assignments,
     IReadOnlyList<string> Warnings,
-    DateTimeOffset CapturedAt)
+    DateTimeOffset CapturedAt
+)
 {
     public IEnumerable<ElmsResource> AllResources =>
-        GeneralResources.Concat(Lessons.SelectMany(l => l.Resources))
-                        .Concat(Assignments.SelectMany(a => a.AllResources));
+        GeneralResources
+            .Concat(Lessons.SelectMany(l => l.Resources))
+            .Concat(Assignments.SelectMany(a => a.AllResources));
 
     /// <summary>
     /// Builds a Compile_School-compatible term.json dictionary mapping Prelims/Midterms/Prefinals/Finals to 2-digit module prefixes.
@@ -96,14 +102,17 @@ public sealed record ElmsCourseSnapshot(
             ["Prelims"] = [],
             ["Midterms"] = [],
             ["Prefinals"] = [],
-            ["Finals"] = []
+            ["Finals"] = [],
         };
 
         var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var mod in Modules)
         {
-            if (string.IsNullOrWhiteSpace(mod.TermHeader) || string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix))
+            if (
+                string.IsNullOrWhiteSpace(mod.TermHeader)
+                || string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix)
+            )
                 continue;
 
             if (!map.TryGetValue(mod.TermHeader, out var list))
@@ -122,7 +131,10 @@ public sealed record ElmsCourseSnapshot(
         // Standard STI 4-term fallback for numbered modules when instructor omitted (Prelim)/(Midterm) from module title
         foreach (var mod in Modules)
         {
-            if (string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix) || assigned.Contains(mod.ModuleNumberPrefix))
+            if (
+                string.IsNullOrWhiteSpace(mod.ModuleNumberPrefix)
+                || assigned.Contains(mod.ModuleNumberPrefix)
+            )
                 continue;
 
             if (!int.TryParse(mod.ModuleNumberPrefix, out int num))
@@ -133,10 +145,13 @@ public sealed record ElmsCourseSnapshot(
                 <= 2 => "Prelims",
                 <= 4 => "Midterms",
                 <= 6 => "Prefinals",
-                _ => "Finals"
+                _ => "Finals",
             };
 
-            if (!map[inferredTerm].Contains(mod.ModuleNumberPrefix, StringComparer.OrdinalIgnoreCase))
+            if (
+                !map[inferredTerm]
+                    .Contains(mod.ModuleNumberPrefix, StringComparer.OrdinalIgnoreCase)
+            )
             {
                 map[inferredTerm].Add(mod.ModuleNumberPrefix);
                 assigned.Add(mod.ModuleNumberPrefix);

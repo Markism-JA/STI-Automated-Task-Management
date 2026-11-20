@@ -12,15 +12,20 @@ public static class ElmsSessionStore
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public static string GetDefaultSessionPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "scholarflow",
-        "session.json");
+    public static string GetDefaultSessionPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "scholarflow",
+            "session.json"
+        );
 
-    public static async Task<ElmsSession?> LoadAsync(string? path = null, CancellationToken ct = default)
+    public static async Task<ElmsSession?> LoadAsync(
+        string? path = null,
+        CancellationToken ct = default
+    )
     {
         var target = path ?? GetDefaultSessionPath();
         if (!File.Exists(target))
@@ -37,7 +42,11 @@ public static class ElmsSessionStore
         }
     }
 
-    public static async Task SaveAsync(ElmsSession session, string? path = null, CancellationToken ct = default)
+    public static async Task SaveAsync(
+        ElmsSession session,
+        string? path = null,
+        CancellationToken ct = default
+    )
     {
         var target = path ?? GetDefaultSessionPath();
         var dir = Path.GetDirectoryName(target);

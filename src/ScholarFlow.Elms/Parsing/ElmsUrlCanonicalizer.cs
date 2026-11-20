@@ -32,9 +32,7 @@ public static class ElmsUrlCanonicalizer
         }
 
         var basePath = uri.GetLeftPart(UriPartial.Path);
-        return keptParams.Count == 0
-            ? basePath
-            : $"{basePath}?{string.Join('&', keptParams)}";
+        return keptParams.Count == 0 ? basePath : $"{basePath}?{string.Join('&', keptParams)}";
     }
 
     public static bool IsSameOrSubdomain(string candidateDomain, string targetHost)

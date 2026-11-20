@@ -13,12 +13,15 @@ public static class LessonParser
         string courseId,
         string? termHeader = null,
         string baseUrl = "https://elms.sti.edu",
-        string? fallbackTitle = null)
+        string? fallbackTitle = null
+    )
     {
         var doc = HtmlParsingHelpers.ParseDocument(html);
         var centre = doc.QuerySelector("#centreColumn, #mainContent") ?? doc.Body;
 
-        var titleEl = centre?.QuerySelector("#fixedSectionHeader h2, h2, h3, .lesson-title, .page-title");
+        var titleEl = centre?.QuerySelector(
+            "#fixedSectionHeader h2, h2, h3, .lesson-title, .page-title"
+        );
         var title = HtmlParsingHelpers.NormalizeWhitespace(titleEl?.TextContent);
         if (string.IsNullOrWhiteSpace(title))
             title = fallbackTitle ?? "Untitled_Lesson";
@@ -27,21 +30,27 @@ public static class LessonParser
 
         if (string.IsNullOrWhiteSpace(termHeader))
         {
-            var moduleHeading = centre?.QuerySelector("#fixedSectionHeader h1.centerHeading")?.TextContent;
+            var moduleHeading = centre
+                ?.QuerySelector("#fixedSectionHeader h1.centerHeading")
+                ?.TextContent;
             termHeader = HtmlParsingHelpers.ExtractTermAndPrefix(moduleHeading).TermHeader;
         }
 
-        var hasScorm = lessonUrl.Contains("scorm_player.html", StringComparison.OrdinalIgnoreCase) ||
-                       centre?.QuerySelector("iframe[src*=\"scorm\"], iframe[src*=\"player\"]") is not null;
+        var hasScorm =
+            lessonUrl.Contains("scorm_player.html", StringComparison.OrdinalIgnoreCase)
+            || centre?.QuerySelector("iframe[src*=\"scorm\"], iframe[src*=\"player\"]") is not null;
 
-        var contentScope = centre?.QuerySelector(".lesson-content, .content-body, .materialStyle, main, article") ?? centre;
+        var contentScope =
+            centre?.QuerySelector(".lesson-content, .content-body, .materialStyle, main, article")
+            ?? centre;
         var resources = HtmlParsingHelpers.ExtractFileResources(
             contentScope,
             baseUrl,
             relativeTargetFolder: folder,
             kind: ElmsResourceKind.LessonAttachment,
             courseId: courseId,
-            sourceTitle: title);
+            sourceTitle: title
+        );
 
         var markdown = HtmlToMarkdownConverter.Convert(contentScope?.InnerHtml);
 
@@ -53,6 +62,7 @@ public static class LessonParser
             HtmlContent: contentScope?.InnerHtml,
             Resources: resources,
             HasScormOrEmbeddedPlayer: hasScorm,
-            MarkdownContent: string.IsNullOrWhiteSpace(markdown) ? null : markdown);
+            MarkdownContent: string.IsNullOrWhiteSpace(markdown) ? null : markdown
+        );
     }
 }

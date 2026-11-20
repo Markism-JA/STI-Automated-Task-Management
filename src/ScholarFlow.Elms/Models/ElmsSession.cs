@@ -10,7 +10,8 @@ public sealed record ElmsCookie(
     string Path,
     bool Secure,
     bool HttpOnly,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt
+);
 
 /// <summary>
 /// Represents an active authenticated session against STI eLMS.
@@ -19,7 +20,8 @@ public sealed record ElmsSession(
     string BaseUrl,
     string UserAgent,
     IReadOnlyList<ElmsCookie> Cookies,
-    DateTimeOffset AuthenticatedAt)
+    DateTimeOffset AuthenticatedAt
+)
 {
     public bool HasCookies => Cookies.Count > 0;
 }
@@ -39,18 +41,22 @@ public sealed record AuthOptions
     /// <summary>
     /// Directory storing persistent Chromium profile data (cookies, localStorage, session).
     /// </summary>
-    public string BrowserProfileDirectory { get; init; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "scholarflow",
-        "browser_session");
+    public string BrowserProfileDirectory { get; init; } =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "scholarflow",
+            "browser_session"
+        );
 
     /// <summary>
     /// Cached cookie session file path for fast HTTP-only validation without launching Chromium.
     /// </summary>
-    public string SessionFilePath { get; init; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "scholarflow",
-        "session.json");
+    public string SessionFilePath { get; init; } =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "scholarflow",
+            "session.json"
+        );
 
     /// <summary>
     /// Optional credentials; if omitted, checks ELMS_USERNAME and ELMS_PASSWORD environment variables.
@@ -76,9 +82,5 @@ public sealed record AuthOptions
 /// <summary>
 /// Thrown when an authenticated eLMS session cannot be established silently and interactive browser login is disabled.
 /// </summary>
-public sealed class ElmsAuthenticationRequiredException : InvalidOperationException
-{
-    public ElmsAuthenticationRequiredException(string message) : base(message)
-    {
-    }
-}
+public sealed class ElmsAuthenticationRequiredException(string message)
+    : InvalidOperationException(message) { }

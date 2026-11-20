@@ -11,23 +11,30 @@ public static class CourseFilterStore
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public static string GetDefaultFilterPath(string outputRootDirectory)
-        => Path.Combine(outputRootDirectory, ".scholarflow", "ignore_courses.json");
+    public static string GetDefaultFilterPath(string outputRootDirectory) =>
+        Path.Combine(outputRootDirectory, ".scholarflow", "ignore_courses.json");
 
-    public static async Task<CourseFilter> LoadAsync(string filterFilePath, CancellationToken ct = default)
+    public static async Task<CourseFilter> LoadAsync(
+        string filterFilePath,
+        CancellationToken ct = default
+    )
     {
         if (!File.Exists(filterFilePath))
             return new CourseFilter();
 
         await using var stream = File.OpenRead(filterFilePath);
         return await JsonSerializer.DeserializeAsync<CourseFilter>(stream, JsonOptions, ct)
-               ?? new CourseFilter();
+            ?? new CourseFilter();
     }
 
-    public static async Task SaveAsync(string filterFilePath, CourseFilter filter, CancellationToken ct = default)
+    public static async Task SaveAsync(
+        string filterFilePath,
+        CourseFilter filter,
+        CancellationToken ct = default
+    )
     {
         var dir = Path.GetDirectoryName(filterFilePath);
         if (!string.IsNullOrEmpty(dir))

@@ -12,7 +12,7 @@ public enum ElmsResourceKind
     AssignmentAttachment,
     SubmittedArtifact,
     ExternalLink,
-    ScormPackage
+    ScormPackage,
 }
 
 /// <summary>
@@ -29,14 +29,16 @@ public sealed record ElmsResource(
     string? MimeType = null,
     long? ContentLength = null,
     string? ETag = null,
-    DateTimeOffset? LastModified = null)
+    DateTimeOffset? LastModified = null
+)
 {
     /// <summary>
     /// Stable URL key with ephemeral query tokens (e.g. ?lmsauth=...) removed.
     /// </summary>
     public string CanonicalUrl => ElmsUrlCanonicalizer.GetCanonicalUrl(Url);
 
-    public string RelativeTargetPath => string.IsNullOrEmpty(RelativeTargetFolder)
-        ? SanitizedFileName
-        : $"{RelativeTargetFolder}/{SanitizedFileName}";
+    public string RelativeTargetPath =>
+        string.IsNullOrEmpty(RelativeTargetFolder)
+            ? SanitizedFileName
+            : $"{RelativeTargetFolder}/{SanitizedFileName}";
 }

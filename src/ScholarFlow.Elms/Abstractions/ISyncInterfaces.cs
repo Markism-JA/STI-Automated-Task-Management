@@ -14,7 +14,8 @@ public interface ISyncResolver
         ElmsCourseSnapshot snapshot,
         LocalSyncState localState,
         string outputRootDirectory,
-        bool forceRedownload = false);
+        bool forceRedownload = false
+    );
 }
 
 /// <summary>
@@ -27,5 +28,6 @@ public interface ISyncExecutor
         SyncOptions options,
         LocalSyncState localState,
         IProgress<SyncProgress>? progress = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default
+    );
 }
