@@ -113,12 +113,12 @@ public sealed class SyncExecutor(HttpClient httpClient) : ISyncExecutor
             await semaphore.WaitAsync(ct);
             try
             {
-                var outcome = await DownloadWithRetryAsync(action, options, ct);
-                if (outcome.SkippedByFilter)
+                var (SkippedByFilter, Record) = await DownloadWithRetryAsync(action, options, ct);
+                if (SkippedByFilter)
                 {
                     Interlocked.Increment(ref skipped);
                 }
-                else if (outcome.Record is not null)
+                else if (Record is not null)
                 {
                     if (action.Kind == SyncActionKind.Updated)
                         Interlocked.Increment(ref updated);
@@ -127,7 +127,7 @@ public sealed class SyncExecutor(HttpClient httpClient) : ISyncExecutor
 
                     lock (stateLock)
                     {
-                        localState.ResourcesByUrl[action.Resource.CanonicalUrl] = outcome.Record;
+                        localState.ResourcesByUrl[action.Resource.CanonicalUrl] = Record;
                     }
                 }
 

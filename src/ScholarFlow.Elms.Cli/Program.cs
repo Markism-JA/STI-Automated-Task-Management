@@ -24,15 +24,20 @@ if (command == "open")
 
 using var loggerFactory = LoggerFactory.Create(b =>
     b.AddSimpleConsole(o =>
-    {
-        o.SingleLine = true;
-        o.TimestampFormat = "HH:mm:ss ";
-    }).SetMinimumLevel(LogLevel.Information));
+        {
+            o.SingleLine = true;
+            o.TimestampFormat = "HH:mm:ss ";
+        })
+        .SetMinimumLevel(LogLevel.Information)
+);
 
 var forceInteractive = args.Contains("--interactive", StringComparer.OrdinalIgnoreCase);
 
 var authProvider = new PlaywrightAuthProvider(loggerFactory.CreateLogger<PlaywrightAuthProvider>());
-await using var client = new StiElmsClient(authProvider, loggerFactory.CreateLogger<StiElmsClient>());
+await using var client = new StiElmsClient(
+    authProvider,
+    loggerFactory.CreateLogger<StiElmsClient>()
+);
 
 try
 {
@@ -56,7 +61,10 @@ try
             foreach (var link in doc.QuerySelectorAll("a[href]").Take(40))
             {
                 var href = link.GetAttribute("href");
-                var text = string.Join(' ', link.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                var text = string.Join(
+                    ' ',
+                    link.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                );
                 if (!string.IsNullOrWhiteSpace(text))
                     Console.WriteLine($"  <a> {text} => {href}");
             }
@@ -81,14 +89,17 @@ static async Task<int> RunCoursesAsync(StiElmsClient client, string[] cmdArgs)
 {
     var outDir = GetOptionValue(cmdArgs, "--out") ?? Path.GetFullPath("./STI_Sync");
     var showAll = cmdArgs.Contains("--all", StringComparer.OrdinalIgnoreCase);
-    var includeAdmin = showAll || cmdArgs.Contains("--include-admin", StringComparer.OrdinalIgnoreCase);
-    var includeCompleted = showAll || cmdArgs.Contains("--include-completed", StringComparer.OrdinalIgnoreCase);
+    var includeAdmin =
+        showAll || cmdArgs.Contains("--include-admin", StringComparer.OrdinalIgnoreCase);
+    var includeCompleted =
+        showAll || cmdArgs.Contains("--include-completed", StringComparer.OrdinalIgnoreCase);
 
     var filter = await CourseFilterStore.LoadAsync(CourseFilterStore.GetDefaultFilterPath(outDir));
     var rawCourses = await client.GetEnrolledCoursesAsync(
         filter: null,
         includeCompleted: includeCompleted,
-        includeAdministrative: includeAdmin);
+        includeAdministrative: includeAdmin
+    );
 
     var visible = showAll ? rawCourses : filter.Apply(rawCourses);
 
@@ -125,15 +136,31 @@ static async Task<int> RunIgnoreAsync(string[] cmdArgs)
     {
         case "list":
             Console.WriteLine($"Ignore list ({filterPath}):");
-            Console.WriteLine("  IDs: " + (filter.IgnoredCourseIds.Count == 0 ? "(none)" : string.Join(", ", filter.IgnoredCourseIds)));
-            Console.WriteLine("  Title patterns: " + (filter.IgnoredTitlePatterns.Count == 0 ? "(none)" : string.Join(", ", filter.IgnoredTitlePatterns)));
+            Console.WriteLine(
+                "  IDs: "
+                    + (
+                        filter.IgnoredCourseIds.Count == 0
+                            ? "(none)"
+                            : string.Join(", ", filter.IgnoredCourseIds)
+                    )
+            );
+            Console.WriteLine(
+                "  Title patterns: "
+                    + (
+                        filter.IgnoredTitlePatterns.Count == 0
+                            ? "(none)"
+                            : string.Join(", ", filter.IgnoredTitlePatterns)
+                    )
+            );
             return 0;
 
         case "add" when cmdArgs.Length > 1 && !cmdArgs[1].StartsWith("--"):
             var addVal = cmdArgs[1].Trim();
             if (addVal.All(char.IsDigit))
                 filter.IgnoredCourseIds.Add(addVal);
-            else if (!filter.IgnoredTitlePatterns.Contains(addVal, StringComparer.OrdinalIgnoreCase))
+            else if (
+                !filter.IgnoredTitlePatterns.Contains(addVal, StringComparer.OrdinalIgnoreCase)
+            )
                 filter.IgnoredTitlePatterns.Add(addVal);
 
             await CourseFilterStore.SaveAsync(filterPath, filter);
@@ -142,14 +169,23 @@ static async Task<int> RunIgnoreAsync(string[] cmdArgs)
 
         case "remove" when cmdArgs.Length > 1 && !cmdArgs[1].StartsWith("--"):
             var remVal = cmdArgs[1].Trim();
-            var removed = filter.IgnoredCourseIds.Remove(remVal) |
-                          filter.IgnoredTitlePatterns.RemoveAll(p => p.Equals(remVal, StringComparison.OrdinalIgnoreCase)) > 0;
+            var removed =
+                filter.IgnoredCourseIds.Remove(remVal)
+                | filter.IgnoredTitlePatterns.RemoveAll(p =>
+                    p.Equals(remVal, StringComparison.OrdinalIgnoreCase)
+                ) > 0;
             await CourseFilterStore.SaveAsync(filterPath, filter);
-            Console.WriteLine(removed ? $"Removed '{remVal}' from ignore list." : $"'{remVal}' was not in ignore list.");
+            Console.WriteLine(
+                removed
+                    ? $"Removed '{remVal}' from ignore list."
+                    : $"'{remVal}' was not in ignore list."
+            );
             return 0;
 
         default:
-            Console.Error.WriteLine("Usage: ignore [list | add <id-or-pattern> | remove <id-or-pattern>] [--out <dir>]");
+            Console.Error.WriteLine(
+                "Usage: ignore [list | add <id-or-pattern> | remove <id-or-pattern>] [--out <dir>]"
+            );
             return 1;
     }
 }
@@ -164,15 +200,24 @@ static async Task<int> RunSyncAsync(StiElmsClient client, string[] syncArgs)
 
     var statePath = LocalSyncStateStore.GetDefaultStatePath(outDir);
     var localState = await LocalSyncStateStore.LoadAsync(statePath);
-    var ignoreFilter = await CourseFilterStore.LoadAsync(CourseFilterStore.GetDefaultFilterPath(outDir));
+    var ignoreFilter = await CourseFilterStore.LoadAsync(
+        CourseFilterStore.GetDefaultFilterPath(outDir)
+    );
 
-    var courses = await client.GetEnrolledCoursesAsync(ignoreFilter, includeCompleted: false, includeAdministrative: includeAdmin);
+    var courses = await client.GetEnrolledCoursesAsync(
+        ignoreFilter,
+        includeCompleted: false,
+        includeAdministrative: includeAdmin
+    );
     if (!string.IsNullOrWhiteSpace(courseFilterArg))
     {
-        courses = courses
-            .Where(c => c.CourseId.Equals(courseFilterArg, StringComparison.OrdinalIgnoreCase) ||
-                        c.Title.Contains(courseFilterArg, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        courses =
+        [
+            .. courses.Where(c =>
+                c.CourseId.Equals(courseFilterArg, StringComparison.OrdinalIgnoreCase)
+                || c.Title.Contains(courseFilterArg, StringComparison.OrdinalIgnoreCase)
+            ),
+        ];
     }
 
     var resolver = new SyncResolver();
@@ -181,35 +226,56 @@ static async Task<int> RunSyncAsync(StiElmsClient client, string[] syncArgs)
     {
         OutputRootDirectory = outDir,
         DryRun = dryRun,
-        ForceRedownload = force
+        ForceRedownload = force,
     };
 
     var progress = new Progress<SyncProgress>(p =>
-        Console.WriteLine($"[{p.Stage}] {(p.CourseTitle is not null ? $"({p.CourseTitle}) " : "")}{p.Message}"));
+        Console.WriteLine(
+            $"[{p.Stage}] {(p.CourseTitle is not null ? $"({p.CourseTitle}) " : "")}{p.Message}"
+        )
+    );
 
     foreach (var course in courses)
     {
         var snapshot = await client.GetCourseSnapshotAsync(course, progress);
         var plan = resolver.Resolve(snapshot, localState, outDir, force);
         var termMap = snapshot.BuildTermMap();
-        var termSummary = string.Join(", ", termMap.Where(kv => kv.Value.Count > 0).Select(kv => $"{kv.Key}: [{string.Join(",", kv.Value)}]"));
+        var termSummary = string.Join(
+            ", ",
+            termMap
+                .Where(kv => kv.Value.Count > 0)
+                .Select(kv => $"{kv.Key}: [{string.Join(",", kv.Value)}]")
+        );
 
-        Console.WriteLine($"\n=== {course.Title} ({course.CourseId}) -> {course.SanitizedFolderName}/ ===");
+        Console.WriteLine(
+            $"\n=== {course.Title} ({course.CourseId}) -> {course.SanitizedFolderName}/ ==="
+        );
         if (!string.IsNullOrEmpty(termSummary))
             Console.WriteLine($"  Terms: {termSummary}");
-        Console.WriteLine($"  Modules: {snapshot.Modules.Count}, Handout Pages: {snapshot.Lessons.Count}, Assignments: {snapshot.Assignments.Count}");
-        Console.WriteLine($"  Plan: {plan.DownloadCount} to download, {plan.RelocatedCount} moved locally, {plan.UnchangedCount} unchanged, {plan.SkippedCount} skipped");
+        Console.WriteLine(
+            $"  Modules: {snapshot.Modules.Count}, Handout Pages: {snapshot.Lessons.Count}, Assignments: {snapshot.Assignments.Count}"
+        );
+        Console.WriteLine(
+            $"  Plan: {plan.DownloadCount} to download, {plan.RelocatedCount} moved locally, {plan.UnchangedCount} unchanged, {plan.SkippedCount} skipped"
+        );
 
         foreach (var a in snapshot.Assignments)
         {
-            var subFiles = a.SubmissionInfo.SubmittedFiles.Count > 0 ? $" | SubmittedFiles: {a.SubmissionInfo.SubmittedFiles.Count}" : "";
-            Console.WriteLine($"    [{a.Kind} {a.LmsId}] {a.Title} | Due: {a.DueDate?.ToString("yyyy-MM-dd HH:mm") ?? "None"} | Status: {a.Status} | Score: {a.Score ?? (a.MaxScore.HasValue ? $"?/{a.MaxScore}" : "N/A")}{subFiles}");
+            var subFiles =
+                a.SubmissionInfo.SubmittedFiles.Count > 0
+                    ? $" | SubmittedFiles: {a.SubmissionInfo.SubmittedFiles.Count}"
+                    : "";
+            Console.WriteLine(
+                $"    [{a.Kind} {a.LmsId}] {a.Title} | Due: {a.DueDate?.ToString("yyyy-MM-dd HH:mm") ?? "None"} | Status: {a.Status} | Score: {a.Score ?? (a.MaxScore.HasValue ? $"?/{a.MaxScore}" : "N/A")}{subFiles}"
+            );
         }
 
         if (dryRun)
         {
             foreach (var action in plan.Actions.Where(a => a.Kind != SyncActionKind.Unchanged))
-                Console.WriteLine($"    [{action.Kind}] {action.TargetRelativePath} ({action.Reason})");
+                Console.WriteLine(
+                    $"    [{action.Kind}] {action.TargetRelativePath} ({action.Reason})"
+                );
         }
         else
         {
@@ -219,7 +285,9 @@ static async Task<int> RunSyncAsync(StiElmsClient client, string[] syncArgs)
         var result = await executor.ExecuteAsync(plan, options, localState, progress);
         if (!dryRun)
         {
-            Console.WriteLine($"  Done in {result.Duration.TotalSeconds:F1}s: +{result.Downloaded} new, ~{result.Updated} updated, >{result.Relocated} relocated, ={result.Unchanged} unchanged, !{result.Failed} failed");
+            Console.WriteLine(
+                $"  Done in {result.Duration.TotalSeconds:F1}s: +{result.Downloaded} new, ~{result.Updated} updated, >{result.Relocated} relocated, ={result.Unchanged} unchanged, !{result.Failed} failed"
+            );
             foreach (var err in result.Errors)
                 Console.Error.WriteLine($"    [ERR] {err}");
         }
@@ -246,15 +314,17 @@ static string? GetOptionValue(string[] args, string flag)
 
 static void PrintHelp()
 {
-    Console.WriteLine("""
-    ScholarFlow.Elms.Cli — STI eLMS Scraper & Sync Harness
+    Console.WriteLine(
+        """
+        ScholarFlow.Elms.Cli — STI eLMS Scraper & Sync Harness
 
-    Commands:
-      auth [--interactive]                   Verify/cache eLMS session (supports ELMS_USERNAME / ELMS_PASSWORD)
-      courses [--out <dir>] [--all]          List active academic courses (--all includes admin/completed/ignored)
-      ignore [list|add|remove] <val> [--out] Manage ignored course IDs or title patterns
-      open [url-or-path]                     Open authenticated standalone Chromium web-app window
-      inspect [url-or-path]                  Inspect authenticated DOM links/structure
-      sync [--out <dir>] [--course <id|name>] [--dry-run] [--force]
-    """);
+        Commands:
+          auth [--interactive]                   Verify/cache eLMS session (supports ELMS_USERNAME / ELMS_PASSWORD)
+          courses [--out <dir>] [--all]          List active academic courses (--all includes admin/completed/ignored)
+          ignore [list|add|remove] <val> [--out] Manage ignored course IDs or title patterns
+          open [url-or-path]                     Open authenticated standalone Chromium web-app window
+          inspect [url-or-path]                  Inspect authenticated DOM links/structure
+          sync [--out <dir>] [--course <id|name>] [--dry-run] [--force]
+        """
+    );
 }
