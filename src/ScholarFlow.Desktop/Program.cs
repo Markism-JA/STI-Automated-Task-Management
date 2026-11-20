@@ -9,13 +9,12 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        StartMinimized = args.Any(a => string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+        StartMinimized = args.Any(a =>
+            string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase)
+        );
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
-            .UsePlatformDetect()
-            .WithInterFont()
-            .LogToTrace();
+        AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();
 }

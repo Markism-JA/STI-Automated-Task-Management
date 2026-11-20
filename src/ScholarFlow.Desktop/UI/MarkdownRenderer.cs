@@ -19,7 +19,9 @@ namespace ScholarFlow.Desktop.UI;
 /// </summary>
 public static partial class MarkdownRenderer
 {
-    private static readonly FontFamily MonoFont = new("JetBrains Mono, Fira Code, Cascadia Code, DejaVu Sans Mono, monospace");
+    private static readonly FontFamily MonoFont = new(
+        "JetBrains Mono, Fira Code, Cascadia Code, DejaVu Sans Mono, monospace"
+    );
 
     [GeneratedRegex(@"^(\d+)\.\s+(.+)$", RegexOptions.Compiled)]
     private static partial Regex OrderedListRegex();
@@ -30,7 +32,10 @@ public static partial class MarkdownRenderer
     [GeneratedRegex(@"^[-*+]\s+(.+)$", RegexOptions.Compiled)]
     private static partial Regex BulletListRegex();
 
-    [GeneratedRegex(@"(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*\s][^*]*\*|_[^_\s][^_]*_)", RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*\s][^*]*\*|_[^_\s][^_]*_)",
+        RegexOptions.Compiled
+    )]
     private static partial Regex InlineTokenRegex();
 
     public static Control Render(string? markdown, Action<string>? onLinkClicked = null)
@@ -54,7 +59,14 @@ public static partial class MarkdownRenderer
             paragraphBuffer.Clear();
             if (!string.IsNullOrEmpty(joined))
             {
-                container.Children.Add(BuildFormattedTextBlock(joined, 12.5, ThemeService.Brush(ThemeService.TextPrimary), onLinkClicked));
+                container.Children.Add(
+                    BuildFormattedTextBlock(
+                        joined,
+                        12.5,
+                        ThemeService.Brush(ThemeService.TextPrimary),
+                        onLinkClicked
+                    )
+                );
             }
         }
 
@@ -108,7 +120,11 @@ public static partial class MarkdownRenderer
                 while (level < trimmed.Length && trimmed[level] == '#')
                     level++;
 
-                if (level is >= 1 and <= 6 && level < trimmed.Length && char.IsWhiteSpace(trimmed[level]))
+                if (
+                    level is >= 1 and <= 6
+                    && level < trimmed.Length
+                    && char.IsWhiteSpace(trimmed[level])
+                )
                 {
                     FlushParagraph();
                     var headingText = trimmed[(level + 1)..].Trim();
@@ -151,7 +167,13 @@ public static partial class MarkdownRenderer
             if (orderedMatch.Success)
             {
                 FlushParagraph();
-                container.Children.Add(BuildOrderedItem(orderedMatch.Groups[1].Value, orderedMatch.Groups[2].Value, onLinkClicked));
+                container.Children.Add(
+                    BuildOrderedItem(
+                        orderedMatch.Groups[1].Value,
+                        orderedMatch.Groups[2].Value,
+                        onLinkClicked
+                    )
+                );
                 continue;
             }
 
@@ -190,7 +212,7 @@ public static partial class MarkdownRenderer
             1 => 16.5,
             2 => 14.5,
             3 => 13.5,
-            _ => 12.5
+            _ => 12.5,
         };
 
         var tb = BuildFormattedTextBlock(
@@ -198,7 +220,8 @@ public static partial class MarkdownRenderer
             fontSize,
             ThemeService.Brush(ThemeService.TextPrimary),
             onLinkClicked,
-            defaultWeight: FontWeight.Bold);
+            defaultWeight: FontWeight.Bold
+        );
 
         if (level <= 2)
         {
@@ -206,11 +229,7 @@ public static partial class MarkdownRenderer
             {
                 Spacing = 4,
                 Margin = new Thickness(0, level == 1 ? 6 : 4, 0, 2),
-                Children =
-                {
-                    tb,
-                    UiBuilder.HairlineDivider()
-                }
+                Children = { tb, UiBuilder.HairlineDivider() },
             };
         }
 
@@ -218,7 +237,7 @@ public static partial class MarkdownRenderer
         return tb;
     }
 
-    private static Control BuildBlockquote(string text, Action<string>? onLinkClicked)
+    private static Border BuildBlockquote(string text, Action<string>? onLinkClicked)
     {
         return new Border
         {
@@ -227,17 +246,29 @@ public static partial class MarkdownRenderer
             BorderThickness = new Thickness(3, 0, 0, 0),
             CornerRadius = new CornerRadius(0, 5, 5, 0),
             Padding = new Thickness(10, 6),
-            Child = BuildFormattedTextBlock(text, 12, ThemeService.Brush(ThemeService.TextSecondary), onLinkClicked)
+            Child = BuildFormattedTextBlock(
+                text,
+                12,
+                ThemeService.Brush(ThemeService.TextSecondary),
+                onLinkClicked
+            ),
         };
     }
 
-    private static Control BuildChecklistItem(string text, bool isChecked, Action<string>? onLinkClicked)
+    private static Grid BuildChecklistItem(
+        string text,
+        bool isChecked,
+        Action<string>? onLinkClicked
+    )
     {
         var grid = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("20,*") };
         var icon = UiBuilder.Icon(
             isChecked ? MaterialIconKind.CheckboxMarked : MaterialIconKind.CheckboxBlankOutline,
             14.5,
-            isChecked ? ThemeService.Brush(ThemeService.SuccessFg) : ThemeService.Brush(ThemeService.TextSecondary));
+            isChecked
+                ? ThemeService.Brush(ThemeService.SuccessFg)
+                : ThemeService.Brush(ThemeService.TextSecondary)
+        );
         icon.VerticalAlignment = VerticalAlignment.Top;
         icon.Margin = new Thickness(0, 2, 0, 0);
         grid.Children.Add(icon);
@@ -245,8 +276,11 @@ public static partial class MarkdownRenderer
         var tb = BuildFormattedTextBlock(
             text,
             12.5,
-            isChecked ? ThemeService.Brush(ThemeService.TextSecondary) : ThemeService.Brush(ThemeService.TextPrimary),
-            onLinkClicked);
+            isChecked
+                ? ThemeService.Brush(ThemeService.TextSecondary)
+                : ThemeService.Brush(ThemeService.TextPrimary),
+            onLinkClicked
+        );
         if (isChecked)
             tb.TextDecorations = TextDecorations.Strikethrough;
 
@@ -255,45 +289,59 @@ public static partial class MarkdownRenderer
         return grid;
     }
 
-    private static Control BuildBulletItem(string text, Action<string>? onLinkClicked)
+    private static Grid BuildBulletItem(string text, Action<string>? onLinkClicked)
     {
         var grid = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("16,*") };
-        grid.Children.Add(new TextBlock
-        {
-            Text = "•",
-            FontSize = 13,
-            FontWeight = FontWeight.Bold,
-            Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(2, -1, 0, 0)
-        });
+        grid.Children.Add(
+            new TextBlock
+            {
+                Text = "•",
+                FontSize = 13,
+                FontWeight = FontWeight.Bold,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(2, -1, 0, 0),
+            }
+        );
 
-        var tb = BuildFormattedTextBlock(text, 12.5, ThemeService.Brush(ThemeService.TextPrimary), onLinkClicked);
+        var tb = BuildFormattedTextBlock(
+            text,
+            12.5,
+            ThemeService.Brush(ThemeService.TextPrimary),
+            onLinkClicked
+        );
         Grid.SetColumn(tb, 1);
         grid.Children.Add(tb);
         return grid;
     }
 
-    private static Control BuildOrderedItem(string number, string text, Action<string>? onLinkClicked)
+    private static Grid BuildOrderedItem(string number, string text, Action<string>? onLinkClicked)
     {
         var grid = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("22,*") };
-        grid.Children.Add(new TextBlock
-        {
-            Text = $"{number}.",
-            FontSize = 12,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 1, 0, 0)
-        });
+        grid.Children.Add(
+            new TextBlock
+            {
+                Text = $"{number}.",
+                FontSize = 12,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 1, 0, 0),
+            }
+        );
 
-        var tb = BuildFormattedTextBlock(text, 12.5, ThemeService.Brush(ThemeService.TextPrimary), onLinkClicked);
+        var tb = BuildFormattedTextBlock(
+            text,
+            12.5,
+            ThemeService.Brush(ThemeService.TextPrimary),
+            onLinkClicked
+        );
         Grid.SetColumn(tb, 1);
         grid.Children.Add(tb);
         return grid;
     }
 
-    private static Control BuildCodeBlock(string code)
+    private static Border BuildCodeBlock(string code)
     {
         return new Border
         {
@@ -308,8 +356,8 @@ public static partial class MarkdownRenderer
                 FontFamily = MonoFont,
                 FontSize = 11.5,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                TextWrapping = TextWrapping.Wrap
-            }
+                TextWrapping = TextWrapping.Wrap,
+            },
         };
     }
 
@@ -318,7 +366,8 @@ public static partial class MarkdownRenderer
         double fontSize,
         IBrush foreground,
         Action<string>? onLinkClicked,
-        FontWeight defaultWeight = FontWeight.Normal)
+        FontWeight defaultWeight = FontWeight.Normal
+    )
     {
         var tb = new TextBlock
         {
@@ -326,7 +375,7 @@ public static partial class MarkdownRenderer
             FontWeight = defaultWeight,
             Foreground = foreground,
             TextWrapping = TextWrapping.Wrap,
-            LineHeight = fontSize * 1.42
+            LineHeight = fontSize * 1.42,
         };
 
         var inlines = tb.Inlines ??= [];
@@ -340,8 +389,10 @@ public static partial class MarkdownRenderer
             }
 
             var token = m.Value;
-            if ((token.StartsWith("**") && token.EndsWith("**")) ||
-                (token.StartsWith("__") && token.EndsWith("__")))
+            if (
+                (token.StartsWith("**") && token.EndsWith("**"))
+                || (token.StartsWith("__") && token.EndsWith("__"))
+            )
             {
                 var inner = token[2..^2];
                 inlines.Add(new Run(inner) { FontWeight = FontWeight.Bold });
@@ -349,13 +400,15 @@ public static partial class MarkdownRenderer
             else if (token.StartsWith('`') && token.EndsWith('`'))
             {
                 var inner = token[1..^1];
-                inlines.Add(new Run(inner)
-                {
-                    FontFamily = MonoFont,
-                    FontSize = Math.Max(10.5, fontSize - 1),
-                    Background = ThemeService.Brush(ThemeService.BgElevated),
-                    Foreground = ThemeService.Brush(ThemeService.AccentPrimary)
-                });
+                inlines.Add(
+                    new Run(inner)
+                    {
+                        FontFamily = MonoFont,
+                        FontSize = Math.Max(10.5, fontSize - 1),
+                        Background = ThemeService.Brush(ThemeService.BgElevated),
+                        Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
+                    }
+                );
             }
             else if (token.StartsWith('[') && token.Contains("](") && token.EndsWith(')'))
             {
@@ -370,14 +423,14 @@ public static partial class MarkdownRenderer
                         Text = label,
                         FontSize = fontSize,
                         Foreground = ThemeService.Brush(ThemeService.PriorityP3Fg),
-                        TextDecorations = TextDecorations.Underline
+                        TextDecorations = TextDecorations.Underline,
                     },
                     Background = Brushes.Transparent,
                     BorderThickness = new Thickness(0),
                     Padding = new Thickness(0),
                     Margin = new Thickness(0, 0, 0, -2),
                     Cursor = new Cursor(StandardCursorType.Hand),
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
                 };
                 linkBtn.Click += (_, e) =>
                 {
@@ -387,10 +440,17 @@ public static partial class MarkdownRenderer
                     else
                         ExternalFileLauncher.OpenLocalFile(url);
                 };
-                inlines.Add(new InlineUIContainer(linkBtn) { BaselineAlignment = BaselineAlignment.Baseline });
+                inlines.Add(
+                    new InlineUIContainer(linkBtn)
+                    {
+                        BaselineAlignment = BaselineAlignment.Baseline,
+                    }
+                );
             }
-            else if ((token.StartsWith('*') && token.EndsWith('*')) ||
-                     (token.StartsWith('_') && token.EndsWith('_')))
+            else if (
+                (token.StartsWith('*') && token.EndsWith('*'))
+                || (token.StartsWith('_') && token.EndsWith('_'))
+            )
             {
                 var inner = token[1..^1];
                 inlines.Add(new Run(inner) { FontStyle = FontStyle.Italic });

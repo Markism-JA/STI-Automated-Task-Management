@@ -1,12 +1,8 @@
-using Avalonia.Media.Imaging;
-using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Quiz;
 using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class QuizStudioViewModel
 {
@@ -152,12 +148,15 @@ public sealed partial class QuizStudioViewModel
         IsBuildingPrompt = true;
         try
         {
-            var (prompt, pageCount) = await Task.Run(() =>
-            {
-                token.ThrowIfCancellationRequested();
-                var text = _llmService.BuildPromptForManualCopy(req, out var pages);
-                return (text, pages.Count);
-            }, token);
+            var (prompt, pageCount) = await Task.Run(
+                () =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    var text = _llmService.BuildPromptForManualCopy(req, out var pages);
+                    return (text, pages.Count);
+                },
+                token
+            );
 
             if (token.IsCancellationRequested)
                 return;
@@ -165,7 +164,8 @@ public sealed partial class QuizStudioViewModel
             GeneratedPromptPreview = prompt;
             if (updateStatus)
             {
-                StatusMessage = $"Live grounded prompt ready across {pageCount} PDF page(s) ({req.QuestionCount} items).";
+                StatusMessage =
+                    $"Live grounded prompt ready across {pageCount} PDF page(s) ({req.QuestionCount} items).";
                 IsStatusError = false;
             }
         }
@@ -186,7 +186,7 @@ public sealed partial class QuizStudioViewModel
             if (_promptBuildCts == cts)
             {
                 IsBuildingPrompt = false;
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
+                Avalonia.Threading.Dispatcher.UIThread.Post(_mainVm.RequestUiRefresh);
             }
         }
     }
@@ -195,7 +195,9 @@ public sealed partial class QuizStudioViewModel
     {
         AppendTargetQuizId = quiz.Id;
         AppendTargetQuizTitle = quiz.Title;
-        var course = _mainVm.Courses.FirstOrDefault(c => string.Equals(c.FolderName, quiz.CourseFolder, StringComparison.OrdinalIgnoreCase));
+        var course = _mainVm.Courses.FirstOrDefault(c =>
+            string.Equals(c.FolderName, quiz.CourseFolder, StringComparison.OrdinalIgnoreCase)
+        );
         if (course is not null)
             SelectedCourse = course;
         RebuildAvailablePdfsForCourse(quiz.SourcePdfPath);
@@ -203,7 +205,8 @@ public sealed partial class QuizStudioViewModel
             SelectedTerm = quiz.Term;
         RecomputeScopePreview();
         ActiveSubTab = QuizStudioSubTab.Builder;
-        StatusMessage = $"Appending new non-duplicate questions to '{quiz.Title}'. Configure count/types and generate.";
+        StatusMessage =
+            $"Appending new non-duplicate questions to '{quiz.Title}'. Configure count/types and generate.";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
@@ -216,13 +219,15 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-
     public void SetPreset(QuizPresetMode preset)
     {
         SelectedPreset = preset;
         if (preset != QuizPresetMode.Custom)
         {
-            KindAllocations = QuizGenerationRequest.GetDefaultAllocationsForPreset(preset, AllocationMode);
+            KindAllocations = QuizGenerationRequest.GetDefaultAllocationsForPreset(
+                preset,
+                AllocationMode
+            );
             if (AllocationMode == QuestionAllocationMode.ExactCounts)
                 QuestionCount = Math.Clamp(KindAllocations.Values.Sum(), 1, 150);
         }
@@ -252,7 +257,8 @@ public sealed partial class QuizStudioViewModel
                 settings.AiModelName = "anthropic/claude-3.5-sonnet";
                 break;
             case "GeminiAiStudio":
-                settings.AiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+                settings.AiBaseUrl =
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
                 settings.AiModelName = "gemini-2.5-flash";
                 break;
             case "DeepSeek":
@@ -299,16 +305,24 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-    public async Task SaveAsNewAiProfileAsync(string profileName, string baseUrl, string modelName, string? apiKey)
+    public async Task SaveAsNewAiProfileAsync(
+        string profileName,
+        string baseUrl,
+        string modelName,
+        string? apiKey
+    )
     {
         var settings = _mainVm.Settings;
         var cleanUrl = string.IsNullOrWhiteSpace(baseUrl) ? settings.AiBaseUrl : baseUrl.Trim();
-        var cleanModel = string.IsNullOrWhiteSpace(modelName) ? settings.AiModelName : modelName.Trim();
+        var cleanModel = string.IsNullOrWhiteSpace(modelName)
+            ? settings.AiModelName
+            : modelName.Trim();
         var cleanKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
         var cleanName = string.IsNullOrWhiteSpace(profileName) ? cleanModel : profileName.Trim();
 
         var existing = settings.SavedAiProfiles.FirstOrDefault(p =>
-            p.Name.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+            p.Name.Equals(cleanName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (existing is not null)
         {
@@ -324,7 +338,7 @@ public sealed partial class QuizStudioViewModel
                 Name = cleanName,
                 BaseUrl = cleanUrl,
                 ModelName = cleanModel,
-                ApiKey = cleanKey
+                ApiKey = cleanKey,
             };
             settings.SavedAiProfiles.Add(created);
             settings.ActiveAiProfileId = created.Id;
@@ -344,10 +358,18 @@ public sealed partial class QuizStudioViewModel
     public async Task DeleteSavedAiProfileAsync(string profileId)
     {
         var settings = _mainVm.Settings;
-        var removed = settings.SavedAiProfiles.RemoveAll(p => string.Equals(p.Id, profileId, StringComparison.OrdinalIgnoreCase));
+        var removed = settings.SavedAiProfiles.RemoveAll(p =>
+            string.Equals(p.Id, profileId, StringComparison.OrdinalIgnoreCase)
+        );
         if (removed > 0)
         {
-            if (string.Equals(settings.ActiveAiProfileId, profileId, StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(
+                    settings.ActiveAiProfileId,
+                    profileId,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
                 settings.ActiveAiProfileId = null;
 
             await AppSettingsStore.SaveAsync(settings);
@@ -368,7 +390,9 @@ public sealed partial class QuizStudioViewModel
 
         if (!string.IsNullOrWhiteSpace(settings.ActiveAiProfileId))
         {
-            var active = settings.SavedAiProfiles.FirstOrDefault(p => p.Id == settings.ActiveAiProfileId);
+            var active = settings.SavedAiProfiles.FirstOrDefault(p =>
+                p.Id == settings.ActiveAiProfileId
+            );
             if (active is not null)
             {
                 active.BaseUrl = settings.AiBaseUrl;
@@ -410,7 +434,14 @@ public sealed partial class QuizStudioViewModel
             return;
 
         var req = BuildCurrentRequest();
-        if (forceOffline || string.Equals(_mainVm.Settings.AiProviderPreset, "OfflineSmart", StringComparison.OrdinalIgnoreCase))
+        if (
+            forceOffline
+            || string.Equals(
+                _mainVm.Settings.AiProviderPreset,
+                "OfflineSmart",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
             req.UseOfflineHeuristicFallback = true;
 
         if (string.IsNullOrWhiteSpace(req.SourcePdfPath) || !File.Exists(req.SourcePdfPath))
@@ -436,7 +467,8 @@ public sealed partial class QuizStudioViewModel
             AppendTargetQuizTitle = null;
             await RefreshAsync(SelectedCourse, SelectedPdfPath);
             StartQuizSession(session);
-            StatusMessage = $"Generated '{session.Title}' ({session.Questions.Count} grounded questions).";
+            StatusMessage =
+                $"Generated '{session.Title}' ({session.Questions.Count} grounded questions).";
         }
         catch (Exception ex)
         {
@@ -476,7 +508,8 @@ public sealed partial class QuizStudioViewModel
             ManualJsonInput = string.Empty;
             await RefreshAsync(SelectedCourse, SelectedPdfPath);
             StartQuizSession(session);
-            StatusMessage = $"Imported and PDF-grounded {session.Questions.Count} questions from Web AI JSON.";
+            StatusMessage =
+                $"Imported and PDF-grounded {session.Questions.Count} questions from Web AI JSON.";
             IsStatusError = false;
         }
         catch (Exception ex)
@@ -492,7 +525,6 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-
     private QuizGenerationRequest BuildCurrentRequest()
     {
         var course = SelectedCourse ?? _mainVm.Courses.FirstOrDefault(c => !c.IsArchived);
@@ -501,7 +533,9 @@ public sealed partial class QuizStudioViewModel
         var excludes = new List<string>();
         if (!string.IsNullOrWhiteSpace(AppendTargetQuizId))
         {
-            var targetQuiz = SavedQuizzes.FirstOrDefault(q => string.Equals(q.Id, AppendTargetQuizId, StringComparison.OrdinalIgnoreCase));
+            var targetQuiz = SavedQuizzes.FirstOrDefault(q =>
+                string.Equals(q.Id, AppendTargetQuizId, StringComparison.OrdinalIgnoreCase)
+            );
             if (targetQuiz is not null)
                 excludes.AddRange(targetQuiz.Questions.Select(q => q.Prompt));
         }
@@ -527,9 +561,13 @@ public sealed partial class QuizStudioViewModel
             ProviderBaseUrl = settings.AiBaseUrl,
             ApiKey = settings.AiApiKey,
             ModelName = settings.AiModelName,
-            UseOfflineHeuristicFallback = BuilderOutputMode == QuizBuilderOutputMode.OfflineSmart ||
-                                          string.Equals(settings.AiProviderPreset, "OfflineSmart", StringComparison.OrdinalIgnoreCase)
+            UseOfflineHeuristicFallback =
+                BuilderOutputMode == QuizBuilderOutputMode.OfflineSmart
+                || string.Equals(
+                    settings.AiProviderPreset,
+                    "OfflineSmart",
+                    StringComparison.OrdinalIgnoreCase
+                ),
         };
     }
-
 }

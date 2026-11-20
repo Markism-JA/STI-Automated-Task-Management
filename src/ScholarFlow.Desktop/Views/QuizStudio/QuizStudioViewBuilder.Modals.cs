@@ -1,10 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -13,7 +11,7 @@ namespace ScholarFlow.Desktop.Views;
 
 public static partial class QuizStudioViewBuilder
 {
-    private static Control BuildAiSettingsCard(MainWindowViewModel vm, QuizStudioViewModel studio)
+    private static Border BuildAiSettingsCard(MainWindowViewModel vm, QuizStudioViewModel studio)
     {
         var settings = vm.Settings;
         var cardStack = new StackPanel { Spacing = 8 };
@@ -25,11 +23,9 @@ public static partial class QuizStudioViewBuilder
         var presetRow = new WrapPanel { Orientation = Orientation.Horizontal };
         void AddProviderPreset(string id, string label, MaterialIconKind icon)
         {
-            bool active = string.Equals(
-                settings.AiProviderPreset,
-                id,
-                StringComparison.OrdinalIgnoreCase
-            ) && string.IsNullOrWhiteSpace(settings.ActiveAiProfileId);
+            bool active =
+                string.Equals(settings.AiProviderPreset, id, StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(settings.ActiveAiProfileId);
             var btn = UiBuilder.GhostButton(
                 label,
                 icon,
@@ -41,13 +37,21 @@ public static partial class QuizStudioViewBuilder
         }
 
         AddProviderPreset("OpenAI", "OpenAI", MaterialIconKind.CreationOutline);
-        AddProviderPreset("OpenRouter", "OpenRouter (Claude / Multi)", MaterialIconKind.SwapHorizontal);
+        AddProviderPreset(
+            "OpenRouter",
+            "OpenRouter (Claude / Multi)",
+            MaterialIconKind.SwapHorizontal
+        );
         AddProviderPreset("GeminiAiStudio", "Google AI Studio", MaterialIconKind.AutoFix);
         AddProviderPreset("DeepSeek", "DeepSeek", MaterialIconKind.Brain);
         AddProviderPreset("Groq", "Groq", MaterialIconKind.LightningBoltOutline);
         AddProviderPreset("OllamaLocal", "Ollama (Local)", MaterialIconKind.ServerNetwork);
         AddProviderPreset("LmStudio", "LM Studio / Custom", MaterialIconKind.DesktopClassic);
-        AddProviderPreset("OfflineSmart", "Offline PDF Analyzer", MaterialIconKind.FileSearchOutline);
+        AddProviderPreset(
+            "OfflineSmart",
+            "Offline PDF Analyzer",
+            MaterialIconKind.FileSearchOutline
+        );
         cardStack.Children.Add(presetRow);
 
         // Saved Custom Model Profiles
@@ -57,9 +61,17 @@ public static partial class QuizStudioViewBuilder
             foreach (var prof in settings.SavedAiProfiles)
             {
                 var capturedProf = prof;
-                bool isActiveProf = string.Equals(settings.ActiveAiProfileId, prof.Id, StringComparison.OrdinalIgnoreCase);
+                bool isActiveProf = string.Equals(
+                    settings.ActiveAiProfileId,
+                    prof.Id,
+                    StringComparison.OrdinalIgnoreCase
+                );
 
-                var chipStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                var chipStack = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 4,
+                };
                 var selectBtn = UiBuilder.GhostButton(
                     $"{prof.Name} ({prof.ModelName})",
                     isActiveProf ? MaterialIconKind.Check : MaterialIconKind.RobotOutline,
@@ -88,11 +100,7 @@ public static partial class QuizStudioViewBuilder
             ColumnSpacing = 6,
         };
 
-        var profileNameBox = new TextBox
-        {
-            Watermark = "Profile name (optional)",
-            FontSize = 12,
-        };
+        var profileNameBox = new TextBox { Watermark = "Profile name (optional)", FontSize = 12 };
         fieldsGrid.Children.Add(profileNameBox);
 
         var urlBox = new TextBox
@@ -154,11 +162,13 @@ public static partial class QuizStudioViewBuilder
         return UiBuilder.Card(cardStack, padding: new Thickness(12, 10));
     }
 
-    private static Control BuildManualJsonBridgeCard(QuizStudioViewModel studio)
+    private static Border BuildManualJsonBridgeCard(QuizStudioViewModel studio)
     {
         var cardStack = new StackPanel { Spacing = 8 };
         cardStack.Children.Add(
-            UiBuilder.SectionHeader("Universal Web AI JSON Bridge (ChatGPT, Claude, Gemini, DeepSeek — Zero API Quota)")
+            UiBuilder.SectionHeader(
+                "Universal Web AI JSON Bridge (ChatGPT, Claude, Gemini, DeepSeek — Zero API Quota)"
+            )
         );
 
         var split = new Grid
@@ -198,7 +208,8 @@ public static partial class QuizStudioViewBuilder
 
         var jsonInputBox = new TextBox
         {
-            Watermark = "Paste the JSON response from any AI chat (ChatGPT, Claude, Gemini, DeepSeek...) here...",
+            Watermark =
+                "Paste the JSON response from any AI chat (ChatGPT, Claude, Gemini, DeepSeek...) here...",
             AcceptsReturn = true,
             MinHeight = 125,
             MaxHeight = 220,
@@ -224,5 +235,4 @@ public static partial class QuizStudioViewBuilder
     // =========================================================================
     // 2. INTERACTIVE QUESTION RUNNER & GROUNDED PDF EVIDENCE VIEW
     // =========================================================================
-
 }

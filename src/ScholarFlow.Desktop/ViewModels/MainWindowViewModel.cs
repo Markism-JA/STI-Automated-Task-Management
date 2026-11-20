@@ -1,6 +1,4 @@
 using Avalonia.Threading;
-using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Services;
@@ -9,7 +7,6 @@ using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Services;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Elms.Client;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
 
@@ -19,7 +16,7 @@ public enum WorkspaceTabMode
     Calendar,
     CourseWorkspace,
     PdfReader,
-    QuizStudio
+    QuizStudio,
 }
 
 public enum TaskGroupingMode
@@ -28,7 +25,7 @@ public enum TaskGroupingMode
     Term,
     DueDate,
     Priority,
-    Course
+    Course,
 }
 
 public enum UiChangeKind
@@ -39,7 +36,7 @@ public enum UiChangeKind
     SearchOrTaskList,
     StatusOnly,
     NotificationsOnly,
-    OverlayOnly
+    OverlayOnly,
 }
 
 public enum SearchResultKind
@@ -47,7 +44,7 @@ public enum SearchResultKind
     Course,
     Task,
     PdfDocument,
-    Quiz
+    Quiz,
 }
 
 public sealed record SearchResultItem(
@@ -58,7 +55,8 @@ public sealed record SearchResultItem(
     TaskItem? Task = null,
     BasinCourseEntry? Course = null,
     string? PdfPath = null,
-    Core.Quiz.QuizSessionRecord? Quiz = null);
+    Core.Quiz.QuizSessionRecord? Quiz = null
+);
 
 /// <summary>
 /// Central application ViewModel coordinating Basin state, Todoist smart views, Calendar,
@@ -118,10 +116,12 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public bool IsSettingsModalOpen { get; private set; }
     public bool IsOnboardingOpen { get; private set; }
     public bool IsAddCourseModalOpen { get; private set; }
-    public string OnboardingVaultPath { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        "Documents",
-        "ScholarFlow-Basin");
+    public string OnboardingVaultPath { get; set; } =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Documents",
+            "ScholarFlow-Basin"
+        );
 
     public bool IsSyncing { get; private set; }
     public string StatusText { get; private set; } = "Ready";
@@ -140,7 +140,11 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public MainWindowViewModel()
     {
         _legacyImporter = new LegacyImporter(_basinService);
-        _syncService = new ElmsBasinSyncService(_elmsClient, _basinService, pdfService: _pdfService);
+        _syncService = new ElmsBasinSyncService(
+            _elmsClient,
+            _basinService,
+            pdfService: _pdfService
+        );
         _pollingService = new ElmsPollingService(_syncService);
         _pollingService.NotificationEmitted += OnPollingNotification;
         QuizStudio = new QuizStudioViewModel(this);
@@ -155,12 +159,15 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Documents",
             "School-Files",
-            "YR4_01");
+            "YR4_01"
+        );
 
-        if (!Settings.HasCompletedOnboarding &&
-            Settings.KnownBasins.Count == 0 &&
-            string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath) &&
-            !Directory.Exists(defaultSchoolFiles))
+        if (
+            !Settings.HasCompletedOnboarding
+            && Settings.KnownBasins.Count == 0
+            && string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath)
+            && !Directory.Exists(defaultSchoolFiles)
+        )
         {
             IsOnboardingOpen = true;
             NotifyStateChanged(UiChangeKind.OverlayOnly);
@@ -173,15 +180,15 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
             await AppSettingsStore.SaveAsync(Settings);
         }
 
-        var initialBasin = !string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath) && Directory.Exists(Settings.LastOpenedBasinPath)
-            ? Settings.LastOpenedBasinPath
-            : Directory.Exists(defaultSchoolFiles)
-                ? defaultSchoolFiles
-                : OnboardingVaultPath;
+        var initialBasin =
+            !string.IsNullOrWhiteSpace(Settings.LastOpenedBasinPath)
+            && Directory.Exists(Settings.LastOpenedBasinPath)
+                ? Settings.LastOpenedBasinPath
+            : Directory.Exists(defaultSchoolFiles) ? defaultSchoolFiles
+            : OnboardingVaultPath;
 
         await OpenBasinAsync(initialBasin);
     }
-
 
     public async Task OpenBasinAsync(string basinPath)
     {
@@ -193,21 +200,33 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
 
         // If courses.json is empty and legacy subdirectories exist, run non-destructive legacy import automatically
         var existingCourses = await _basinService.LoadCoursesAsync(BasinRoot);
-        if (existingCourses.Count == 0 && Directory.GetDirectories(BasinRoot).Any(d => !Path.GetFileName(d).StartsWith('.')))
+        if (
+            existingCourses.Count == 0
+            && Directory.GetDirectories(BasinRoot).Any(d => !Path.GetFileName(d).StartsWith('.'))
+        )
         {
             var legacyYaml = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "Downloads",
                 "Ongoing",
-                "metadata.yaml");
+                "metadata.yaml"
+            );
             var summary = await _legacyImporter.ImportAsync(BasinRoot, legacyYaml);
-            StatusText = $"Imported {summary.CoursesImported} courses & {summary.OngoingTasksImported} tasks from Basin";
+            StatusText =
+                $"Imported {summary.CoursesImported} courses & {summary.OngoingTasksImported} tasks from Basin";
         }
 
         Settings.LastOpenedBasinPath = BasinRoot;
-        if (!Settings.KnownBasins.Any(b => b.FilePath.Equals(BasinRoot, StringComparison.OrdinalIgnoreCase)))
+        if (
+            !Settings.KnownBasins.Any(b =>
+                b.FilePath.Equals(BasinRoot, StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
-            Settings.KnownBasins.Insert(0, new KnownBasinEntry { Name = BasinConfig.Name, FilePath = BasinRoot });
+            Settings.KnownBasins.Insert(
+                0,
+                new KnownBasinEntry { Name = BasinConfig.Name, FilePath = BasinRoot }
+            );
         }
         await AppSettingsStore.SaveAsync(Settings);
 
@@ -233,14 +252,20 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
         {
             Courses = await _basinService.LoadCoursesAsync(BasinRoot);
             AllTasks = await _basinService.LoadAllTasksAsync(BasinRoot);
-            AllKnownLabels = EnumerateAllTaskNodes(AllTasks)
-                .SelectMany(t => t.Labels)
-                .Where(l => !string.IsNullOrWhiteSpace(l))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(BasinRoot, Courses, AllTasks);
-            Calendar.UpdateTasks(EnumerateAllTaskNodes(AllTasks).ToList());
+            AllKnownLabels =
+            [
+                .. EnumerateAllTaskNodes(AllTasks)
+                    .SelectMany(t => t.Labels)
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(l => l, StringComparer.OrdinalIgnoreCase),
+            ];
+            UnregisteredFiles = TaskQueryService.FindUnregisteredOngoingFiles(
+                BasinRoot,
+                Courses,
+                AllTasks
+            );
+            Calendar.UpdateTasks([.. EnumerateAllTaskNodes(AllTasks)]);
             await QuizStudio.RefreshAsync();
 
             RecomputeVisibleTasks();
@@ -262,7 +287,6 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
                 yield return c;
         }
     }
-
 
     private void NotifyStateChanged(UiChangeKind kind = UiChangeKind.FullLayout)
     {

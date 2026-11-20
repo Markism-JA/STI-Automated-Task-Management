@@ -134,22 +134,26 @@ public static class ThemeService
 
     public static IBrush Brush(string key)
     {
-        if (Application.Current?.Resources.TryGetResource(key, null, out var val) == true && val is IBrush b)
+        if (
+            Application.Current?.Resources.TryGetResource(key, null, out var val) == true
+            && val is IBrush b
+        )
             return b;
 
         return Brushes.Transparent;
     }
 
-    public static (IBrush Fg, IBrush Bg) GetPriorityBrushes(TaskPriority priority) => priority switch
-    {
-        TaskPriority.P1 => (Brush(PriorityP1Fg), Brush(PriorityP1Bg)),
-        TaskPriority.P2 => (Brush(PriorityP2Fg), Brush(PriorityP2Bg)),
-        TaskPriority.P3 => (Brush(PriorityP3Fg), Brush(PriorityP3Bg)),
-        _ => (Brush(PriorityP4Fg), Brush(PriorityP4Bg))
-    };
+    public static (IBrush Fg, IBrush Bg) GetPriorityBrushes(TaskPriority priority) =>
+        priority switch
+        {
+            TaskPriority.P1 => (Brush(PriorityP1Fg), Brush(PriorityP1Bg)),
+            TaskPriority.P2 => (Brush(PriorityP2Fg), Brush(PriorityP2Bg)),
+            TaskPriority.P3 => (Brush(PriorityP3Fg), Brush(PriorityP3Bg)),
+            _ => (Brush(PriorityP4Fg), Brush(PriorityP4Bg)),
+        };
 
     public static IBrush PriorityBrush(TaskPriority priority) => GetPriorityBrushes(priority).Fg;
 
-    private static void SetBrush(IResourceDictionary dict, string key, string hex)
-        => dict[key] = new SolidColorBrush(Color.Parse(hex));
+    private static void SetBrush(IResourceDictionary dict, string key, string hex) =>
+        dict[key] = new SolidColorBrush(Color.Parse(hex));
 }

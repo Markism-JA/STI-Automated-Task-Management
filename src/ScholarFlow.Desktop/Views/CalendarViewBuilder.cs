@@ -66,31 +66,18 @@ public static class CalendarViewBuilder
             UiBuilder.ActionButton(
                 "",
                 MaterialIconKind.ChevronLeft,
-                () =>
-                {
-                    cal.PreviousMonth();
-                },
+                cal.PreviousMonth,
                 tooltip: "Previous Month ([)"
             )
         );
         navBtns.Children.Add(
-            UiBuilder.ActionButton(
-                "Today",
-                MaterialIconKind.CalendarToday,
-                () =>
-                {
-                    cal.GoToToday();
-                }
-            )
+            UiBuilder.ActionButton("Today", MaterialIconKind.CalendarToday, cal.GoToToday)
         );
         navBtns.Children.Add(
             UiBuilder.ActionButton(
                 "",
                 MaterialIconKind.ChevronRight,
-                () =>
-                {
-                    cal.NextMonth();
-                },
+                cal.NextMonth,
                 tooltip: "Next Month (])"
             )
         );
@@ -133,7 +120,7 @@ public static class CalendarViewBuilder
         return root;
     }
 
-    private static Control BuildDayCell(
+    private static Button BuildDayCell(
         MainWindowViewModel vm,
         CalendarViewModel cal,
         CalendarDayCell cell
@@ -194,9 +181,7 @@ public static class CalendarViewBuilder
                 )
                 : ThemeService.GetPriorityBrushes(t.Priority);
 
-            var pillLabel = t.DueTime.HasValue
-                ? $"{t.DueTime.Value:h:mm tt} · {t.Title}"
-                : t.Title;
+            var pillLabel = t.DueTime.HasValue ? $"{t.DueTime.Value:h:mm tt} · {t.Title}" : t.Title;
 
             var pillBtn = new Button
             {
@@ -214,7 +199,7 @@ public static class CalendarViewBuilder
                 Padding = new Thickness(4, 1.5),
                 Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left
+                HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             pillBtn.Click += (_, e) =>
             {
@@ -271,7 +256,7 @@ public static class CalendarViewBuilder
         return btn;
     }
 
-    private static Control BuildDayAgenda(MainWindowViewModel vm, CalendarViewModel cal)
+    private static Border BuildDayAgenda(MainWindowViewModel vm, CalendarViewModel cal)
     {
         var panel = new Grid
         {
@@ -359,41 +344,56 @@ public static class CalendarViewBuilder
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 6,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
                 };
                 if (!string.IsNullOrWhiteSpace(task.PrimaryPdfFile))
                 {
-                    rightBadges.Children.Add(UiBuilder.GhostButton(
-                        "View PDF",
-                        MaterialIconKind.FilePdfBox,
-                        () => vm.OpenTaskFile(task, task.PrimaryPdfFile!)));
+                    rightBadges.Children.Add(
+                        UiBuilder.GhostButton(
+                            "View PDF",
+                            MaterialIconKind.FilePdfBox,
+                            () => vm.OpenTaskFile(task, task.PrimaryPdfFile)
+                        )
+                    );
                 }
                 if (task.DueTime.HasValue)
                 {
-                    rightBadges.Children.Add(UiBuilder.Pill(
-                        task.DueTime.Value.ToString("h:mm tt"),
-                        ThemeService.Brush(ThemeService.TextPrimary),
-                        ThemeService.Brush(ThemeService.BgBase)));
+                    rightBadges.Children.Add(
+                        UiBuilder.Pill(
+                            task.DueTime.Value.ToString("h:mm tt"),
+                            ThemeService.Brush(ThemeService.TextPrimary),
+                            ThemeService.Brush(ThemeService.BgBase)
+                        )
+                    );
                 }
                 if (!string.IsNullOrWhiteSpace(task.Term))
                 {
-                    rightBadges.Children.Add(UiBuilder.Pill(
-                        task.Term,
-                        ThemeService.Brush(ThemeService.TextSecondary),
-                        ThemeService.Brush(ThemeService.BgElevated)));
+                    rightBadges.Children.Add(
+                        UiBuilder.Pill(
+                            task.Term,
+                            ThemeService.Brush(ThemeService.TextSecondary),
+                            ThemeService.Brush(ThemeService.BgElevated)
+                        )
+                    );
                 }
                 if (!string.IsNullOrWhiteSpace(task.CourseAlias))
                 {
-                    rightBadges.Children.Add(UiBuilder.Pill(
-                        $"#{task.CourseAlias}",
-                        ThemeService.Brush(ThemeService.AccentPrimary),
-                        ThemeService.Brush(ThemeService.AccentSoftBg)));
+                    rightBadges.Children.Add(
+                        UiBuilder.Pill(
+                            $"#{task.CourseAlias}",
+                            ThemeService.Brush(ThemeService.AccentPrimary),
+                            ThemeService.Brush(ThemeService.AccentSoftBg)
+                        )
+                    );
                 }
                 rightBadges.Children.Add(UiBuilder.Pill($"P{(int)task.Priority}", pFg, pBg));
-                rightBadges.Children.Add(UiBuilder.GhostButton(
-                    "Inspect",
-                    MaterialIconKind.TuneVariant,
-                    () => vm.SelectTask(task, openInspector: true)));
+                rightBadges.Children.Add(
+                    UiBuilder.GhostButton(
+                        "Inspect",
+                        MaterialIconKind.TuneVariant,
+                        () => vm.SelectTask(task, openInspector: true)
+                    )
+                );
 
                 Grid.SetColumn(rightBadges, 2);
                 Grid.SetColumnSpan(rightBadges, 2);

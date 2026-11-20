@@ -1,18 +1,7 @@
-using Avalonia.Threading;
-using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
-using ScholarFlow.Core.Services;
-using ScholarFlow.Core.Sync;
 using ScholarFlow.Core.Tasks;
-using ScholarFlow.Desktop.Services;
-using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Client;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class MainWindowViewModel
 {
@@ -31,12 +20,21 @@ public sealed partial class MainWindowViewModel
         var normalized = TaskItem.NormalizeTerm(term);
         if (ActiveMode == WorkspaceTabMode.CourseWorkspace)
         {
-            ActiveTermFilter = string.Equals(ActiveTermFilter, normalized, StringComparison.OrdinalIgnoreCase) ? null : normalized;
+            ActiveTermFilter = string.Equals(
+                ActiveTermFilter,
+                normalized,
+                StringComparison.OrdinalIgnoreCase
+            )
+                ? null
+                : normalized;
         }
         else
         {
             ActiveMode = WorkspaceTabMode.TaskList;
-            if (normalized is null || string.Equals(ActiveTermFilter, normalized, StringComparison.OrdinalIgnoreCase))
+            if (
+                normalized is null
+                || string.Equals(ActiveTermFilter, normalized, StringComparison.OrdinalIgnoreCase)
+            )
             {
                 ActiveTermFilter = null;
                 if (ActiveSmartView == SmartViewKind.Term)
@@ -74,13 +72,17 @@ public sealed partial class MainWindowViewModel
     {
         ActiveMode = WorkspaceTabMode.Calendar;
         ActiveCourse = null;
-        Calendar.UpdateTasks(EnumerateAllTaskNodes(AllTasks).ToList());
+        Calendar.UpdateTasks([.. EnumerateAllTaskNodes(AllTasks)]);
         NotifyStateChanged();
     }
 
     public void SetCompletedCourseFilter(string? courseFolder)
     {
-        CompletedCourseFilter = string.Equals(CompletedCourseFilter, courseFolder, StringComparison.OrdinalIgnoreCase)
+        CompletedCourseFilter = string.Equals(
+            CompletedCourseFilter,
+            courseFolder,
+            StringComparison.OrdinalIgnoreCase
+        )
             ? null
             : courseFolder;
         RecomputeVisibleTasks();
@@ -109,7 +111,8 @@ public sealed partial class MainWindowViewModel
     public async Task SelectQuizStudioViewAsync(
         BasinCourseEntry? course = null,
         string? pdfPath = null,
-        int? focusPage = null)
+        int? focusPage = null
+    )
     {
         ActiveMode = WorkspaceTabMode.QuizStudio;
         if (course is not null)
@@ -122,9 +125,11 @@ public sealed partial class MainWindowViewModel
     {
         var currentPdf = PdfReader.CurrentFilePath;
         var currentPage = PdfReader.CurrentPage;
-        var matchedCourse = Courses.FirstOrDefault(c =>
-            !string.IsNullOrWhiteSpace(currentPdf) &&
-            currentPdf.Contains(c.FolderName, StringComparison.OrdinalIgnoreCase)) ?? ActiveCourse;
+        var matchedCourse =
+            Courses.FirstOrDefault(c =>
+                !string.IsNullOrWhiteSpace(currentPdf)
+                && currentPdf.Contains(c.FolderName, StringComparison.OrdinalIgnoreCase)
+            ) ?? ActiveCourse;
 
         _ = SelectQuizStudioViewAsync(matchedCourse, currentPdf, currentPage);
     }
@@ -132,14 +137,21 @@ public sealed partial class MainWindowViewModel
     public void OpenPdfWithQuizEvidence(
         string pdfFullPath,
         int pageNumber,
-        IReadOnlyList<ScholarFlow.Core.Quiz.NormalizedHighlightRect> highlights,
+        IReadOnlyList<Core.Quiz.NormalizedHighlightRect> highlights,
         string? verbatimQuote,
-        string? questionPrompt)
+        string? questionPrompt
+    )
     {
         PdfReturnMode = WorkspaceTabMode.QuizStudio;
         PdfReturnTask = null;
         PdfOpenedFromQuiz = true;
-        if (!string.Equals(PdfReader.CurrentFilePath, pdfFullPath, StringComparison.OrdinalIgnoreCase))
+        if (
+            !string.Equals(
+                PdfReader.CurrentFilePath,
+                pdfFullPath,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
             PdfReader.LoadPdf(pdfFullPath);
         PdfReader.SetEvidenceHighlight(pageNumber, highlights, verbatimQuote, questionPrompt);
         ActiveMode = WorkspaceTabMode.PdfReader;
@@ -171,7 +183,10 @@ public sealed partial class MainWindowViewModel
         PdfReturnTask = null;
         if (returnTask is not null)
         {
-            ActiveMode = PdfReturnMode == WorkspaceTabMode.PdfReader ? WorkspaceTabMode.TaskList : PdfReturnMode;
+            ActiveMode =
+                PdfReturnMode == WorkspaceTabMode.PdfReader
+                    ? WorkspaceTabMode.TaskList
+                    : PdfReturnMode;
             SelectTask(returnTask, openInspector: true);
             return;
         }
@@ -385,5 +400,4 @@ public sealed partial class MainWindowViewModel
 
         SelectTask(toEnd ? VisibleTasks[^1] : VisibleTasks[0]);
     }
-
 }

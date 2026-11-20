@@ -10,7 +10,8 @@ public sealed record CalendarDayCell(
     bool IsSelected,
     IReadOnlyList<TaskItem> Tasks,
     int TotalUrgency,
-    TaskPriority? HighestPriority);
+    TaskPriority? HighestPriority
+);
 
 /// <summary>
 /// Manages the 42-cell Month Grid and Selected-Day Agenda for the Calendar view.
@@ -79,10 +80,13 @@ public sealed class CalendarViewModel
             .GroupBy(t => t.DueDate!.Value)
             .ToDictionary(
                 g => g.Key,
-                g => (IReadOnlyList<TaskItem>)g
-                    .OrderBy(t => t.IsCompleted)
-                    .ThenByDescending(t => UrgencyCalculator.CalculateScore(t, today))
-                    .ToList());
+                g =>
+                    (IReadOnlyList<TaskItem>)
+                        [
+                            .. g.OrderBy(t => t.IsCompleted)
+                                .ThenByDescending(t => UrgencyCalculator.CalculateScore(t, today)),
+                        ]
+            );
 
         var cells = new List<CalendarDayCell>(42);
         for (int i = 0; i < 42; i++)
@@ -93,18 +97,20 @@ public sealed class CalendarViewModel
 
             var activeTasks = dayTasks.Where(t => !t.IsCompleted).ToList();
             int totalUrgency = activeTasks.Sum(t => UrgencyCalculator.CalculateScore(t, today));
-            TaskPriority? highest = activeTasks.Count > 0
-                ? activeTasks.Min(t => t.Priority)
-                : null;
+            TaskPriority? highest = activeTasks.Count > 0 ? activeTasks.Min(t => t.Priority) : null;
 
-            cells.Add(new CalendarDayCell(
-                Date: date,
-                IsCurrentMonth: date.Month == DisplayedMonth.Month && date.Year == DisplayedMonth.Year,
-                IsToday: date == today,
-                IsSelected: date == SelectedDate,
-                Tasks: dayTasks,
-                TotalUrgency: totalUrgency,
-                HighestPriority: highest));
+            cells.Add(
+                new CalendarDayCell(
+                    Date: date,
+                    IsCurrentMonth: date.Month == DisplayedMonth.Month
+                        && date.Year == DisplayedMonth.Year,
+                    IsToday: date == today,
+                    IsSelected: date == SelectedDate,
+                    Tasks: dayTasks,
+                    TotalUrgency: totalUrgency,
+                    HighestPriority: highest
+                )
+            );
         }
 
         MonthCells = cells;

@@ -1,10 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -34,14 +32,7 @@ public static partial class QuizStudioViewBuilder
         return BuildStudioWorkspaceView(vm, studio);
     }
 
-    // =========================================================================
-    // 1. COHESIVE STUDIO WORKSPACE (HEADER + SUBJECT BAR + SUB-TABS)
-    // =========================================================================
-
-    private static Control BuildStudioWorkspaceView(
-        MainWindowViewModel vm,
-        QuizStudioViewModel studio
-    )
+    private static Grid BuildStudioWorkspaceView(MainWindowViewModel vm, QuizStudioViewModel studio)
     {
         var root = new Grid
         {
@@ -112,7 +103,7 @@ public static partial class QuizStudioViewBuilder
             UiBuilder.GhostButton(
                 "Web AI JSON",
                 MaterialIconKind.CodeJson,
-                () => studio.OpenManualJsonBridge(),
+                studio.OpenManualJsonBridge,
                 isActive: studio.IsManualJsonModalOpen
             )
         );
@@ -121,7 +112,7 @@ public static partial class QuizStudioViewBuilder
             UiBuilder.GhostButton(
                 "AI Engine",
                 MaterialIconKind.CogOutline,
-                () => studio.ToggleAiSettings(),
+                studio.ToggleAiSettings,
                 isActive: studio.IsAiSettingsOpen
             )
         );
@@ -205,11 +196,9 @@ public static partial class QuizStudioViewBuilder
             };
             statusRowGrid.Children.Add(
                 UiBuilder.Icon(
-                    studio.IsStatusError
-                        ? MaterialIconKind.AlertCircleOutline
-                        : studio.IsBusy
-                            ? MaterialIconKind.Autorenew
-                            : MaterialIconKind.CheckCircleOutline,
+                    studio.IsStatusError ? MaterialIconKind.AlertCircleOutline
+                        : studio.IsBusy ? MaterialIconKind.Autorenew
+                        : MaterialIconKind.CheckCircleOutline,
                     14,
                     studio.IsStatusError
                         ? ThemeService.Brush(ThemeService.PriorityP1Fg)
@@ -252,11 +241,10 @@ public static partial class QuizStudioViewBuilder
                     Background = studio.IsStatusError
                         ? ThemeService.Brush(ThemeService.PriorityP1Bg)
                         : ThemeService.Brush(ThemeService.BgSurface),
-                    BorderBrush = studio.IsStatusError
-                        ? ThemeService.Brush(ThemeService.PriorityP1Fg)
-                        : studio.IsBusy
-                            ? ThemeService.Brush(ThemeService.AccentPrimary)
-                            : ThemeService.Brush(ThemeService.BorderSubtle),
+                    BorderBrush =
+                        studio.IsStatusError ? ThemeService.Brush(ThemeService.PriorityP1Fg)
+                        : studio.IsBusy ? ThemeService.Brush(ThemeService.AccentPrimary)
+                        : ThemeService.Brush(ThemeService.BorderSubtle),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(10, 6),
@@ -286,9 +274,4 @@ public static partial class QuizStudioViewBuilder
         root.Children.Add(bodyContent);
         return root;
     }
-
-    // =========================================================================
-    // 1A. 2-COLUMN SPLIT BUILDER & LIVE VISUAL PDF SCOPE PREVIEW
-    // =========================================================================
-
 }

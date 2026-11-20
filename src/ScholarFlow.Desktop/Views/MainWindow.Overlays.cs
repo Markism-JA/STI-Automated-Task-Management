@@ -1,27 +1,22 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Presenters;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 using Material.Icons;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
 
 namespace ScholarFlow.Desktop.Views;
 
-
 /// <summary>
 /// MainWindow partial: Floating QuickAdd, Search, Notifications, Shortcuts modals and StatusBar.
 /// </summary>
 public sealed partial class MainWindow
 {
-    private Control BuildFloatingQuickAddModal()
+    private Border BuildFloatingQuickAddModal()
     {
         DetachFromParent(_quickAddBox);
         _quickAddChipsContainer = new StackPanel
@@ -94,7 +89,8 @@ public sealed partial class MainWindow
         AddTokenBtn("Tomorrow", MaterialIconKind.CalendarArrowRight, "tomorrow", dateRegex);
         AddTokenBtn("Next week", MaterialIconKind.CalendarWeek, "+7d", dateRegex);
 
-        var timeRegex = @"\b(?:at\s+)?(?:(?:[01]?\d|2[0-3]):[0-5]\d(?:\s?[ap]m)?|(?:1[0-2]|[1-9])\s?[ap]m)\b";
+        var timeRegex =
+            @"\b(?:at\s+)?(?:(?:[01]?\d|2[0-3]):[0-5]\d(?:\s?[ap]m)?|(?:1[0-2]|[1-9])\s?[ap]m)\b";
         AddTokenBtn("12:00 AM", MaterialIconKind.ClockOutline, "12:00am", timeRegex);
         AddTokenBtn("12:00 PM", MaterialIconKind.ClockOutline, "12:00pm", timeRegex);
         AddTokenBtn("5:00 PM", MaterialIconKind.ClockOutline, "5:00pm", timeRegex);
@@ -144,7 +140,7 @@ public sealed partial class MainWindow
             }
         );
 
-        var cancelBtn = UiBuilder.GhostButton("Cancel", null, () => _vm.CloseQuickAddModal());
+        var cancelBtn = UiBuilder.GhostButton("Cancel", null, _vm.CloseQuickAddModal);
         cancelBtn.Margin = new Thickness(0, 0, 6, 0);
         Grid.SetColumn(cancelBtn, 1);
         footer.Children.Add(cancelBtn);
@@ -176,7 +172,7 @@ public sealed partial class MainWindow
         };
     }
 
-    private Control BuildFloatingSearchModal()
+    private Border BuildFloatingSearchModal()
     {
         DetachFromParent(_searchBox);
         _searchResultsStack = new StackPanel { Spacing = 2 };
@@ -338,7 +334,7 @@ public sealed partial class MainWindow
         }
     }
 
-    private Control BuildFloatingNotificationsModal()
+    private Border BuildFloatingNotificationsModal()
     {
         var stack = new StackPanel { Spacing = 8 };
         var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
@@ -352,10 +348,7 @@ public sealed partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
             }
         );
-        var closeBtn = UiBuilder.IconButton(
-            MaterialIconKind.Close,
-            () => _vm.ToggleNotificationDrawer()
-        );
+        var closeBtn = UiBuilder.IconButton(MaterialIconKind.Close, _vm.ToggleNotificationDrawer);
         Grid.SetColumn(closeBtn, 1);
         header.Children.Add(closeBtn);
         stack.Children.Add(header);
@@ -442,7 +435,7 @@ public sealed partial class MainWindow
         };
     }
 
-    private Control BuildFloatingShortcutsModal()
+    private Border BuildFloatingShortcutsModal()
     {
         var stack = new StackPanel { Spacing = 8 };
         var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
@@ -456,10 +449,7 @@ public sealed partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
             }
         );
-        var closeBtn = UiBuilder.IconButton(
-            MaterialIconKind.Close,
-            () => _vm.ToggleShortcutsModal()
-        );
+        var closeBtn = UiBuilder.IconButton(MaterialIconKind.Close, _vm.ToggleShortcutsModal);
         Grid.SetColumn(closeBtn, 1);
         header.Children.Add(closeBtn);
         stack.Children.Add(header);
@@ -476,7 +466,10 @@ public sealed partial class MainWindow
             ("Space or D", "Complete / reopen selected task"),
             ("O", "Open selected assignment in STI eLMS app"),
             ("[ or Ctrl+B", "Collapse / expand left navigation sidebar"),
-            ("1 - 6", "Switch smart views (Inbox, Today, Upcoming, Calendar, Completed, Test & Recall)"),
+            (
+                "1 - 6",
+                "Switch smart views (Inbox, Today, Upcoming, Calendar, Completed, Test & Recall)"
+            ),
             ("R / Ctrl+S", "Fast poll assignments / Run full eLMS sync"),
             ("Shift+P", "Pause / resume background eLMS polling (single-session shield)"),
             ("T", "Toggle Dark / Light mode"),
@@ -590,7 +583,7 @@ public sealed partial class MainWindow
     // 4. QUIET MINIMAL STATUS BAR & KEYBOARD NAVIGATION
     // =========================================================================
 
-    private Control BuildStatusBar()
+    private Border BuildStatusBar()
     {
         bool isPaused = _vm.Settings.EnableElmsIntegration && _vm.IsPollingPaused;
         var grid = new Grid
@@ -608,12 +601,12 @@ public sealed partial class MainWindow
         left.Children.Add(
             UiBuilder.Icon(
                 isPaused ? MaterialIconKind.PauseCircle
-                : _vm.IsSyncing ? MaterialIconKind.Sync
-                : MaterialIconKind.CheckCircleOutline,
+                    : _vm.IsSyncing ? MaterialIconKind.Sync
+                    : MaterialIconKind.CheckCircleOutline,
                 13,
                 isPaused ? ThemeService.Brush(ThemeService.PriorityP2Fg)
-                : _vm.IsSyncing ? ThemeService.Brush(ThemeService.AccentPrimary)
-                : ThemeService.Brush(ThemeService.TextMuted)
+                    : _vm.IsSyncing ? ThemeService.Brush(ThemeService.AccentPrimary)
+                    : ThemeService.Brush(ThemeService.TextMuted)
             )
         );
         left.Children.Add(
@@ -636,7 +629,7 @@ public sealed partial class MainWindow
             var resumeBtn = UiBuilder.GhostButton(
                 "Resume",
                 MaterialIconKind.PlayCircleOutline,
-                () => _vm.TogglePollingPaused(),
+                _vm.TogglePollingPaused,
                 isActive: true
             );
             resumeBtn.Padding = new Thickness(6, 1);

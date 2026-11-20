@@ -1,12 +1,9 @@
 using Avalonia.Media.Imaging;
-using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Quiz;
-using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class QuizStudioViewModel
 {
@@ -41,7 +38,9 @@ public sealed partial class QuizStudioViewModel
 
     public void SelectTermScope(string? term)
     {
-        SelectedTerm = string.Equals(SelectedTerm, term, StringComparison.OrdinalIgnoreCase) ? null : term;
+        SelectedTerm = string.Equals(SelectedTerm, term, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : term;
         SelectedSectionKeys.Clear();
         PreviewScopeIndex = 0;
         RecomputeScopePreview();
@@ -59,7 +58,8 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-    public static string GetSectionKey(PdfOutlineSectionInfo s) => $"{s.StartPage}-{s.EndPage}:{s.Title}";
+    public static string GetSectionKey(PdfOutlineSectionInfo s) =>
+        $"{s.StartPage}-{s.EndPage}:{s.Title}";
 
     public void ToggleOutlineSection(PdfOutlineSectionInfo sec)
     {
@@ -72,7 +72,8 @@ public sealed partial class QuizStudioViewModel
         {
             var idx = MatchedScopePages
                 .Select((p, i) => (p.PageNumber, Index: i))
-                .FirstOrDefault(x => x.PageNumber >= sec.StartPage).Index;
+                .FirstOrDefault(x => x.PageNumber >= sec.StartPage)
+                .Index;
             PreviewScopeIndex = idx;
         }
         _mainVm.RequestUiRefresh();
@@ -126,10 +127,12 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-
     public void OpenQuestionEvidenceInPdfReader(QuizQuestionRecord question)
     {
-        if (string.IsNullOrWhiteSpace(question.SourcePdfPath) || !File.Exists(question.SourcePdfPath))
+        if (
+            string.IsNullOrWhiteSpace(question.SourcePdfPath)
+            || !File.Exists(question.SourcePdfPath)
+        )
         {
             StatusMessage = $"Source PDF not found: {question.SourcePdfPath}";
             IsStatusError = true;
@@ -137,13 +140,22 @@ public sealed partial class QuizStudioViewModel
             return;
         }
 
-        var parentQuiz = SavedQuizzes.FirstOrDefault(qz => string.Equals(qz.Id, question.QuizId, StringComparison.OrdinalIgnoreCase));
+        var parentQuiz = SavedQuizzes.FirstOrDefault(qz =>
+            string.Equals(qz.Id, question.QuizId, StringComparison.OrdinalIgnoreCase)
+        );
         bool isStale = parentQuiz?.IsSourcePdfStale() == true;
 
         // Re-compute highlight rects on-the-fly if empty or if the source Master PDF was recompiled
-        if ((isStale || question.HighlightRects.Count == 0) && !string.IsNullOrWhiteSpace(question.VerbatimQuote))
+        if (
+            (isStale || question.HighlightRects.Count == 0)
+            && !string.IsNullOrWhiteSpace(question.VerbatimQuote)
+        )
         {
-            PdfQuizGrounder.GroundQuestionsToPdf(question.SourcePdfPath, [question], forceUpdateSection: true);
+            PdfQuizGrounder.GroundQuestionsToPdf(
+                question.SourcePdfPath,
+                [question],
+                forceUpdateSection: true
+            );
         }
 
         _mainVm.OpenPdfWithQuizEvidence(
@@ -151,12 +163,19 @@ public sealed partial class QuizStudioViewModel
             question.SourcePage,
             question.HighlightRects,
             question.VerbatimQuote,
-            question.Prompt);
+            question.Prompt
+        );
     }
 
-    public void OpenEvidenceAnchorInPdfReader(QuizQuestionRecord question, GroundedEvidenceAnchor anchor)
+    public void OpenEvidenceAnchorInPdfReader(
+        QuizQuestionRecord question,
+        GroundedEvidenceAnchor anchor
+    )
     {
-        if (string.IsNullOrWhiteSpace(question.SourcePdfPath) || !File.Exists(question.SourcePdfPath))
+        if (
+            string.IsNullOrWhiteSpace(question.SourcePdfPath)
+            || !File.Exists(question.SourcePdfPath)
+        )
         {
             StatusMessage = $"Source PDF not found: {question.SourcePdfPath}";
             IsStatusError = true;
@@ -169,7 +188,8 @@ public sealed partial class QuizStudioViewModel
             anchor.PageNumber > 0 ? anchor.PageNumber : question.SourcePage,
             anchor.HighlightRects,
             anchor.VerbatimQuote,
-            question.Prompt);
+            question.Prompt
+        );
     }
 
     private List<PdfPageRange> GetSelectedPageRanges()
@@ -177,15 +197,21 @@ public sealed partial class QuizStudioViewModel
         if (SelectedSectionKeys.Count == 0)
             return [];
 
-        return OutlineSections
-            .Where(s => SelectedSectionKeys.Contains(GetSectionKey(s)))
-            .Select(s => new PdfPageRange(s.StartPage, s.EndPage))
-            .ToList();
+        return
+        [
+            .. OutlineSections
+                .Where(s => SelectedSectionKeys.Contains(GetSectionKey(s)))
+                .Select(s => new PdfPageRange(s.StartPage, s.EndPage)),
+        ];
     }
 
     public Bitmap? GetCurrentPreviewBitmap()
     {
-        if (string.IsNullOrWhiteSpace(SelectedPdfPath) || !File.Exists(SelectedPdfPath) || PdfTotalPages <= 0)
+        if (
+            string.IsNullOrWhiteSpace(SelectedPdfPath)
+            || !File.Exists(SelectedPdfPath)
+            || PdfTotalPages <= 0
+        )
             return null;
 
         int pageOneBased = Math.Clamp(CurrentPreviewPdfPage, 1, PdfTotalPages);
@@ -211,7 +237,13 @@ public sealed partial class QuizStudioViewModel
                 byte[] pdfBytes;
                 lock (_pendingPreviewRenders)
                 {
-                    if (!string.Equals(_cachedBytesPath, pdfPath, StringComparison.OrdinalIgnoreCase) || _cachedPdfBytes is null)
+                    if (
+                        !string.Equals(
+                            _cachedBytesPath,
+                            pdfPath,
+                            StringComparison.OrdinalIgnoreCase
+                        ) || _cachedPdfBytes is null
+                    )
                     {
                         _cachedPdfBytes = File.ReadAllBytes(pdfPath);
                         _cachedBytesPath = pdfPath;
@@ -223,8 +255,14 @@ public sealed partial class QuizStudioViewModel
 #pragma warning disable CA1416
                 var renderOpts = new PDFtoImage.RenderOptions(
                     Dpi: 135,
-                    BackgroundColor: SkiaSharp.SKColors.White);
-                PDFtoImage.Conversion.SavePng(ms, pdfBytes, page: (Index)(pageOneBased - 1), options: renderOpts);
+                    BackgroundColor: SkiaSharp.SKColors.White
+                );
+                PDFtoImage.Conversion.SavePng(
+                    ms,
+                    pdfBytes,
+                    page: (Index)(pageOneBased - 1),
+                    options: renderOpts
+                );
 #pragma warning restore CA1416
                 return ms.ToArray();
             });
@@ -249,7 +287,7 @@ public sealed partial class QuizStudioViewModel
         {
             _pendingPreviewRenders.Remove(key);
             IsLoadingPreviewPage = _pendingPreviewRenders.Count > 0;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
+            Avalonia.Threading.Dispatcher.UIThread.Post(_mainVm.RequestUiRefresh);
         }
     }
 
@@ -259,7 +297,10 @@ public sealed partial class QuizStudioViewModel
         if (SelectedCourse is not null && !string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
         {
             var courseDir = Path.Combine(_mainVm.BasinRoot, SelectedCourse.FolderName);
-            var masterPdf = MasterPdfService.FindExistingMasterPdfPath(_mainVm.BasinRoot, SelectedCourse.FolderName);
+            var masterPdf = MasterPdfService.FindExistingMasterPdfPath(
+                _mainVm.BasinRoot,
+                SelectedCourse.FolderName
+            );
             if (masterPdf is not null && File.Exists(masterPdf))
             {
                 list.Add(($"Master Study Packet ({Path.GetFileName(masterPdf)})", masterPdf, true));
@@ -267,17 +308,27 @@ public sealed partial class QuizStudioViewModel
 
             if (Directory.Exists(courseDir))
             {
-                foreach (var dir in Directory.GetDirectories(courseDir).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                foreach (
+                    var dir in Directory
+                        .GetDirectories(courseDir)
+                        .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+                )
                 {
                     var dirName = Path.GetFileName(dir);
-                    if (dirName.StartsWith('.') ||
-                        dirName.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
-                        dirName.Equals("ongoing", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        dirName.StartsWith('.')
+                        || dirName.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                        || dirName.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                    )
                     {
                         continue;
                     }
 
-                    foreach (var pdf in Directory.GetFiles(dir, "*.pdf").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+                    foreach (
+                        var pdf in Directory
+                            .GetFiles(dir, "*.pdf")
+                            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                    )
                     {
                         var fileName = Path.GetFileName(pdf);
                         if (fileName.EndsWith("_.pdf", StringComparison.OrdinalIgnoreCase))
@@ -291,17 +342,27 @@ public sealed partial class QuizStudioViewModel
         AvailablePdfs = list;
         if (!string.IsNullOrWhiteSpace(preferredPdfPath) && File.Exists(preferredPdfPath))
         {
-            if (!AvailablePdfs.Any(p => p.FullPath.Equals(preferredPdfPath, StringComparison.OrdinalIgnoreCase)))
+            if (
+                !AvailablePdfs.Any(p =>
+                    p.FullPath.Equals(preferredPdfPath, StringComparison.OrdinalIgnoreCase)
+                )
+            )
             {
                 list.Insert(0, (Path.GetFileName(preferredPdfPath), preferredPdfPath, false));
                 AvailablePdfs = list;
             }
             SelectedPdfPath = preferredPdfPath;
         }
-        else if (SelectedPdfPath is null || !AvailablePdfs.Any(p => p.FullPath.Equals(SelectedPdfPath, StringComparison.OrdinalIgnoreCase)))
+        else if (
+            SelectedPdfPath is null
+            || !AvailablePdfs.Any(p =>
+                p.FullPath.Equals(SelectedPdfPath, StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
-            SelectedPdfPath = AvailablePdfs.FirstOrDefault(p => p.IsMaster).FullPath
-                              ?? AvailablePdfs.FirstOrDefault().FullPath;
+            SelectedPdfPath =
+                AvailablePdfs.FirstOrDefault(p => p.IsMaster).FullPath
+                ?? (AvailablePdfs.Count > 0 ? AvailablePdfs[0].FullPath : null);
         }
 
         InspectSelectedPdfOutlineAndPreview();
@@ -352,13 +413,17 @@ public sealed partial class QuizStudioViewModel
         finally
         {
             IsInspectingPdf = false;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => _mainVm.RequestUiRefresh());
+            Avalonia.Threading.Dispatcher.UIThread.Post(_mainVm.RequestUiRefresh);
         }
     }
 
     private void RecomputeScopePreview()
     {
-        if (string.IsNullOrWhiteSpace(SelectedPdfPath) || !File.Exists(SelectedPdfPath) || PdfTotalPages <= 0)
+        if (
+            string.IsNullOrWhiteSpace(SelectedPdfPath)
+            || !File.Exists(SelectedPdfPath)
+            || PdfTotalPages <= 0
+        )
         {
             MatchedScopePages = [];
             PreviewScopeIndex = 0;
@@ -371,7 +436,8 @@ public sealed partial class QuizStudioViewModel
             SelectedTerm,
             StartPage,
             EndPage,
-            GetSelectedPageRanges());
+            GetSelectedPageRanges()
+        );
 
         if (PreviewScopeIndex >= MatchedScopePages.Count)
             PreviewScopeIndex = 0;

@@ -16,11 +16,16 @@ namespace ScholarFlow.Desktop.Views;
 /// </summary>
 public static class CourseWorkspaceViewBuilder
 {
-    public static Control Build(MainWindowViewModel vm, BasinCourseEntry course, Func<MainWindowViewModel, Control> buildTaskList)
+    public static Control Build(
+        MainWindowViewModel vm,
+        BasinCourseEntry course,
+        Func<MainWindowViewModel, Control> buildTaskList
+    )
     {
         var coursePath = Path.Combine(vm.BasinRoot, course.FolderName);
-        var masterPdfPath = ScholarFlow.Core.Pdf.MasterPdfService.FindExistingMasterPdfPath(vm.BasinRoot, course.FolderName)
-                            ?? ScholarFlow.Core.Pdf.MasterPdfService.GetExpectedMasterPdfPath(vm.BasinRoot, course.FolderName);
+        var masterPdfPath =
+            Core.Pdf.MasterPdfService.FindExistingMasterPdfPath(vm.BasinRoot, course.FolderName)
+            ?? Core.Pdf.MasterPdfService.GetExpectedMasterPdfPath(vm.BasinRoot, course.FolderName);
         bool hasMasterPdf = File.Exists(masterPdfPath);
 
         var root = new Grid
@@ -28,66 +33,76 @@ public static class CourseWorkspaceViewBuilder
             RowDefinitions = RowDefinitions.Parse("Auto,Auto,*"),
             MaxWidth = 860,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(24, 16, 24, 12)
+            Margin = new Thickness(24, 16, 24, 12),
         };
 
         // 1. Course Header & Responsive Action Strip
         var headerStack = new StackPanel { Spacing = 8, Margin = new Thickness(0, 0, 0, 12) };
 
-        var titleWrap = new Grid
-        {
-            ColumnDefinitions = ColumnDefinitions.Parse("*,Auto")
-        };
+        var titleWrap = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
 
         var titleLeft = new StackPanel { Spacing = 3 };
-        var titleRow = new WrapPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        titleRow.Children.Add(new TextBlock
+        var titleRow = new WrapPanel
         {
-            Text = course.Title,
-            FontSize = 20,
-            FontWeight = FontWeight.Bold,
-            Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-            Margin = new Thickness(0, 0, 8, 0)
-        });
-        titleRow.Children.Add(UiBuilder.Pill(
-            $"#{course.Alias}",
-            ThemeService.Brush(ThemeService.TextSecondary),
-            ThemeService.Brush(ThemeService.BgElevated)));
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        titleRow.Children.Add(
+            new TextBlock
+            {
+                Text = course.Title,
+                FontSize = 20,
+                FontWeight = FontWeight.Bold,
+                Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                Margin = new Thickness(0, 0, 8, 0),
+            }
+        );
+        titleRow.Children.Add(
+            UiBuilder.Pill(
+                $"#{course.Alias}",
+                ThemeService.Brush(ThemeService.TextSecondary),
+                ThemeService.Brush(ThemeService.BgElevated)
+            )
+        );
         titleLeft.Children.Add(titleRow);
 
         var metaParts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(course.CourseCode)) metaParts.Add(course.CourseCode);
-        if (!string.IsNullOrWhiteSpace(course.SectionCode)) metaParts.Add(course.SectionCode);
+        if (!string.IsNullOrWhiteSpace(course.CourseCode))
+            metaParts.Add(course.CourseCode);
+        if (!string.IsNullOrWhiteSpace(course.SectionCode))
+            metaParts.Add(course.SectionCode);
         if (hasMasterPdf)
         {
             var info = new FileInfo(masterPdfPath);
-            metaParts.Add($"Master PDF · {info.Length / 1024.0 / 1024.0:F1} MB · Updated {info.LastWriteTime:MMM d}");
+            metaParts.Add(
+                $"Master PDF · {info.Length / 1024.0 / 1024.0:F1} MB · Updated {info.LastWriteTime:MMM d}"
+            );
         }
         else
         {
             metaParts.Add("Master PDF not yet compiled");
         }
 
-        titleLeft.Children.Add(new TextBlock
-        {
-            Text = string.Join(" · ", metaParts),
-            FontSize = 12,
-            Foreground = ThemeService.Brush(ThemeService.TextSecondary)
-        });
+        titleLeft.Children.Add(
+            new TextBlock
+            {
+                Text = string.Join(" · ", metaParts),
+                FontSize = 12,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+            }
+        );
         titleWrap.Children.Add(titleLeft);
         headerStack.Children.Add(titleWrap);
 
         // Responsive WrapPanel for Course Actions
-        var actionWrap = new WrapPanel
-        {
-            Orientation = Orientation.Horizontal
-        };
+        var actionWrap = new WrapPanel { Orientation = Orientation.Horizontal };
 
         var addBtn = UiBuilder.ActionButton(
             "Add Task",
             MaterialIconKind.Plus,
-            () => vm.OpenQuickAddModal(),
-            isPrimary: true);
+            vm.OpenQuickAddModal,
+            isPrimary: true
+        );
         addBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(addBtn);
 
@@ -96,7 +111,8 @@ public static class CourseWorkspaceViewBuilder
             var syncCourseBtn = UiBuilder.GhostButton(
                 "Sync Course",
                 MaterialIconKind.CloudSyncOutline,
-                async () => await vm.RunCourseSyncAsync(course));
+                async () => await vm.RunCourseSyncAsync(course)
+            );
             syncCourseBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(syncCourseBtn);
         }
@@ -107,24 +123,33 @@ public static class CourseWorkspaceViewBuilder
             async () =>
             {
                 var top = TopLevel.GetTopLevel(actionWrap);
-                if (top?.StorageProvider is null) return;
-                var files = await top.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
-                {
-                    Title = $"Import Study PDFs into {course.Title}",
-                    AllowMultiple = true,
-                    FileTypeFilter =
-                    [
-                        new Avalonia.Platform.Storage.FilePickerFileType("PDF Documents") { Patterns = ["*.pdf"] }
-                    ]
-                });
+                if (top?.StorageProvider is null)
+                    return;
+                var files = await top.StorageProvider.OpenFilePickerAsync(
+                    new Avalonia.Platform.Storage.FilePickerOpenOptions
+                    {
+                        Title = $"Import Study PDFs into {course.Title}",
+                        AllowMultiple = true,
+                        FileTypeFilter =
+                        [
+                            new Avalonia.Platform.Storage.FilePickerFileType("PDF Documents")
+                            {
+                                Patterns = ["*.pdf"],
+                            },
+                        ],
+                    }
+                );
                 var paths = files
-                    .Select(f => Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f))
+                    .Select(f =>
+                        Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f)
+                    )
                     .Where(p => !string.IsNullOrWhiteSpace(p))
                     .Cast<string>()
                     .ToList();
                 if (paths.Count > 0)
                     await vm.ImportPdfsToCourseAsync(course, paths);
-            });
+            }
+        );
         importPdfBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(importPdfBtn);
 
@@ -134,14 +159,16 @@ public static class CourseWorkspaceViewBuilder
                 "View Master PDF",
                 MaterialIconKind.FilePdfBox,
                 () => vm.OpenPdfInReader(masterPdfPath),
-                isActive: true);
+                isActive: true
+            );
             viewPdfBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(viewPdfBtn);
 
             var quizBtn = UiBuilder.GhostButton(
                 "Generate Quiz",
                 MaterialIconKind.HeadLightbulbOutline,
-                async () => await vm.SelectQuizStudioViewAsync(course, masterPdfPath));
+                async () => await vm.SelectQuizStudioViewAsync(course, masterPdfPath)
+            );
             quizBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(quizBtn);
         }
@@ -149,7 +176,8 @@ public static class CourseWorkspaceViewBuilder
         var compileBtn = UiBuilder.GhostButton(
             hasMasterPdf ? "Recompile PDF" : "Compile Master PDF",
             MaterialIconKind.HammerWrench,
-            async () => await vm.CompileCourseMasterPdfAsync(course, force: true));
+            async () => await vm.CompileCourseMasterPdfAsync(course, force: true)
+        );
         compileBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(compileBtn);
 
@@ -158,7 +186,12 @@ public static class CourseWorkspaceViewBuilder
             var elmsBtn = UiBuilder.GhostButton(
                 "Open in eLMS",
                 MaterialIconKind.OpenInApp,
-                async () => await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(course.CourseUrl, () => vm.RunFastPollAsync()));
+                async () =>
+                    await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(
+                        course.CourseUrl,
+                        () => vm.RunFastPollAsync()
+                    )
+            );
             elmsBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(elmsBtn);
         }
@@ -169,17 +202,23 @@ public static class CourseWorkspaceViewBuilder
         // 2. Clean Sub-Tab Switcher (Tasks vs Modules & Handouts)
         var subTabsPanel = new StackPanel { Spacing = 8, Margin = new Thickness(0, 0, 0, 8) };
         var subTabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        subTabs.Children.Add(UiBuilder.GhostButton(
-            $"Tasks ({vm.VisibleTasks.Count})",
-            MaterialIconKind.CheckboxMarkedCircleOutline,
-            () => vm.SetCourseSubTab(showMaterials: false),
-            isActive: !vm.ShowCourseMaterialsSubTab));
+        subTabs.Children.Add(
+            UiBuilder.GhostButton(
+                $"Tasks ({vm.VisibleTasks.Count})",
+                MaterialIconKind.CheckboxMarkedCircleOutline,
+                () => vm.SetCourseSubTab(showMaterials: false),
+                isActive: !vm.ShowCourseMaterialsSubTab
+            )
+        );
 
-        subTabs.Children.Add(UiBuilder.GhostButton(
-            "Modules & Handouts",
-            MaterialIconKind.FolderOpenOutline,
-            () => vm.SetCourseSubTab(showMaterials: true),
-            isActive: vm.ShowCourseMaterialsSubTab));
+        subTabs.Children.Add(
+            UiBuilder.GhostButton(
+                "Modules & Handouts",
+                MaterialIconKind.FolderOpenOutline,
+                () => vm.SetCourseSubTab(showMaterials: true),
+                isActive: vm.ShowCourseMaterialsSubTab
+            )
+        );
 
         subTabsPanel.Children.Add(subTabs);
         subTabsPanel.Children.Add(UiBuilder.HairlineDivider());
@@ -202,15 +241,19 @@ public static class CourseWorkspaceViewBuilder
         var stack = new StackPanel { Spacing = 12, Margin = new Thickness(0, 4, 0, 20) };
         if (!Directory.Exists(coursePath))
         {
-            stack.Children.Add(new TextBlock
-            {
-                Text = "Course directory does not exist on disk yet. Run Sync eLMS to download course materials.",
-                Foreground = ThemeService.Brush(ThemeService.TextSecondary)
-            });
+            stack.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Course directory does not exist on disk yet. Run Sync eLMS to download course materials.",
+                    Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                }
+            );
             return stack;
         }
 
-        var dirs = Directory.GetDirectories(coursePath)
+        var dirs = Directory
+            .GetDirectories(coursePath)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
             .OrderBy(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -218,7 +261,8 @@ public static class CourseWorkspaceViewBuilder
         foreach (var dir in dirs)
         {
             var dirName = Path.GetFileName(dir);
-            var files = Directory.GetFiles(dir)
+            var files = Directory
+                .GetFiles(dir)
                 .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .OrderBy(f => f)
                 .ToList();
@@ -227,45 +271,63 @@ public static class CourseWorkspaceViewBuilder
                 continue;
 
             var sectionStack = new StackPanel { Spacing = 2 };
-            sectionStack.Children.Add(new TextBlock
-            {
-                Text = dirName.Replace('_', ' '),
-                FontSize = 12.5,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-                Margin = new Thickness(2, 4, 0, 4)
-            });
+            sectionStack.Children.Add(
+                new TextBlock
+                {
+                    Text = dirName.Replace('_', ' '),
+                    FontSize = 12.5,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                    Margin = new Thickness(2, 4, 0, 4),
+                }
+            );
 
             foreach (var file in files)
             {
                 var fileName = Path.GetFileName(file);
                 var isPdf = fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
 
-                var fileRow = new Grid
-                {
-                    ColumnDefinitions = ColumnDefinitions.Parse("22,*,Auto")
-                };
-                fileRow.Children.Add(UiBuilder.Icon(
-                    isPdf ? MaterialIconKind.FilePdfBox : MaterialIconKind.FileDocumentOutline,
-                    15,
-                    isPdf ? ThemeService.Brush(ThemeService.AccentPrimary) : ThemeService.Brush(ThemeService.TextMuted)));
+                var fileRow = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("22,*,Auto") };
+                fileRow.Children.Add(
+                    UiBuilder.Icon(
+                        isPdf ? MaterialIconKind.FilePdfBox : MaterialIconKind.FileDocumentOutline,
+                        15,
+                        isPdf
+                            ? ThemeService.Brush(ThemeService.AccentPrimary)
+                            : ThemeService.Brush(ThemeService.TextMuted)
+                    )
+                );
 
-                fileRow.Children.Add(new TextBlock
-                {
-                    Text = fileName,
-                    FontSize = 13,
-                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    [Grid.ColumnProperty] = 1
-                });
+                fileRow.Children.Add(
+                    new TextBlock
+                    {
+                        Text = fileName,
+                        FontSize = 13,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        [Grid.ColumnProperty] = 1,
+                    }
+                );
 
                 var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
                 if (isPdf)
                 {
-                    actions.Children.Add(UiBuilder.GhostButton("Read", MaterialIconKind.BookOpenOutline, () => vm.OpenPdfInReader(file)));
+                    actions.Children.Add(
+                        UiBuilder.GhostButton(
+                            "Read",
+                            MaterialIconKind.BookOpenOutline,
+                            () => vm.OpenPdfInReader(file)
+                        )
+                    );
                 }
-                actions.Children.Add(UiBuilder.IconButton(MaterialIconKind.OpenInNew, () => ExternalFileLauncher.OpenLocalFile(file), 14));
+                actions.Children.Add(
+                    UiBuilder.IconButton(
+                        MaterialIconKind.OpenInNew,
+                        () => ExternalFileLauncher.OpenLocalFile(file),
+                        14
+                    )
+                );
                 Grid.SetColumn(actions, 2);
                 fileRow.Children.Add(actions);
 
@@ -275,9 +337,10 @@ public static class CourseWorkspaceViewBuilder
                     BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
                     BorderThickness = new Thickness(0, 0, 0, 1),
                     Padding = new Thickness(6, 6),
-                    Child = fileRow
+                    Child = fileRow,
                 };
-                rowBorder.PointerEntered += (_, _) => rowBorder.Background = ThemeService.Brush(ThemeService.BgHover);
+                rowBorder.PointerEntered += (_, _) =>
+                    rowBorder.Background = ThemeService.Brush(ThemeService.BgHover);
                 rowBorder.PointerExited += (_, _) => rowBorder.Background = Brushes.Transparent;
 
                 sectionStack.Children.Add(rowBorder);
@@ -286,6 +349,9 @@ public static class CourseWorkspaceViewBuilder
             stack.Children.Add(sectionStack);
         }
 
-        return UiBuilder.PersistentScrollViewer($"course-workspace:{vm.ActiveCourse?.FolderName}", stack);
+        return UiBuilder.PersistentScrollViewer(
+            $"course-workspace:{vm.ActiveCourse?.FolderName}",
+            stack
+        );
     }
 }

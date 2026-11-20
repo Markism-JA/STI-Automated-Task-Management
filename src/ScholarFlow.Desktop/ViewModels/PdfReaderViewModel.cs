@@ -27,7 +27,8 @@ public sealed class PdfReaderViewModel : IDisposable
     private byte[]? _pdfBytes;
 
     public string? CurrentFilePath { get; private set; }
-    public string Title => string.IsNullOrEmpty(CurrentFilePath) ? "No PDF Loaded" : Path.GetFileName(CurrentFilePath);
+    public string Title =>
+        string.IsNullOrEmpty(CurrentFilePath) ? "No PDF Loaded" : Path.GetFileName(CurrentFilePath);
     public int PageCount { get; private set; }
     public int CurrentPage { get; private set; } = 1; // 1-based
     public int ZoomPercent { get; private set; } = 100;
@@ -84,9 +85,7 @@ public sealed class PdfReaderViewModel : IDisposable
             return null;
 
         int zeroBased = Math.Clamp(CurrentPage - 1, 0, PageCount - 1);
-        int dpi = FitToWidth
-            ? 180
-            : Math.Clamp((int)(160 * (ZoomPercent / 100.0)), 96, 300);
+        int dpi = FitToWidth ? 180 : Math.Clamp((int)(160 * (ZoomPercent / 100.0)), 96, 300);
 
         if (_pageCache.TryGetValue((zeroBased, dpi), out var cached))
             return cached;
@@ -97,8 +96,14 @@ public sealed class PdfReaderViewModel : IDisposable
 #pragma warning disable CA1416
             var renderOpts = new PDFtoImage.RenderOptions(
                 Dpi: dpi,
-                BackgroundColor: SkiaSharp.SKColors.White);
-            PDFtoImage.Conversion.SavePng(ms, _pdfBytes, page: (Index)zeroBased, options: renderOpts);
+                BackgroundColor: SkiaSharp.SKColors.White
+            );
+            PDFtoImage.Conversion.SavePng(
+                ms,
+                _pdfBytes,
+                page: (Index)zeroBased,
+                options: renderOpts
+            );
 #pragma warning restore CA1416
             ms.Position = 0;
             var bmp = new Bitmap(ms);
@@ -151,7 +156,8 @@ public sealed class PdfReaderViewModel : IDisposable
         int oneBasedPage,
         IReadOnlyList<NormalizedHighlightRect> highlights,
         string? verbatimQuote = null,
-        string? questionPrompt = null)
+        string? questionPrompt = null
+    )
     {
         if (PageCount > 0)
             CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
@@ -256,7 +262,10 @@ public sealed class PdfReaderViewModel : IDisposable
                 foreach (var rootNode in bookmarks.Roots)
                 {
                     var converted = BuildBookmarkTree(rootNode, level: 1);
-                    if (converted is not null && seenSiblings.Add((converted.Title, converted.PageNumber)))
+                    if (
+                        converted is not null
+                        && seenSiblings.Add((converted.Title, converted.PageNumber))
+                    )
                     {
                         roots.Add(converted);
                     }
@@ -282,7 +291,7 @@ public sealed class PdfReaderViewModel : IDisposable
             Title = title,
             PageNumber = pageNumber,
             Level = level,
-            IsExpanded = level <= 2
+            IsExpanded = level <= 2,
         };
 
         var seenChildren = new HashSet<(string Title, int Page)>();

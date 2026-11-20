@@ -40,14 +40,23 @@ public sealed class App : Application
         {
             Setters =
             {
-                new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(Color.Parse("#22252B"))),
-                new Setter(TemplatedControl.ForegroundProperty, new SolidColorBrush(Color.Parse("#ECEFF4"))),
-                new Setter(TemplatedControl.BorderBrushProperty, new SolidColorBrush(Color.Parse("#5E81F4"))),
+                new Setter(
+                    TemplatedControl.BackgroundProperty,
+                    new SolidColorBrush(Color.Parse("#22252B"))
+                ),
+                new Setter(
+                    TemplatedControl.ForegroundProperty,
+                    new SolidColorBrush(Color.Parse("#ECEFF4"))
+                ),
+                new Setter(
+                    TemplatedControl.BorderBrushProperty,
+                    new SolidColorBrush(Color.Parse("#5E81F4"))
+                ),
                 new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1)),
                 new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)),
                 new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 6)),
-                new Setter(TemplatedControl.FontSizeProperty, 12.0)
-            }
+                new Setter(TemplatedControl.FontSizeProperty, 12.0),
+            },
         };
         Styles.Add(tooltipStyle);
 
@@ -56,17 +65,14 @@ public sealed class App : Application
             Setters =
             {
                 new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)),
-                new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 7))
-            }
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 7)),
+            },
         };
         Styles.Add(textBoxStyle);
 
         var datePickerStyle = new Style(x => x.OfType<CalendarDatePicker>())
         {
-            Setters =
-            {
-                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6))
-            }
+            Setters = { new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)) },
         };
         Styles.Add(datePickerStyle);
     }
@@ -94,8 +100,7 @@ public sealed class App : Application
 
             desktop.Exit += async (_, _) =>
             {
-                if (_mainVm is not null)
-                    _mainVm.StateChanged -= OnMainVmStateChanged;
+                _mainVm?.StateChanged -= OnMainVmStateChanged;
                 _trayIcon?.Dispose();
                 if (_mainVm is not null)
                     await _mainVm.DisposeAsync();
@@ -110,12 +115,17 @@ public sealed class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void InitializeTrayIcon(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window)
+    private void InitializeTrayIcon(
+        IClassicDesktopStyleApplicationLifetime desktop,
+        MainWindow window
+    )
     {
         try
         {
             WindowIcon? icon = null;
-            using var stream = typeof(App).Assembly.GetManifestResourceStream("ScholarFlow.Assets.scholarflow.ico");
+            using var stream = typeof(App).Assembly.GetManifestResourceStream(
+                "ScholarFlow.Assets.scholarflow.ico"
+            );
             if (stream is not null)
                 icon = new WindowIcon(stream);
 
@@ -139,10 +149,7 @@ public sealed class App : Application
             };
             menu.Items.Add(_trayPollItem);
 
-            _trayCourseSyncItem = new NativeMenuItem("Sync Course")
-            {
-                Menu = new NativeMenu()
-            };
+            _trayCourseSyncItem = new NativeMenuItem("Sync Course") { Menu = [] };
             menu.Items.Add(_trayCourseSyncItem);
 
             _trayFullSyncItem = new NativeMenuItem("Full eLMS Sync (All Courses)");
@@ -168,7 +175,7 @@ public sealed class App : Application
                 ToolTipText = "ScholarFlow — Academic Workspace",
                 Icon = icon,
                 Menu = menu,
-                IsVisible = true
+                IsVisible = true,
             };
             _trayIcon.Clicked += (_, _) => RestoreMainWindow(window);
 
@@ -199,26 +206,27 @@ public sealed class App : Application
         bool isSyncing = _mainVm.IsSyncing;
 
         var syncableCourses = elmsEnabled
-            ? _mainVm.Courses
-                .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
+            ? _mainVm
+                .Courses.Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
                 .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList()
             : [];
 
-        string courseSig = string.Join("|", syncableCourses.Select(c => $"{c.FolderName}:{c.Title}"));
+        string courseSig = string.Join(
+            "|",
+            syncableCourses.Select(c => $"{c.FolderName}:{c.Title}")
+        );
         string sig = $"{elmsEnabled}:{isPaused}:{isSyncing}:{courseSig}";
         if (sig == _lastTrayStateSignature)
             return;
         _lastTrayStateSignature = sig;
 
-        _trayIcon.ToolTipText = isSyncing
-            ? "ScholarFlow — Syncing eLMS..."
-            : elmsEnabled && isPaused
-                ? "ScholarFlow — eLMS Polling PAUSED"
-                : "ScholarFlow — Academic Workspace";
+        _trayIcon.ToolTipText =
+            isSyncing ? "ScholarFlow — Syncing eLMS..."
+            : elmsEnabled && isPaused ? "ScholarFlow — eLMS Polling PAUSED"
+            : "ScholarFlow — Academic Workspace";
 
-        if (_trayElmsSeparator is not null)
-            _trayElmsSeparator.IsVisible = elmsEnabled;
+        _trayElmsSeparator?.IsVisible = elmsEnabled;
 
         if (_trayPauseItem is not null)
         {
@@ -248,15 +256,12 @@ public sealed class App : Application
             _trayCourseSyncItem.IsVisible = elmsEnabled && syncableCourses.Count > 0;
             _trayCourseSyncItem.IsEnabled = !isSyncing;
 
-            var subMenu = _trayCourseSyncItem.Menu ?? new NativeMenu();
+            var subMenu = _trayCourseSyncItem.Menu ?? [];
             subMenu.Items.Clear();
             foreach (var course in syncableCourses)
             {
                 var captured = course;
-                var courseItem = new NativeMenuItem(captured.Title)
-                {
-                    IsEnabled = !isSyncing
-                };
+                var courseItem = new NativeMenuItem(captured.Title) { IsEnabled = !isSyncing };
                 courseItem.Click += async (_, _) =>
                 {
                     if (_mainVm is not null)

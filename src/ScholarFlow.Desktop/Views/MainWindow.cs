@@ -6,11 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using Material.Icons;
-using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
 
 namespace ScholarFlow.Desktop.Views;
@@ -398,7 +394,10 @@ public sealed partial class MainWindow : Window
 
         if (_vm.IsOnboardingOpen)
         {
-            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildOnboardingModal(this, _vm);
+            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildOnboardingModal(
+                this,
+                _vm
+            );
             _modalOverlayContainer.Child = backdrop;
             _modalOverlayContainer.IsVisible = true;
             return;
@@ -474,7 +473,6 @@ public sealed partial class MainWindow : Window
             _modalOverlayContainer.IsVisible = true;
         }
     }
-
 
     private async Task PromptOpenBasinFolderAsync()
     {

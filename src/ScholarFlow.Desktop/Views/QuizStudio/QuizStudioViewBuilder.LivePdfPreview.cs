@@ -1,10 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -170,7 +168,7 @@ public static partial class QuizStudioViewBuilder
         var prevBtn = UiBuilder.GhostButton(
             "Prev in Scope",
             MaterialIconKind.ChevronLeft,
-            () => studio.PreviousPreviewPage()
+            studio.PreviousPreviewPage
         );
         prevBtn.IsEnabled = studio.PreviewScopeIndex > 0;
         footerBar.Children.Add(prevBtn);
@@ -193,7 +191,7 @@ public static partial class QuizStudioViewBuilder
         var nextBtn = UiBuilder.GhostButton(
             "Next in Scope",
             MaterialIconKind.ChevronRight,
-            () => studio.NextPreviewPage()
+            studio.NextPreviewPage
         );
         nextBtn.IsEnabled = studio.PreviewScopeIndex + 1 < studio.ScopePreviewPageCount;
         Grid.SetColumn(nextBtn, 2);
@@ -208,5 +206,4 @@ public static partial class QuizStudioViewBuilder
     // =========================================================================
     // 1B. HAIRLINE QUIZ CATALOG & MULTI-QUIZ COMBINER VIEW
     // =========================================================================
-
 }

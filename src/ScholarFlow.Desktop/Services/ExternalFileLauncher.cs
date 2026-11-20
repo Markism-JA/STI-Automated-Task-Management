@@ -14,12 +14,29 @@ public static class ExternalFileLauncher
 {
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".cs", ".toml", ".conf"
+        ".md",
+        ".txt",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".py",
+        ".sh",
+        ".cs",
+        ".toml",
+        ".conf",
     };
 
     private static readonly HashSet<string> TerminalEditors = new(StringComparer.OrdinalIgnoreCase)
     {
-        "nvim", "vim", "vi", "nano", "hx", "helix", "micro", "emacs", "emacsclient"
+        "nvim",
+        "vim",
+        "vi",
+        "nano",
+        "hx",
+        "helix",
+        "micro",
+        "emacs",
+        "emacsclient",
     };
 
     public static string? GetConfiguredEditor()
@@ -77,17 +94,32 @@ public static class ExternalFileLauncher
                 var term = Environment.GetEnvironmentVariable("TERMINAL")?.Trim();
                 if (!string.IsNullOrWhiteSpace(term))
                 {
-                    if (Path.GetFileNameWithoutExtension(term).Equals("kitty", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        Path.GetFileNameWithoutExtension(term)
+                            .Equals("kitty", StringComparison.OrdinalIgnoreCase)
+                    )
                         return TryStart(term, ["--detach", editorExe, .. extraArgs, fullPath]);
                     if (TryStart(term, ["-e", editorExe, .. extraArgs, fullPath]))
                         return true;
                 }
 
-                if (File.Exists("/usr/bin/kitty") && TryStart("/usr/bin/kitty", ["--detach", editorExe, .. extraArgs, fullPath]))
+                if (
+                    File.Exists("/usr/bin/kitty")
+                    && TryStart("/usr/bin/kitty", ["--detach", editorExe, .. extraArgs, fullPath])
+                )
                     return true;
-                if (File.Exists("/usr/bin/alacritty") && TryStart("/usr/bin/alacritty", ["-e", editorExe, .. extraArgs, fullPath]))
+                if (
+                    File.Exists("/usr/bin/alacritty")
+                    && TryStart("/usr/bin/alacritty", ["-e", editorExe, .. extraArgs, fullPath])
+                )
                     return true;
-                if (File.Exists("/usr/bin/wezterm") && TryStart("/usr/bin/wezterm", ["start", "--", editorExe, .. extraArgs, fullPath]))
+                if (
+                    File.Exists("/usr/bin/wezterm")
+                    && TryStart(
+                        "/usr/bin/wezterm",
+                        ["start", "--", editorExe, .. extraArgs, fullPath]
+                    )
+                )
                     return true;
             }
 
@@ -121,11 +153,7 @@ public static class ExternalFileLauncher
     {
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = fileName,
-                UseShellExecute = false
-            };
+            var psi = new ProcessStartInfo { FileName = fileName, UseShellExecute = false };
             foreach (var a in args)
                 psi.ArgumentList.Add(a);
 
@@ -144,7 +172,8 @@ public static class ExternalFileLauncher
     public static async Task OpenInElmsAppAndWatchAsync(
         string urlOrPath,
         Func<Task>? onWindowClosed = null,
-        AuthOptions? options = null)
+        AuthOptions? options = null
+    )
     {
         var proc = ElmsBrowserLauncher.LaunchAppWindow(urlOrPath, options);
         if (proc is null || onWindowClosed is null)

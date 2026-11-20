@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
-using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Theme;
 
 namespace ScholarFlow.Desktop.UI;
@@ -17,11 +16,43 @@ namespace ScholarFlow.Desktop.UI;
 /// </summary>
 public static partial class QuizRichContentRenderer
 {
-    private static readonly FontFamily MonospaceFont =
-        new("JetBrains Mono, Fira Code, Cascadia Mono, Consolas, monospace");
+    private static readonly FontFamily MonospaceFont = new(
+        "JetBrains Mono, Fira Code, Cascadia Mono, Consolas, monospace"
+    );
 
-    private static readonly FontFamily MathFont =
-        new("Cambria Math, STIX Two Math, Latin Modern Math, Georgia, serif");
+    private static readonly FontFamily MathFont = new(
+        "Cambria Math, STIX Two Math, Latin Modern Math, Georgia, serif"
+    );
+
+    [GeneratedRegex(@"\\frac\{([^{}]+)\}\{([^{}]+)\}")]
+    private static partial Regex FracInlineRegex();
+
+    [GeneratedRegex(@"\\sqrt\{([^{}]+)\}")]
+    private static partial Regex SqrtInlineRegex();
+
+    [GeneratedRegex(@"\\text\{([^{}]+)\}")]
+    private static partial Regex TextCommandRegex();
+
+    [GeneratedRegex(@"\\mathbf\{([^{}]+)\}")]
+    private static partial Regex MathbfCommandRegex();
+
+    [GeneratedRegex(@"\^\{([^{}]+)\}")]
+    private static partial Regex BracedSuperscriptRegex();
+
+    [GeneratedRegex(@"\^([0-9ni])")]
+    private static partial Regex SingleSuperscriptRegex();
+
+    [GeneratedRegex(@"_\{([^{}]+)\}")]
+    private static partial Regex BracedSubscriptRegex();
+
+    [GeneratedRegex(@"_([0-9ijknm])")]
+    private static partial Regex SingleSubscriptRegex();
+
+    [GeneratedRegex(@"^(?<pre>.*?)\\frac\{(?<num>[^{}]+)\}\{(?<den>[^{}]+)\}(?<post>.*)$")]
+    private static partial Regex StandaloneFractionRegex();
+
+    [GeneratedRegex(@"\s*(?:-->|==>|->)\s*")]
+    private static partial Regex DiagramArrowSplitRegex();
 
     private static readonly (string Latex, string Symbol)[] LatexReplacements =
     [
@@ -82,25 +113,66 @@ public static partial class QuizRichContentRenderer
         (@"\tan", "tan"),
         (@"\lim", "lim"),
         (@"\max", "max"),
-        (@"\min", "min")
+        (@"\min", "min"),
     ];
 
     private static readonly Dictionary<char, char> SuperscriptMap = new()
     {
-        ['0'] = '⁰', ['1'] = '¹', ['2'] = '²', ['3'] = '³', ['4'] = '⁴',
-        ['5'] = '⁵', ['6'] = '⁶', ['7'] = '⁷', ['8'] = '⁸', ['9'] = '⁹',
-        ['+'] = '⁺', ['-'] = '⁻', ['='] = '⁼', ['('] = '⁽', [')'] = '⁾',
-        ['n'] = 'ⁿ', ['i'] = 'ⁱ', ['x'] = 'ˣ', ['y'] = 'ʸ', ['k'] = 'ᵏ', ['m'] = 'ᵐ'
+        ['0'] = '⁰',
+        ['1'] = '¹',
+        ['2'] = '²',
+        ['3'] = '³',
+        ['4'] = '⁴',
+        ['5'] = '⁵',
+        ['6'] = '⁶',
+        ['7'] = '⁷',
+        ['8'] = '⁸',
+        ['9'] = '⁹',
+        ['+'] = '⁺',
+        ['-'] = '⁻',
+        ['='] = '⁼',
+        ['('] = '⁽',
+        [')'] = '⁾',
+        ['n'] = 'ⁿ',
+        ['i'] = 'ⁱ',
+        ['x'] = 'ˣ',
+        ['y'] = 'ʸ',
+        ['k'] = 'ᵏ',
+        ['m'] = 'ᵐ',
     };
 
     private static readonly Dictionary<char, char> SubscriptMap = new()
     {
-        ['0'] = '₀', ['1'] = '₁', ['2'] = '₂', ['3'] = '₃', ['4'] = '₄',
-        ['5'] = '₅', ['6'] = '₆', ['7'] = '₇', ['8'] = '₈', ['9'] = '₉',
-        ['+'] = '₊', ['-'] = '₋', ['='] = '₌', ['('] = '₍', [')'] = '₎',
-        ['a'] = 'ₐ', ['e'] = 'ₑ', ['i'] = 'ᵢ', ['j'] = 'ⱼ', ['k'] = 'ₖ',
-        ['m'] = 'ₘ', ['n'] = 'ₙ', ['o'] = 'ₒ', ['p'] = 'ₚ', ['r'] = 'ᵣ',
-        ['s'] = 'ₛ', ['t'] = 'ₜ', ['u'] = 'ᵤ', ['v'] = 'ᵥ', ['x'] = 'ₓ'
+        ['0'] = '₀',
+        ['1'] = '₁',
+        ['2'] = '₂',
+        ['3'] = '₃',
+        ['4'] = '₄',
+        ['5'] = '₅',
+        ['6'] = '₆',
+        ['7'] = '₇',
+        ['8'] = '₈',
+        ['9'] = '₉',
+        ['+'] = '₊',
+        ['-'] = '₋',
+        ['='] = '₌',
+        ['('] = '₍',
+        [')'] = '₎',
+        ['a'] = 'ₐ',
+        ['e'] = 'ₑ',
+        ['i'] = 'ᵢ',
+        ['j'] = 'ⱼ',
+        ['k'] = 'ₖ',
+        ['m'] = 'ₘ',
+        ['n'] = 'ₙ',
+        ['o'] = 'ₒ',
+        ['p'] = 'ₚ',
+        ['r'] = 'ᵣ',
+        ['s'] = 'ₛ',
+        ['t'] = 'ₜ',
+        ['u'] = 'ᵤ',
+        ['v'] = 'ᵥ',
+        ['x'] = 'ₓ',
     };
 
     /// <summary>
@@ -116,27 +188,35 @@ public static partial class QuizRichContentRenderer
             return s;
 
         s = s.Replace("$$", "").Replace("$", "");
-        s = Regex.Replace(s, @"\\frac\{([^{}]+)\}\{([^{}]+)\}", "($1) / ($2)");
-        s = Regex.Replace(s, @"\\sqrt\{([^{}]+)\}", "√($1)");
-        s = Regex.Replace(s, @"\\text\{([^{}]+)\}", "$1");
-        s = Regex.Replace(s, @"\\mathbf\{([^{}]+)\}", "$1");
+        s = FracInlineRegex().Replace(s, "($1) / ($2)");
+        s = SqrtInlineRegex().Replace(s, "√($1)");
+        s = TextCommandRegex().Replace(s, "$1");
+        s = MathbfCommandRegex().Replace(s, "$1");
 
         foreach (var (latex, sym) in LatexReplacements)
             s = s.Replace(latex, sym, StringComparison.Ordinal);
 
         // Superscripts ^{...} or ^x
-        s = Regex.Replace(s, @"\^\{([^{}]+)\}", m => TryConvertScript(m.Groups[1].Value, SuperscriptMap, '^'));
-        s = Regex.Replace(s, @"\^([0-9ni])", m => TryConvertScript(m.Groups[1].Value, SuperscriptMap, '^'));
+        s = BracedSuperscriptRegex()
+            .Replace(s, m => TryConvertScript(m.Groups[1].Value, SuperscriptMap, '^'));
+        s = SingleSuperscriptRegex()
+            .Replace(s, m => TryConvertScript(m.Groups[1].Value, SuperscriptMap, '^'));
 
         // Subscripts _{...} or _x
-        s = Regex.Replace(s, @"_\{([^{}]+)\}", m => TryConvertScript(m.Groups[1].Value, SubscriptMap, '_'));
-        s = Regex.Replace(s, @"_([0-9ijknm])", m => TryConvertScript(m.Groups[1].Value, SubscriptMap, '_'));
+        s = BracedSubscriptRegex()
+            .Replace(s, m => TryConvertScript(m.Groups[1].Value, SubscriptMap, '_'));
+        s = SingleSubscriptRegex()
+            .Replace(s, m => TryConvertScript(m.Groups[1].Value, SubscriptMap, '_'));
 
         s = s.Replace(@"\left", "").Replace(@"\right", "").Replace("{", "").Replace("}", "");
         return s.Trim();
     }
 
-    private static string TryConvertScript(string content, Dictionary<char, char> map, char fallbackPrefix)
+    private static string TryConvertScript(
+        string content,
+        Dictionary<char, char> map,
+        char fallbackPrefix
+    )
     {
         var chars = new char[content.Length];
         for (int i = 0; i < content.Length; i++)
@@ -150,22 +230,37 @@ public static partial class QuizRichContentRenderer
     public static Control BuildCodeSnippetCard(string codeSnippet, string? language)
     {
         var cleanCode = (codeSnippet ?? string.Empty).Trim();
-        var langLabel = string.IsNullOrWhiteSpace(language) ? "CODE" : language.Trim().ToUpperInvariant();
+        var langLabel = string.IsNullOrWhiteSpace(language)
+            ? "CODE"
+            : language.Trim().ToUpperInvariant();
 
         var outerStack = new StackPanel { Spacing = 6 };
         var topBar = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
 
-        var leftBadge = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        leftBadge.Children.Add(UiBuilder.Icon(MaterialIconKind.CodeTags, 14, ThemeService.Brush(ThemeService.AccentPrimary)));
-        leftBadge.Children.Add(new TextBlock
+        var leftBadge = new StackPanel
         {
-            Text = $"CODE SNIPPET · {langLabel}",
-            FontSize = 10.5,
-            FontWeight = FontWeight.Bold,
-            LetterSpacing = 0.6,
-            Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
-            VerticalAlignment = VerticalAlignment.Center
-        });
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        leftBadge.Children.Add(
+            UiBuilder.Icon(
+                MaterialIconKind.CodeTags,
+                14,
+                ThemeService.Brush(ThemeService.AccentPrimary)
+            )
+        );
+        leftBadge.Children.Add(
+            new TextBlock
+            {
+                Text = $"CODE SNIPPET · {langLabel}",
+                FontSize = 10.5,
+                FontWeight = FontWeight.Bold,
+                LetterSpacing = 0.6,
+                Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        );
         topBar.Children.Add(leftBadge);
 
         var codeBox = new TextBox
@@ -179,7 +274,7 @@ public static partial class QuizRichContentRenderer
             Foreground = ThemeService.Brush(ThemeService.TextPrimary),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(6, 4),
-            TextWrapping = TextWrapping.NoWrap
+            TextWrapping = TextWrapping.NoWrap,
         };
 
         var copyBtn = UiBuilder.GhostButton(
@@ -190,20 +285,23 @@ public static partial class QuizRichContentRenderer
                 var top = TopLevel.GetTopLevel(codeBox);
                 if (top?.Clipboard is not null)
                     await top.Clipboard.SetTextAsync(cleanCode);
-            });
+            }
+        );
         Grid.SetColumn(copyBtn, 1);
         topBar.Children.Add(copyBtn);
         outerStack.Children.Add(topBar);
 
-        outerStack.Children.Add(new Border
-        {
-            Background = ThemeService.Brush(ThemeService.BgBase),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(8, 6),
-            Child = codeBox
-        });
+        outerStack.Children.Add(
+            new Border
+            {
+                Background = ThemeService.Brush(ThemeService.BgBase),
+                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(8, 6),
+                Child = codeBox,
+            }
+        );
 
         return new Border
         {
@@ -212,7 +310,7 @@ public static partial class QuizRichContentRenderer
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(12, 10),
-            Child = outerStack
+            Child = outerStack,
         };
     }
 
@@ -220,21 +318,29 @@ public static partial class QuizRichContentRenderer
     {
         var stack = new StackPanel { Spacing = 8 };
         var topRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        topRow.Children.Add(UiBuilder.Icon(MaterialIconKind.FunctionVariant, 14, ThemeService.Brush(ThemeService.PriorityP3Fg)));
-        topRow.Children.Add(new TextBlock
-        {
-            Text = "MATHEMATICAL EXPRESSION",
-            FontSize = 10.5,
-            FontWeight = FontWeight.Bold,
-            LetterSpacing = 0.6,
-            Foreground = ThemeService.Brush(ThemeService.PriorityP3Fg),
-            VerticalAlignment = VerticalAlignment.Center
-        });
+        topRow.Children.Add(
+            UiBuilder.Icon(
+                MaterialIconKind.FunctionVariant,
+                14,
+                ThemeService.Brush(ThemeService.PriorityP3Fg)
+            )
+        );
+        topRow.Children.Add(
+            new TextBlock
+            {
+                Text = "MATHEMATICAL EXPRESSION",
+                FontSize = 10.5,
+                FontWeight = FontWeight.Bold,
+                LetterSpacing = 0.6,
+                Foreground = ThemeService.Brush(ThemeService.PriorityP3Fg),
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        );
         stack.Children.Add(topRow);
 
         Control equationVisual;
         var clean = rawLatex.Trim().Replace("$$", "").Replace("$", "");
-        var fracMatch = Regex.Match(clean, @"^(?<pre>.*?)\\frac\{(?<num>[^{}]+)\}\{(?<den>[^{}]+)\}(?<post>.*)$");
+        var fracMatch = StandaloneFractionRegex().Match(clean);
         if (fracMatch.Success)
         {
             // Render stacked visual fraction (pre + [num / horizontal bar / den] + post)
@@ -243,68 +349,78 @@ public static partial class QuizRichContentRenderer
                 Orientation = Orientation.Horizontal,
                 Spacing = 10,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
             };
 
             var pre = FormatInlineMath(fracMatch.Groups["pre"].Value);
             if (!string.IsNullOrWhiteSpace(pre))
             {
-                horiz.Children.Add(new TextBlock
-                {
-                    Text = pre,
-                    FontFamily = MathFont,
-                    FontSize = 18,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                    VerticalAlignment = VerticalAlignment.Center
-                });
+                horiz.Children.Add(
+                    new TextBlock
+                    {
+                        Text = pre,
+                        FontFamily = MathFont,
+                        FontSize = 18,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    }
+                );
             }
 
             var fracStack = new StackPanel
             {
                 Spacing = 3,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            fracStack.Children.Add(new TextBlock
-            {
-                Text = FormatInlineMath(fracMatch.Groups["num"].Value),
-                FontFamily = MathFont,
-                FontSize = 16,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                HorizontalAlignment = HorizontalAlignment.Center
-            });
-            fracStack.Children.Add(new Border
-            {
-                Height = 1.5,
-                MinWidth = 48,
-                Background = ThemeService.Brush(ThemeService.TextPrimary),
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            });
-            fracStack.Children.Add(new TextBlock
-            {
-                Text = FormatInlineMath(fracMatch.Groups["den"].Value),
-                FontFamily = MathFont,
-                FontSize = 16,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                HorizontalAlignment = HorizontalAlignment.Center
-            });
+            fracStack.Children.Add(
+                new TextBlock
+                {
+                    Text = FormatInlineMath(fracMatch.Groups["num"].Value),
+                    FontFamily = MathFont,
+                    FontSize = 16,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                }
+            );
+            fracStack.Children.Add(
+                new Border
+                {
+                    Height = 1.5,
+                    MinWidth = 48,
+                    Background = ThemeService.Brush(ThemeService.TextPrimary),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                }
+            );
+            fracStack.Children.Add(
+                new TextBlock
+                {
+                    Text = FormatInlineMath(fracMatch.Groups["den"].Value),
+                    FontFamily = MathFont,
+                    FontSize = 16,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                }
+            );
             horiz.Children.Add(fracStack);
 
             var post = FormatInlineMath(fracMatch.Groups["post"].Value);
             if (!string.IsNullOrWhiteSpace(post))
             {
-                horiz.Children.Add(new TextBlock
-                {
-                    Text = post,
-                    FontFamily = MathFont,
-                    FontSize = 18,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                    VerticalAlignment = VerticalAlignment.Center
-                });
+                horiz.Children.Add(
+                    new TextBlock
+                    {
+                        Text = post,
+                        FontFamily = MathFont,
+                        FontSize = 18,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    }
+                );
             }
 
             equationVisual = horiz;
@@ -319,19 +435,21 @@ public static partial class QuizRichContentRenderer
                 FontWeight = FontWeight.SemiBold,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                TextWrapping = TextWrapping.Wrap
+                TextWrapping = TextWrapping.Wrap,
             };
         }
 
-        stack.Children.Add(new Border
-        {
-            Background = ThemeService.Brush(ThemeService.BgBase),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(16, 12),
-            Child = equationVisual
-        });
+        stack.Children.Add(
+            new Border
+            {
+                Background = ThemeService.Brush(ThemeService.BgBase),
+                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(16, 12),
+                Child = equationVisual,
+            }
+        );
 
         return new Border
         {
@@ -340,7 +458,7 @@ public static partial class QuizRichContentRenderer
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(12, 10),
-            Child = stack
+            Child = stack,
         };
     }
 
@@ -350,20 +468,29 @@ public static partial class QuizRichContentRenderer
         var stack = new StackPanel { Spacing = 8 };
 
         var topRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        topRow.Children.Add(UiBuilder.Icon(MaterialIconKind.SitemapOutline, 14, ThemeService.Brush(ThemeService.PriorityP2Fg)));
-        topRow.Children.Add(new TextBlock
-        {
-            Text = "ARCHITECTURE / PROCESS FLOW DIAGRAM",
-            FontSize = 10.5,
-            FontWeight = FontWeight.Bold,
-            LetterSpacing = 0.6,
-            Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
-            VerticalAlignment = VerticalAlignment.Center
-        });
+        topRow.Children.Add(
+            UiBuilder.Icon(
+                MaterialIconKind.SitemapOutline,
+                14,
+                ThemeService.Brush(ThemeService.PriorityP2Fg)
+            )
+        );
+        topRow.Children.Add(
+            new TextBlock
+            {
+                Text = "ARCHITECTURE / PROCESS FLOW DIAGRAM",
+                FontSize = 10.5,
+                FontWeight = FontWeight.Bold,
+                LetterSpacing = 0.6,
+                Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        );
         stack.Children.Add(topRow);
 
         // Parse node chains separated by ->, -->, or ==>
-        var nodes = Regex.Split(clean, @"\s*(?:-->|==>|->)\s*")
+        var nodes = DiagramArrowSplitRegex()
+            .Split(clean)
             .Select(n => n.Trim().Trim('[', ']', '(', ')'))
             .Where(n => n.Length > 0)
             .ToList();
@@ -374,7 +501,7 @@ public static partial class QuizRichContentRenderer
             var flowWrap = new WrapPanel
             {
                 Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Center
+                HorizontalAlignment = HorizontalAlignment.Center,
             };
 
             for (int i = 0; i < nodes.Count; i++)
@@ -393,22 +520,24 @@ public static partial class QuizRichContentRenderer
                         FontSize = 12.5,
                         FontWeight = FontWeight.SemiBold,
                         Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                        VerticalAlignment = VerticalAlignment.Center
-                    }
+                        VerticalAlignment = VerticalAlignment.Center,
+                    },
                 };
                 flowWrap.Children.Add(nodeBox);
 
                 if (i + 1 < nodes.Count)
                 {
-                    flowWrap.Children.Add(new TextBlock
-                    {
-                        Text = "  →  ",
-                        FontSize = 15,
-                        FontWeight = FontWeight.Bold,
-                        Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Margin = new Thickness(2, 0)
-                    });
+                    flowWrap.Children.Add(
+                        new TextBlock
+                        {
+                            Text = "  →  ",
+                            FontSize = 15,
+                            FontWeight = FontWeight.Bold,
+                            Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(2, 0),
+                        }
+                    );
                 }
             }
 
@@ -422,19 +551,21 @@ public static partial class QuizRichContentRenderer
                 FontFamily = MonospaceFont,
                 FontSize = 12,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                TextWrapping = TextWrapping.Wrap
+                TextWrapping = TextWrapping.Wrap,
             };
         }
 
-        stack.Children.Add(new Border
-        {
-            Background = ThemeService.Brush(ThemeService.BgBase),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(14, 10),
-            Child = diagramBody
-        });
+        stack.Children.Add(
+            new Border
+            {
+                Background = ThemeService.Brush(ThemeService.BgBase),
+                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14, 10),
+                Child = diagramBody,
+            }
+        );
 
         return new Border
         {
@@ -443,7 +574,7 @@ public static partial class QuizRichContentRenderer
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(12, 10),
-            Child = stack
+            Child = stack,
         };
     }
 }

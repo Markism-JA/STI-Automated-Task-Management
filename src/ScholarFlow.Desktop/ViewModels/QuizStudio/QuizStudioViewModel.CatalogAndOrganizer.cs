@@ -1,12 +1,7 @@
-using Avalonia.Media.Imaging;
 using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Quiz;
-using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class QuizStudioViewModel
 {
@@ -18,7 +13,13 @@ public sealed partial class QuizStudioViewModel
 
     public void SetCatalogTermFilter(string? term)
     {
-        CatalogTermFilter = string.Equals(CatalogTermFilter, term, StringComparison.OrdinalIgnoreCase) ? null : term;
+        CatalogTermFilter = string.Equals(
+            CatalogTermFilter,
+            term,
+            StringComparison.OrdinalIgnoreCase
+        )
+            ? null
+            : term;
         _mainVm.RequestUiRefresh();
     }
 
@@ -60,36 +61,38 @@ public sealed partial class QuizStudioViewModel
         {
             foreach (var orig in qz.Questions)
             {
-                combinedQuestions.Add(new QuizQuestionRecord
-                {
-                    Id = Guid.NewGuid().ToString("N")[..12],
-                    Kind = orig.Kind,
-                    CognitiveLevel = orig.CognitiveLevel,
-                    Difficulty = orig.Difficulty,
-                    TopicTag = orig.TopicTag,
-                    Prompt = orig.Prompt,
-                    Options = [.. orig.Options],
-                    CorrectAnswer = orig.CorrectAnswer,
-                    AcceptedAliases = [.. orig.AcceptedAliases],
-                    Explanation = orig.Explanation,
-                    CodeSnippet = orig.CodeSnippet,
-                    CodeLanguage = orig.CodeLanguage,
-                    MathLatex = orig.MathLatex,
-                    Diagram = orig.Diagram,
-                    SourcePdfPath = orig.SourcePdfPath,
-                    SourcePage = orig.SourcePage,
-                    SectionTitle = orig.SectionTitle,
-                    VerbatimQuote = orig.VerbatimQuote,
-                    HighlightRects = [.. orig.HighlightRects],
-                    SrsDueDate = orig.SrsDueDate ?? DateOnly.FromDateTime(DateTime.Today)
-                });
+                combinedQuestions.Add(
+                    new QuizQuestionRecord
+                    {
+                        Id = Guid.NewGuid().ToString("N")[..12],
+                        Kind = orig.Kind,
+                        CognitiveLevel = orig.CognitiveLevel,
+                        Difficulty = orig.Difficulty,
+                        TopicTag = orig.TopicTag,
+                        Prompt = orig.Prompt,
+                        Options = [.. orig.Options],
+                        CorrectAnswer = orig.CorrectAnswer,
+                        AcceptedAliases = [.. orig.AcceptedAliases],
+                        Explanation = orig.Explanation,
+                        CodeSnippet = orig.CodeSnippet,
+                        CodeLanguage = orig.CodeLanguage,
+                        MathLatex = orig.MathLatex,
+                        Diagram = orig.Diagram,
+                        SourcePdfPath = orig.SourcePdfPath,
+                        SourcePage = orig.SourcePage,
+                        SectionTitle = orig.SectionTitle,
+                        VerbatimQuote = orig.VerbatimQuote,
+                        HighlightRects = [.. orig.HighlightRects],
+                        SrsDueDate = orig.SrsDueDate ?? DateOnly.FromDateTime(DateTime.Today),
+                    }
+                );
             }
         }
 
         if (shuffleQuestions)
         {
             var rng = new Random();
-            combinedQuestions = combinedQuestions.OrderBy(_ => rng.Next()).ToList();
+            combinedQuestions = [.. combinedQuestions.OrderBy(_ => rng.Next())];
         }
 
         var first = selectedQuizzes[0];
@@ -114,17 +117,17 @@ public sealed partial class QuizStudioViewModel
             SourcePdfPath = first.SourcePdfPath,
             ModelUsed = "Combined Catalog",
             CreatedAtUtc = DateTimeOffset.UtcNow,
-            Questions = combinedQuestions
+            Questions = combinedQuestions,
         };
 
         await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, mergedSession);
         SelectedQuizIdsForMerge.Clear();
         await RefreshAsync(SelectedCourse, SelectedPdfPath);
-        StatusMessage = $"Combined {selectedQuizzes.Count} quizzes into '{mergedSession.Title}' ({combinedQuestions.Count} questions).";
+        StatusMessage =
+            $"Combined {selectedQuizzes.Count} quizzes into '{mergedSession.Title}' ({combinedQuestions.Count} questions).";
         IsStatusError = false;
         StartQuizSession(mergedSession);
     }
-
 
     public async Task DeleteQuizAsync(QuizSessionRecord quiz)
     {
@@ -148,7 +151,8 @@ public sealed partial class QuizStudioViewModel
 
         IsGenerating = true;
         IsStatusError = false;
-        StatusMessage = $"Re-grounding '{quiz.Title}' against {Path.GetFileName(quiz.SourcePdfPath)}...";
+        StatusMessage =
+            $"Re-grounding '{quiz.Title}' against {Path.GetFileName(quiz.SourcePdfPath)}...";
         _mainVm.RequestUiRefresh();
         await Task.Yield();
 
@@ -160,7 +164,8 @@ public sealed partial class QuizStudioViewModel
             if (OrganizerQuiz?.Id == quiz.Id)
                 OrganizerQuiz = SavedQuizzes.FirstOrDefault(x => x.Id == quiz.Id) ?? quiz;
 
-            StatusMessage = $"Re-grounded '{quiz.Title}' against updated PDF ({matched}/{quiz.Questions.Count} statements anchored).";
+            StatusMessage =
+                $"Re-grounded '{quiz.Title}' against updated PDF ({matched}/{quiz.Questions.Count} statements anchored).";
             IsStatusError = false;
         }
         finally
@@ -189,12 +194,13 @@ public sealed partial class QuizStudioViewModel
             CreatedAtUtc = quiz.CreatedAtUtc,
             AttemptCount = quiz.AttemptCount,
             LastScorePercent = quiz.LastScorePercent,
-            Questions = quiz.Questions.Select(CloneQuestionForEdit).ToList()
+            Questions = [.. quiz.Questions.Select(CloneQuestionForEdit)],
         };
         OrganizerKindFilter = null;
         EditingQuestionId = null;
         ActiveSubTab = QuizStudioSubTab.Organizer;
-        StatusMessage = $"Organizing '{quiz.Title}' ({quiz.Questions.Count} items). Reorder, filter by kind, edit, or shuffle.";
+        StatusMessage =
+            $"Organizing '{quiz.Title}' ({quiz.Questions.Count} items). Reorder, filter by kind, edit, or shuffle.";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
@@ -204,7 +210,8 @@ public sealed partial class QuizStudioViewModel
         var selected = SavedQuizzes.Where(q => SelectedQuizIdsForMerge.Contains(q.Id)).ToList();
         if (selected.Count == 0)
         {
-            StatusMessage = "Select 1 or more quizzes in the catalog to open in the Deck Organizer.";
+            StatusMessage =
+                "Select 1 or more quizzes in the catalog to open in the Deck Organizer.";
             IsStatusError = true;
             _mainVm.RequestUiRefresh();
             return;
@@ -217,7 +224,11 @@ public sealed partial class QuizStudioViewModel
         }
 
         var first = selected[0];
-        var distinctTerms = selected.Select(q => q.Term).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var distinctTerms = selected
+            .Select(q => q.Term)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var mergedQuestions = new List<QuizQuestionRecord>();
         foreach (var qz in selected)
         {
@@ -232,8 +243,12 @@ public sealed partial class QuizStudioViewModel
 
         OrganizerQuiz = new QuizSessionRecord
         {
-            CourseFolder = selected.All(q => q.CourseFolder == first.CourseFolder) ? first.CourseFolder : (SelectedCourse?.FolderName ?? first.CourseFolder),
-            CourseTitle = selected.All(q => q.CourseTitle == first.CourseTitle) ? first.CourseTitle : "Combined Multi-Subject Assessment",
+            CourseFolder = selected.All(q => q.CourseFolder == first.CourseFolder)
+                ? first.CourseFolder
+                : (SelectedCourse?.FolderName ?? first.CourseFolder),
+            CourseTitle = selected.All(q => q.CourseTitle == first.CourseTitle)
+                ? first.CourseTitle
+                : "Combined Multi-Subject Assessment",
             Term = distinctTerms.Count == 1 ? distinctTerms[0] : "Combined",
             Title = !string.IsNullOrWhiteSpace(customTitle)
                 ? customTitle.Trim()
@@ -242,46 +257,48 @@ public sealed partial class QuizStudioViewModel
             SourcePdfMtimeTicks = first.SourcePdfMtimeTicks,
             ModelUsed = "Curated Multi-Deck",
             CreatedAtUtc = DateTimeOffset.UtcNow,
-            Questions = mergedQuestions
+            Questions = mergedQuestions,
         };
         OrganizerKindFilter = null;
         EditingQuestionId = null;
         ActiveSubTab = QuizStudioSubTab.Organizer;
-        StatusMessage = $"Curating combined deck from {selected.Count} quizzes ({mergedQuestions.Count} items). Customize and click Save Deck.";
+        StatusMessage =
+            $"Curating combined deck from {selected.Count} quizzes ({mergedQuestions.Count} items). Customize and click Save Deck.";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
 
-    private static QuizQuestionRecord CloneQuestionForEdit(QuizQuestionRecord orig) => new()
-    {
-        Id = orig.Id,
-        QuizId = orig.QuizId,
-        OrderIndex = orig.OrderIndex,
-        Kind = orig.Kind,
-        CognitiveLevel = orig.CognitiveLevel,
-        Difficulty = orig.Difficulty,
-        TopicTag = orig.TopicTag,
-        Prompt = orig.Prompt,
-        Options = [.. orig.Options],
-        CorrectAnswer = orig.CorrectAnswer,
-        AcceptedAliases = [.. orig.AcceptedAliases],
-        Explanation = orig.Explanation,
-        CodeSnippet = orig.CodeSnippet,
-        CodeLanguage = orig.CodeLanguage,
-        MathLatex = orig.MathLatex,
-        Diagram = orig.Diagram,
-        SourcePdfPath = orig.SourcePdfPath,
-        SourcePage = orig.SourcePage,
-        SectionTitle = orig.SectionTitle,
-        VerbatimQuote = orig.VerbatimQuote,
-        HighlightRects = [.. orig.HighlightRects],
-        SrsIntervalDays = orig.SrsIntervalDays,
-        SrsEaseFactor = orig.SrsEaseFactor,
-        SrsDueDate = orig.SrsDueDate,
-        SrsReps = orig.SrsReps,
-        SrsLapses = orig.SrsLapses,
-        LastAnsweredCorrect = orig.LastAnsweredCorrect
-    };
+    private static QuizQuestionRecord CloneQuestionForEdit(QuizQuestionRecord orig) =>
+        new()
+        {
+            Id = orig.Id,
+            QuizId = orig.QuizId,
+            OrderIndex = orig.OrderIndex,
+            Kind = orig.Kind,
+            CognitiveLevel = orig.CognitiveLevel,
+            Difficulty = orig.Difficulty,
+            TopicTag = orig.TopicTag,
+            Prompt = orig.Prompt,
+            Options = [.. orig.Options],
+            CorrectAnswer = orig.CorrectAnswer,
+            AcceptedAliases = [.. orig.AcceptedAliases],
+            Explanation = orig.Explanation,
+            CodeSnippet = orig.CodeSnippet,
+            CodeLanguage = orig.CodeLanguage,
+            MathLatex = orig.MathLatex,
+            Diagram = orig.Diagram,
+            SourcePdfPath = orig.SourcePdfPath,
+            SourcePage = orig.SourcePage,
+            SectionTitle = orig.SectionTitle,
+            VerbatimQuote = orig.VerbatimQuote,
+            HighlightRects = [.. orig.HighlightRects],
+            SrsIntervalDays = orig.SrsIntervalDays,
+            SrsEaseFactor = orig.SrsEaseFactor,
+            SrsDueDate = orig.SrsDueDate,
+            SrsReps = orig.SrsReps,
+            SrsLapses = orig.SrsLapses,
+            LastAnsweredCorrect = orig.LastAnsweredCorrect,
+        };
 
     public void SetOrganizerKindFilter(QuizQuestionKind? kind)
     {
@@ -291,7 +308,11 @@ public sealed partial class QuizStudioViewModel
 
     public void ToggleEditQuestion(string questionId)
     {
-        EditingQuestionId = string.Equals(EditingQuestionId, questionId, StringComparison.OrdinalIgnoreCase)
+        EditingQuestionId = string.Equals(
+            EditingQuestionId,
+            questionId,
+            StringComparison.OrdinalIgnoreCase
+        )
             ? null
             : questionId;
         _mainVm.RequestUiRefresh();
@@ -299,20 +320,25 @@ public sealed partial class QuizStudioViewModel
 
     public void MoveOrganizerQuestion(QuizQuestionRecord q, int delta)
     {
-        if (OrganizerQuiz is null) return;
+        if (OrganizerQuiz is null)
+            return;
         int idx = OrganizerQuiz.Questions.IndexOf(q);
         int target = idx + delta;
-        if (idx < 0 || target < 0 || target >= OrganizerQuiz.Questions.Count) return;
+        if (idx < 0 || target < 0 || target >= OrganizerQuiz.Questions.Count)
+            return;
 
-        (OrganizerQuiz.Questions[idx], OrganizerQuiz.Questions[target]) =
-            (OrganizerQuiz.Questions[target], OrganizerQuiz.Questions[idx]);
+        (OrganizerQuiz.Questions[idx], OrganizerQuiz.Questions[target]) = (
+            OrganizerQuiz.Questions[target],
+            OrganizerQuiz.Questions[idx]
+        );
         ReindexOrganizerQuestions();
         _mainVm.RequestUiRefresh();
     }
 
     public void ShuffleOrganizerQuestions(QuizQuestionKind? onlyKind = null)
     {
-        if (OrganizerQuiz is null || OrganizerQuiz.Questions.Count <= 1) return;
+        if (OrganizerQuiz is null || OrganizerQuiz.Questions.Count <= 1)
+            return;
         var rng = new Random();
 
         if (onlyKind.HasValue)
@@ -334,7 +360,7 @@ public sealed partial class QuizStudioViewModel
         }
         else
         {
-            OrganizerQuiz.Questions = OrganizerQuiz.Questions.OrderBy(_ => rng.Next()).ToList();
+            OrganizerQuiz.Questions = [.. OrganizerQuiz.Questions.OrderBy(_ => rng.Next())];
             StatusMessage = $"Shuffled all {OrganizerQuiz.Questions.Count} questions in deck.";
         }
 
@@ -344,11 +370,12 @@ public sealed partial class QuizStudioViewModel
 
     public void SortOrganizerQuestionsByKind()
     {
-        if (OrganizerQuiz is null) return;
-        OrganizerQuiz.Questions = OrganizerQuiz.Questions
-            .OrderBy(q => (int)q.Kind)
-            .ThenBy(q => q.SourcePage)
-            .ToList();
+        if (OrganizerQuiz is null)
+            return;
+        OrganizerQuiz.Questions =
+        [
+            .. OrganizerQuiz.Questions.OrderBy(q => (int)q.Kind).ThenBy(q => q.SourcePage),
+        ];
         ReindexOrganizerQuestions();
         StatusMessage = "Grouped and ordered deck questions by Question Kind.";
         _mainVm.RequestUiRefresh();
@@ -356,11 +383,12 @@ public sealed partial class QuizStudioViewModel
 
     public void SortOrganizerQuestionsByPage()
     {
-        if (OrganizerQuiz is null) return;
-        OrganizerQuiz.Questions = OrganizerQuiz.Questions
-            .OrderBy(q => q.SourcePage)
-            .ThenBy(q => q.OrderIndex)
-            .ToList();
+        if (OrganizerQuiz is null)
+            return;
+        OrganizerQuiz.Questions =
+        [
+            .. OrganizerQuiz.Questions.OrderBy(q => q.SourcePage).ThenBy(q => q.OrderIndex),
+        ];
         ReindexOrganizerQuestions();
         StatusMessage = "Ordered deck questions chronologically by PDF Page.";
         _mainVm.RequestUiRefresh();
@@ -368,7 +396,8 @@ public sealed partial class QuizStudioViewModel
 
     public void DeleteOrganizerQuestion(QuizQuestionRecord q)
     {
-        if (OrganizerQuiz is null) return;
+        if (OrganizerQuiz is null)
+            return;
         OrganizerQuiz.Questions.Remove(q);
         ReindexOrganizerQuestions();
         if (EditingQuestionId == q.Id)
@@ -378,32 +407,40 @@ public sealed partial class QuizStudioViewModel
 
     public void AddBlankOrganizerQuestion(QuizQuestionKind kind)
     {
-        if (OrganizerQuiz is null) return;
+        if (OrganizerQuiz is null)
+            return;
         var q = new QuizQuestionRecord
         {
             QuizId = OrganizerQuiz.Id,
             OrderIndex = OrganizerQuiz.Questions.Count,
             Kind = kind,
-            Prompt = kind == QuizQuestionKind.FillInTheBlank
-                ? "Enter statement with _____ for the missing concept..."
-                : "Enter question prompt...",
+            Prompt =
+                kind == QuizQuestionKind.FillInTheBlank
+                    ? "Enter statement with _____ for the missing concept..."
+                    : "Enter question prompt...",
             Options = kind switch
             {
-                QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational => ["Option A", "Option B", "Option C", "Option D"],
+                QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational =>
+                [
+                    "Option A",
+                    "Option B",
+                    "Option C",
+                    "Option D",
+                ],
                 QuizQuestionKind.TrueFalse => ["True", "False"],
                 QuizQuestionKind.Ordering => ["Step 1", "Step 2", "Step 3"],
-                _ => []
+                _ => [],
             },
             CorrectAnswer = kind switch
             {
                 QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational => "Option A",
                 QuizQuestionKind.TrueFalse => "True",
                 QuizQuestionKind.Ordering => "Step 1 -> Step 2 -> Step 3",
-                _ => "Answer"
+                _ => "Answer",
             },
             SourcePdfPath = OrganizerQuiz.SourcePdfPath,
             SourcePage = 1,
-            SrsDueDate = DateOnly.FromDateTime(DateTime.Today)
+            SrsDueDate = DateOnly.FromDateTime(DateTime.Today),
         };
         OrganizerQuiz.Questions.Add(q);
         EditingQuestionId = q.Id;
@@ -412,19 +449,22 @@ public sealed partial class QuizStudioViewModel
 
     public async Task SaveOrganizerDeckAsync()
     {
-        if (OrganizerQuiz is null) return;
+        if (OrganizerQuiz is null)
+            return;
         ReindexOrganizerQuestions();
         await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, OrganizerQuiz);
         SelectedQuizIdsForMerge.Clear();
         SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
-        StatusMessage = $"Saved deck '{OrganizerQuiz.Title}' ({OrganizerQuiz.Questions.Count} questions).";
+        StatusMessage =
+            $"Saved deck '{OrganizerQuiz.Title}' ({OrganizerQuiz.Questions.Count} questions).";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
 
     private void ReindexOrganizerQuestions()
     {
-        if (OrganizerQuiz is null) return;
+        if (OrganizerQuiz is null)
+            return;
         for (int i = 0; i < OrganizerQuiz.Questions.Count; i++)
         {
             OrganizerQuiz.Questions[i].QuizId = OrganizerQuiz.Id;
@@ -456,11 +496,18 @@ public sealed partial class QuizStudioViewModel
         var courseTitle = course?.Title ?? "Imported Course";
 
         var imported = await Task.Run(() =>
-            QuizExportService.ImportDeckFromJson(rawJson, courseFolder, courseTitle, SelectedPdfPath));
+            QuizExportService.ImportDeckFromJson(
+                rawJson,
+                courseFolder,
+                courseTitle,
+                SelectedPdfPath
+            )
+        );
 
         await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, imported);
         SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
-        StatusMessage = $"Imported '{imported.Title}' ({imported.Questions.Count} questions) into {courseTitle}.";
+        StatusMessage =
+            $"Imported '{imported.Title}' ({imported.Questions.Count} questions) into {courseTitle}.";
         IsStatusError = false;
         _mainVm.RequestUiRefresh();
     }
@@ -488,8 +535,18 @@ public sealed partial class QuizStudioViewModel
     public string BuildQuestionAiFixPrompt(QuizQuestionRecord question, string problemDescription)
     {
         FlagProblemDescription = problemDescription;
-        var deck = OrganizerQuiz ?? new QuizSessionRecord { Title = "Quiz Deck", CourseTitle = SelectedCourse?.Title ?? "Course" };
-        FlagFixPromptPreview = QuizExportService.BuildSingleQuestionFixPrompt(deck, question, problemDescription);
+        var deck =
+            OrganizerQuiz
+            ?? new QuizSessionRecord
+            {
+                Title = "Quiz Deck",
+                CourseTitle = SelectedCourse?.Title ?? "Course",
+            };
+        FlagFixPromptPreview = QuizExportService.BuildSingleQuestionFixPrompt(
+            deck,
+            question,
+            problemDescription
+        );
         _mainVm.RequestUiRefresh();
         return FlagFixPromptPreview;
     }

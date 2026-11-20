@@ -1,10 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Presenters;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Material.Icons;
 using ScholarFlow.Core.Models;
@@ -14,7 +12,6 @@ using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
 
 namespace ScholarFlow.Desktop.Views;
-
 
 /// <summary>
 /// MainWindow partial: Todoist-style hairline task list and task rows.
@@ -94,19 +91,19 @@ public sealed partial class MainWindow
                 UiBuilder.GhostButton(
                     "Add task",
                     MaterialIconKind.Plus,
-                    () => vm.OpenQuickAddModal(),
+                    vm.OpenQuickAddModal,
                     isActive: true
                 )
             );
             headerActions.Children.Add(
-                UiBuilder.IconButton(MaterialIconKind.Magnify, () => vm.OpenSearchModal(), 16)
+                UiBuilder.IconButton(MaterialIconKind.Magnify, vm.OpenSearchModal, 16)
             );
             if (vm.SelectedTask is not null)
             {
                 headerActions.Children.Add(
                     UiBuilder.IconButton(
                         MaterialIconKind.DockRight,
-                        () => vm.ToggleInspector(),
+                        vm.ToggleInspector,
                         16,
                         vm.IsInspectorOpen ? ThemeService.Brush(ThemeService.AccentPrimary) : null
                     )
@@ -195,7 +192,10 @@ public sealed partial class MainWindow
         stack.Children.Add(filterBar);
 
         // Per-Subject Filter Bar in Completed View
-        if (vm.ActiveSmartView == SmartViewKind.Completed && vm.ActiveMode == WorkspaceTabMode.TaskList)
+        if (
+            vm.ActiveSmartView == SmartViewKind.Completed
+            && vm.ActiveMode == WorkspaceTabMode.TaskList
+        )
         {
             var subjectWrap = new WrapPanel { Orientation = Orientation.Horizontal };
             var allSubjectsBtn = UiBuilder.GhostButton(
@@ -217,7 +217,11 @@ public sealed partial class MainWindow
                 );
                 int doneCount = vm.AllTasks.Count(t =>
                     t.IsCompleted
-                    && string.Equals(t.CourseFolder, c.FolderName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        t.CourseFolder,
+                        c.FolderName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
                 );
                 var cBtn = UiBuilder.GhostButton(
                     $"#{c.Alias} ({doneCount})",
@@ -244,7 +248,7 @@ public sealed partial class MainWindow
                     )
                     .ToList()
             : vm.ActiveSmartView is SmartViewKind.Inbox or SmartViewKind.All
-                ? vm.UnregisteredFiles.ToList()
+                ? [.. vm.UnregisteredFiles]
             : [];
 
         if (relevantUnregistered.Count > 0)
@@ -524,7 +528,7 @@ public sealed partial class MainWindow
         return result;
     }
 
-    private Control BuildHairlineTaskRow(MainWindowViewModel vm, TaskItem task, DateOnly today)
+    private Border BuildHairlineTaskRow(MainWindowViewModel vm, TaskItem task, DateOnly today)
     {
         bool isSelected = vm.SelectedTask?.Id == task.Id;
         var (pFg, pBg) = ThemeService.GetPriorityBrushes(task.Priority);
@@ -934,5 +938,4 @@ public sealed partial class MainWindow
     // =========================================================================
     // 3. FLOATING CENTERED MODALS (QUICK ADD, QUICK SEARCH, NOTIFICATIONS, HELP)
     // =========================================================================
-
 }

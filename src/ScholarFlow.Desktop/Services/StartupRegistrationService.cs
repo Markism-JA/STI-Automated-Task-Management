@@ -15,12 +15,12 @@ public static class StartupRegistrationService
 
         if (OperatingSystem.IsWindows())
         {
-#pragma warning disable CA1416
             try
             {
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                     @"Software\Microsoft\Windows\CurrentVersion\Run",
-                    writable: true);
+                    writable: true
+                );
                 if (key is null)
                     return;
 
@@ -33,7 +33,6 @@ public static class StartupRegistrationService
             {
                 // Non-fatal if registry access is restricted
             }
-#pragma warning restore CA1416
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -41,7 +40,10 @@ public static class StartupRegistrationService
             {
                 var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
                 if (string.IsNullOrWhiteSpace(configHome))
-                    configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+                    configHome = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        ".config"
+                    );
 
                 var autostartDir = Path.Combine(configHome, "autostart");
                 var desktopFile = Path.Combine(autostartDir, "scholarflow.desktop");

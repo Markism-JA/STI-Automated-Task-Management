@@ -1,18 +1,8 @@
-using Avalonia.Threading;
-using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Services;
-using ScholarFlow.Core.Sync;
-using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Services;
-using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Client;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class MainWindowViewModel
 {
@@ -26,9 +16,15 @@ public sealed partial class MainWindowViewModel
         NotifyStateChanged(UiChangeKind.OverlayOnly);
     }
 
-    public async Task CompleteOnboardingAsync(string vaultPath, bool runElmsAuth, bool runInitialSync)
+    public async Task CompleteOnboardingAsync(
+        string vaultPath,
+        bool runElmsAuth,
+        bool runInitialSync
+    )
     {
-        var resolvedPath = string.IsNullOrWhiteSpace(vaultPath) ? OnboardingVaultPath : vaultPath.Trim();
+        var resolvedPath = string.IsNullOrWhiteSpace(vaultPath)
+            ? OnboardingVaultPath
+            : vaultPath.Trim();
         IsOnboardingOpen = false;
         Settings.HasCompletedOnboarding = true;
         Settings.EnableElmsIntegration = runElmsAuth || runInitialSync;
@@ -54,7 +50,12 @@ public sealed partial class MainWindowViewModel
         if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(title))
             return;
 
-        var created = await _basinService.CreateLocalCourseAsync(BasinRoot, title, alias, courseCode);
+        var created = await _basinService.CreateLocalCourseAsync(
+            BasinRoot,
+            title,
+            alias,
+            courseCode
+        );
         IsAddCourseModalOpen = false;
         await ReloadBasinDataAsync();
         SelectCourse(created, showMaterials: true);
@@ -62,7 +63,10 @@ public sealed partial class MainWindowViewModel
         NotifyStateChanged();
     }
 
-    public async Task ImportPdfsToCourseAsync(BasinCourseEntry course, IReadOnlyList<string> sourcePdfPaths)
+    public async Task ImportPdfsToCourseAsync(
+        BasinCourseEntry course,
+        IReadOnlyList<string> sourcePdfPaths
+    )
     {
         if (string.IsNullOrWhiteSpace(BasinRoot) || sourcePdfPaths.Count == 0)
             return;
@@ -70,9 +74,16 @@ public sealed partial class MainWindowViewModel
         var courseDir = Path.Combine(BasinRoot, course.FolderName);
         Directory.CreateDirectory(courseDir);
 
-        int existingModules = Directory.GetDirectories(courseDir)
+        int existingModules = Directory
+            .GetDirectories(courseDir)
             .Select(Path.GetFileName)
-            .Count(n => n is not null && n.Length >= 3 && char.IsDigit(n[0]) && char.IsDigit(n[1]) && n[2] == '_');
+            .Count(n =>
+                n is not null
+                && n.Length >= 3
+                && char.IsDigit(n[0])
+                && char.IsDigit(n[1])
+                && n[2] == '_'
+            );
 
         int copied = 0;
         foreach (var src in sourcePdfPaths)
@@ -82,7 +93,8 @@ public sealed partial class MainWindowViewModel
 
             existingModules++;
             var stem = Path.GetFileNameWithoutExtension(src);
-            var folderName = $"{existingModules:00}_{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(stem, "").TrimEnd('.')}";
+            var folderName =
+                $"{existingModules:00}_{Elms.Parsing.FilenameSanitizer.SanitizeFileName(stem, "").TrimEnd('.')}";
             var destDir = Path.Combine(courseDir, folderName);
             Directory.CreateDirectory(destDir);
             var destPath = Path.Combine(destDir, Path.GetFileName(src));
@@ -136,9 +148,8 @@ public sealed partial class MainWindowViewModel
     public async Task ToggleLaunchOnStartupAsync()
     {
         Settings.LaunchOnStartup = !Settings.LaunchOnStartup;
-        Services.StartupRegistrationService.SetEnabled(Settings.LaunchOnStartup);
+        StartupRegistrationService.SetEnabled(Settings.LaunchOnStartup);
         await AppSettingsStore.SaveAsync(Settings);
         NotifyStateChanged(UiChangeKind.OverlayOnly);
     }
-
 }

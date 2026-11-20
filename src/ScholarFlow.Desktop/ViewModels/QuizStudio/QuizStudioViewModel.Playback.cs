@@ -1,12 +1,7 @@
-using Avalonia.Media.Imaging;
 using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Quiz;
-using ScholarFlow.Core.Services;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class QuizStudioViewModel
 {
@@ -15,9 +10,11 @@ public sealed partial class QuizStudioViewModel
         bool? shuffleQuestionsOverride = null,
         bool? shuffleOptionsOverride = null,
         bool missedOnly = false,
-        bool resumeSavedProgress = false)
+        bool resumeSavedProgress = false
+    )
     {
-        bool doShuffleQ = !resumeSavedProgress && (shuffleQuestionsOverride ?? ShuffleQuestionsOnStart);
+        bool doShuffleQ =
+            !resumeSavedProgress && (shuffleQuestionsOverride ?? ShuffleQuestionsOnStart);
         bool doShuffleOpt = shuffleOptionsOverride ?? ShuffleOptionsOnStart;
         var rng = new Random();
 
@@ -28,58 +25,67 @@ public sealed partial class QuizStudioViewModel
             sourceQuestions = [.. session.Questions];
 
         if (doShuffleQ && sourceQuestions.Count > 1)
-            sourceQuestions = sourceQuestions.OrderBy(_ => rng.Next()).ToList();
+            sourceQuestions = [.. sourceQuestions.OrderBy(_ => rng.Next())];
 
         OrderingDrafts.Clear();
         var playbackQuestions = new List<QuizQuestionRecord>(sourceQuestions.Count);
         foreach (var orig in sourceQuestions)
         {
             var opts = new List<string>(orig.Options);
-            if (doShuffleOpt && orig.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational && opts.Count > 1)
+            if (
+                doShuffleOpt
+                && orig.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational
+                && opts.Count > 1
+            )
             {
-                opts = opts.OrderBy(_ => rng.Next()).ToList();
+                opts = [.. opts.OrderBy(_ => rng.Next())];
             }
 
             if (orig.Kind == QuizQuestionKind.Ordering && orig.Options.Count >= 2)
             {
                 var shuffledSteps = orig.Options.OrderBy(_ => rng.Next()).ToList();
                 // Ensure ordering steps don't start already in exact canonical order when possible
-                if (shuffledSteps.SequenceEqual(orig.Options, StringComparer.OrdinalIgnoreCase) && shuffledSteps.Count >= 2)
+                if (
+                    shuffledSteps.SequenceEqual(orig.Options, StringComparer.OrdinalIgnoreCase)
+                    && shuffledSteps.Count >= 2
+                )
                     (shuffledSteps[0], shuffledSteps[^1]) = (shuffledSteps[^1], shuffledSteps[0]);
                 OrderingDrafts[orig.Id] = shuffledSteps;
             }
 
-            playbackQuestions.Add(new QuizQuestionRecord
-            {
-                Id = orig.Id,
-                QuizId = orig.QuizId,
-                OrderIndex = orig.OrderIndex,
-                Kind = orig.Kind,
-                CognitiveLevel = orig.CognitiveLevel,
-                Difficulty = orig.Difficulty,
-                TopicTag = orig.TopicTag,
-                Prompt = orig.Prompt,
-                CodeSnippet = orig.CodeSnippet,
-                CodeLanguage = orig.CodeLanguage,
-                MathLatex = orig.MathLatex,
-                Diagram = orig.Diagram,
-                Options = opts,
-                CorrectAnswer = orig.CorrectAnswer,
-                AcceptedAliases = [.. orig.AcceptedAliases],
-                Explanation = orig.Explanation,
-                SourcePdfPath = orig.SourcePdfPath,
-                SourcePage = orig.SourcePage,
-                SectionTitle = orig.SectionTitle,
-                VerbatimQuote = orig.VerbatimQuote,
-                HighlightRects = [.. orig.HighlightRects],
-                EvidenceAnchors = [.. orig.EvidenceAnchors],
-                SrsIntervalDays = orig.SrsIntervalDays,
-                SrsEaseFactor = orig.SrsEaseFactor,
-                SrsDueDate = orig.SrsDueDate,
-                SrsReps = orig.SrsReps,
-                SrsLapses = orig.SrsLapses,
-                LastAnsweredCorrect = orig.LastAnsweredCorrect
-            });
+            playbackQuestions.Add(
+                new QuizQuestionRecord
+                {
+                    Id = orig.Id,
+                    QuizId = orig.QuizId,
+                    OrderIndex = orig.OrderIndex,
+                    Kind = orig.Kind,
+                    CognitiveLevel = orig.CognitiveLevel,
+                    Difficulty = orig.Difficulty,
+                    TopicTag = orig.TopicTag,
+                    Prompt = orig.Prompt,
+                    CodeSnippet = orig.CodeSnippet,
+                    CodeLanguage = orig.CodeLanguage,
+                    MathLatex = orig.MathLatex,
+                    Diagram = orig.Diagram,
+                    Options = opts,
+                    CorrectAnswer = orig.CorrectAnswer,
+                    AcceptedAliases = [.. orig.AcceptedAliases],
+                    Explanation = orig.Explanation,
+                    SourcePdfPath = orig.SourcePdfPath,
+                    SourcePage = orig.SourcePage,
+                    SectionTitle = orig.SectionTitle,
+                    VerbatimQuote = orig.VerbatimQuote,
+                    HighlightRects = [.. orig.HighlightRects],
+                    EvidenceAnchors = [.. orig.EvidenceAnchors],
+                    SrsIntervalDays = orig.SrsIntervalDays,
+                    SrsEaseFactor = orig.SrsEaseFactor,
+                    SrsDueDate = orig.SrsDueDate,
+                    SrsReps = orig.SrsReps,
+                    SrsLapses = orig.SrsLapses,
+                    LastAnsweredCorrect = orig.LastAnsweredCorrect,
+                }
+            );
         }
 
         ActiveSession = new QuizSessionRecord
@@ -95,7 +101,7 @@ public sealed partial class QuizStudioViewModel
             CreatedAtUtc = session.CreatedAtUtc,
             AttemptCount = session.AttemptCount,
             LastScorePercent = session.LastScorePercent,
-            Questions = playbackQuestions
+            Questions = playbackQuestions,
         };
         SessionResults.Clear();
 
@@ -104,7 +110,11 @@ public sealed partial class QuizStudioViewModel
             foreach (var (qid, ans) in session.InProgressAnswers)
                 SessionResults[qid] = (ans.Answer, ans.IsCorrect);
 
-            CurrentQuestionIndex = Math.Clamp(session.InProgressQuestionIndex ?? 0, 0, playbackQuestions.Count - 1);
+            CurrentQuestionIndex = Math.Clamp(
+                session.InProgressQuestionIndex ?? 0,
+                0,
+                playbackQuestions.Count - 1
+            );
             var cur = CurrentQuestion;
             if (cur is not null && SessionResults.TryGetValue(cur.Id, out var prev))
             {
@@ -114,10 +124,11 @@ public sealed partial class QuizStudioViewModel
             }
             else
             {
-                CurrentAnswerDraft = cur is { Kind: QuizQuestionKind.Ordering } &&
-                                     OrderingDrafts.TryGetValue(cur.Id, out var initSteps)
-                    ? string.Join(" -> ", initSteps)
-                    : string.Empty;
+                CurrentAnswerDraft =
+                    cur is { Kind: QuizQuestionKind.Ordering }
+                    && OrderingDrafts.TryGetValue(cur.Id, out var initSteps)
+                        ? string.Join(" -> ", initSteps)
+                        : string.Empty;
                 IsAnswerRevealed = false;
                 IsCurrentAnswerCorrect = false;
             }
@@ -125,10 +136,11 @@ public sealed partial class QuizStudioViewModel
         else
         {
             CurrentQuestionIndex = 0;
-            CurrentAnswerDraft = playbackQuestions.FirstOrDefault() is { Kind: QuizQuestionKind.Ordering } firstOrd &&
-                                 OrderingDrafts.TryGetValue(firstOrd.Id, out var initSteps)
-                ? string.Join(" -> ", initSteps)
-                : string.Empty;
+            CurrentAnswerDraft =
+                playbackQuestions.FirstOrDefault() is { Kind: QuizQuestionKind.Ordering } firstOrd
+                && OrderingDrafts.TryGetValue(firstOrd.Id, out var initSteps)
+                    ? string.Join(" -> ", initSteps)
+                    : string.Empty;
             IsAnswerRevealed = false;
             IsCurrentAnswerCorrect = false;
             session.InProgressQuestionIndex = null;
@@ -147,9 +159,16 @@ public sealed partial class QuizStudioViewModel
             return steps;
 
         var rng = new Random();
-        var list = q.Options.Count >= 2
-            ? q.Options.OrderBy(_ => rng.Next()).ToList()
-            : q.CorrectAnswer.Split("->", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var list =
+            q.Options.Count >= 2
+                ? q.Options.OrderBy(_ => rng.Next()).ToList()
+                :
+                [
+                    .. q.CorrectAnswer.Split(
+                        "->",
+                        StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+                    ),
+                ];
         if (list.SequenceEqual(q.Options, StringComparer.OrdinalIgnoreCase) && list.Count >= 2)
             (list[0], list[^1]) = (list[^1], list[0]);
 
@@ -177,9 +196,16 @@ public sealed partial class QuizStudioViewModel
     {
         var today = DateOnly.FromDateTime(DateTime.Today);
         var dueQuestions = SavedQuizzes
-            .Where(q => string.IsNullOrWhiteSpace(courseFolderFilter) || q.CourseFolder.Equals(courseFolderFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(q =>
+                string.IsNullOrWhiteSpace(courseFolderFilter)
+                || q.CourseFolder.Equals(courseFolderFilter, StringComparison.OrdinalIgnoreCase)
+            )
             .SelectMany(q => q.Questions)
-            .Where(qq => !qq.SrsDueDate.HasValue || qq.SrsDueDate.Value <= today || qq.LastAnsweredCorrect == false)
+            .Where(qq =>
+                !qq.SrsDueDate.HasValue
+                || qq.SrsDueDate.Value <= today
+                || qq.LastAnsweredCorrect == false
+            )
             .OrderBy(qq => qq.LastAnsweredCorrect == false ? 0 : 1)
             .ThenBy(qq => qq.SrsDueDate ?? today)
             .Take(25)
@@ -196,12 +222,12 @@ public sealed partial class QuizStudioViewModel
         var deckSession = new QuizSessionRecord
         {
             Id = "srs-deck",
-            CourseFolder = courseFolderFilter ?? (SelectedCourse?.FolderName ?? ""),
+            CourseFolder = courseFolderFilter ?? SelectedCourse?.FolderName ?? "",
             CourseTitle = SelectedCourse?.Title ?? "All Courses",
             Title = $"Active Recall & Spaced Repetition Deck ({dueQuestions.Count} due)",
             SourcePdfPath = dueQuestions[0].SourcePdfPath,
             ModelUsed = "SM-2 / FSRS Scheduler",
-            Questions = dueQuestions
+            Questions = dueQuestions,
         };
 
         StartQuizSession(deckSession);
@@ -231,7 +257,8 @@ public sealed partial class QuizStudioViewModel
             q,
             answer,
             isCorrect,
-            isCorrect ? qualityRating : 1);
+            isCorrect ? qualityRating : 1
+        );
 
         await PersistActiveInProgressAsync();
         _mainVm.RequestUiRefresh();
@@ -239,22 +266,34 @@ public sealed partial class QuizStudioViewModel
 
     private async Task PersistActiveInProgressAsync()
     {
-        if (ActiveSession is null || ActiveSession.Id == "srs-deck" || string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
+        if (
+            ActiveSession is null
+            || ActiveSession.Id == "srs-deck"
+            || string.IsNullOrWhiteSpace(_mainVm.BasinRoot)
+        )
             return;
 
         var dict = SessionResults.ToDictionary(
             kv => kv.Key,
             kv => new QuizInProgressAnswer(kv.Value.Answer, kv.Value.IsCorrect),
-            StringComparer.OrdinalIgnoreCase);
+            StringComparer.OrdinalIgnoreCase
+        );
 
-        var savedTarget = SavedQuizzes.FirstOrDefault(s => string.Equals(s.Id, ActiveSession.Id, StringComparison.OrdinalIgnoreCase));
+        var savedTarget = SavedQuizzes.FirstOrDefault(s =>
+            string.Equals(s.Id, ActiveSession.Id, StringComparison.OrdinalIgnoreCase)
+        );
         if (savedTarget is not null)
         {
             savedTarget.InProgressQuestionIndex = CurrentQuestionIndex;
             savedTarget.InProgressAnswers = dict;
         }
 
-        await ScholarFlowDatabase.SaveQuizInProgressAsync(_mainVm.BasinRoot, ActiveSession.Id, CurrentQuestionIndex, dict);
+        await ScholarFlowDatabase.SaveQuizInProgressAsync(
+            _mainVm.BasinRoot,
+            ActiveSession.Id,
+            CurrentQuestionIndex,
+            dict
+        );
     }
 
     public async Task RateAndAdvanceAsync(int qualityRating)
@@ -267,7 +306,8 @@ public sealed partial class QuizStudioViewModel
                 q,
                 CurrentAnswerDraft,
                 IsCurrentAnswerCorrect,
-                qualityRating);
+                qualityRating
+            );
         }
 
         await AdvanceNextQuestionAsync();
@@ -290,10 +330,11 @@ public sealed partial class QuizStudioViewModel
             }
             else
             {
-                CurrentAnswerDraft = nextQ is { Kind: QuizQuestionKind.Ordering } &&
-                                     OrderingDrafts.TryGetValue(nextQ.Id, out var steps)
-                    ? string.Join(" -> ", steps)
-                    : string.Empty;
+                CurrentAnswerDraft =
+                    nextQ is { Kind: QuizQuestionKind.Ordering }
+                    && OrderingDrafts.TryGetValue(nextQ.Id, out var steps)
+                        ? string.Join(" -> ", steps)
+                        : string.Empty;
                 IsCurrentAnswerCorrect = false;
                 IsAnswerRevealed = false;
             }
@@ -305,10 +346,18 @@ public sealed partial class QuizStudioViewModel
             if (ActiveSession.Id != "srs-deck" && ActiveSession.Questions.Count > 0)
             {
                 int correct = ActiveSession.Questions.Count(qq =>
-                    SessionResults.TryGetValue(qq.Id, out var r) && r.IsCorrect);
-                double pct = (100.0 * correct) / ActiveSession.Questions.Count;
-                await ScholarFlowDatabase.ClearQuizInProgressAsync(_mainVm.BasinRoot, ActiveSession.Id);
-                await ScholarFlowDatabase.UpdateQuizSessionScoreAsync(_mainVm.BasinRoot, ActiveSession, pct);
+                    SessionResults.TryGetValue(qq.Id, out var r) && r.IsCorrect
+                );
+                double pct = 100.0 * correct / ActiveSession.Questions.Count;
+                await ScholarFlowDatabase.ClearQuizInProgressAsync(
+                    _mainVm.BasinRoot,
+                    ActiveSession.Id
+                );
+                await ScholarFlowDatabase.UpdateQuizSessionScoreAsync(
+                    _mainVm.BasinRoot,
+                    ActiveSession,
+                    pct
+                );
                 SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
             }
         }
@@ -331,10 +380,11 @@ public sealed partial class QuizStudioViewModel
         }
         else
         {
-            CurrentAnswerDraft = q is { Kind: QuizQuestionKind.Ordering } &&
-                                 OrderingDrafts.TryGetValue(q.Id, out var steps)
-                ? string.Join(" -> ", steps)
-                : string.Empty;
+            CurrentAnswerDraft =
+                q is { Kind: QuizQuestionKind.Ordering }
+                && OrderingDrafts.TryGetValue(q.Id, out var steps)
+                    ? string.Join(" -> ", steps)
+                    : string.Empty;
             IsAnswerRevealed = false;
         }
         _ = PersistActiveInProgressAsync();
@@ -356,15 +406,15 @@ public sealed partial class QuizStudioViewModel
         }
         else
         {
-            CurrentAnswerDraft = q is { Kind: QuizQuestionKind.Ordering } &&
-                                 OrderingDrafts.TryGetValue(q.Id, out var steps)
-                ? string.Join(" -> ", steps)
-                : string.Empty;
+            CurrentAnswerDraft =
+                q is { Kind: QuizQuestionKind.Ordering }
+                && OrderingDrafts.TryGetValue(q.Id, out var steps)
+                    ? string.Join(" -> ", steps)
+                    : string.Empty;
             IsCurrentAnswerCorrect = false;
             IsAnswerRevealed = false;
         }
         _ = PersistActiveInProgressAsync();
         _mainVm.RequestUiRefresh();
     }
-
 }

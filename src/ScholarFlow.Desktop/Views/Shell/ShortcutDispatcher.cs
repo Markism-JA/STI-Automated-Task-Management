@@ -1,6 +1,5 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Quiz;
 using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.ViewModels;
@@ -12,7 +11,11 @@ namespace ScholarFlow.Desktop.Views.Shell;
 /// </summary>
 public static class ShortcutDispatcher
 {
-    public static async Task HandleKeyDownAsync(Window window, MainWindowViewModel vm, KeyEventArgs e)
+    public static async Task HandleKeyDownAsync(
+        Window window,
+        MainWindowViewModel vm,
+        KeyEventArgs e
+    )
     {
         if (e.Handled)
             return;
@@ -56,10 +59,12 @@ public static class ShortcutDispatcher
             return;
 
         // Active Quiz Runner hotkeys (1-4 option/SRS pick, Left/P prev, Right/N next)
-        if (vm.ActiveMode == WorkspaceTabMode.QuizStudio &&
-            vm.QuizStudio.ActiveSession is not null &&
-            !vm.QuizStudio.IsShowingResultsSummary &&
-            !vm.IsSearchModalOpen)
+        if (
+            vm.ActiveMode == WorkspaceTabMode.QuizStudio
+            && vm.QuizStudio.ActiveSession is not null
+            && !vm.QuizStudio.IsShowingResultsSummary
+            && !vm.IsSearchModalOpen
+        )
         {
             var curQ = vm.QuizStudio.CurrentQuestion;
             if (e.Key is Key.D1 or Key.D2 or Key.D3 or Key.D4)
@@ -69,13 +74,18 @@ public static class ShortcutDispatcher
                     Key.D1 => 0,
                     Key.D2 => 1,
                     Key.D3 => 2,
-                    _ => 3
+                    _ => 3,
                 };
 
-                if (!vm.QuizStudio.IsAnswerRevealed &&
-                    curQ is not null &&
-                    curQ.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational or QuizQuestionKind.TrueFalse &&
-                    slot < curQ.Options.Count)
+                if (
+                    !vm.QuizStudio.IsAnswerRevealed
+                    && curQ is not null
+                    && curQ.Kind
+                        is QuizQuestionKind.MultipleChoice
+                            or QuizQuestionKind.Situational
+                            or QuizQuestionKind.TrueFalse
+                    && slot < curQ.Options.Count
+                )
                 {
                     e.Handled = true;
                     await vm.QuizStudio.SubmitAnswerAsync(curQ.Options[slot]);
@@ -85,7 +95,13 @@ public static class ShortcutDispatcher
                 if (vm.QuizStudio.IsAnswerRevealed)
                 {
                     e.Handled = true;
-                    int rating = slot switch { 0 => 1, 1 => 3, 2 => 4, _ => 5 };
+                    int rating = slot switch
+                    {
+                        0 => 1,
+                        1 => 3,
+                        2 => 4,
+                        _ => 5,
+                    };
                     await vm.QuizStudio.RateAndAdvanceAsync(rating);
                     return;
                 }
@@ -116,7 +132,8 @@ public static class ShortcutDispatcher
                     vm.MoveSelection(+1);
                 break;
 
-            case Key.K or Key.Up:
+            case Key.K
+            or Key.Up:
                 e.Handled = true;
                 if (vm.IsSearchModalOpen)
                     vm.MoveSearchSelection(-1);
@@ -139,22 +156,28 @@ public static class ShortcutDispatcher
             case Key.G:
                 e.Handled = true;
                 if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
-                    vm.PdfReader.JumpToPage(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? vm.PdfReader.PageCount : 1);
+                    vm.PdfReader.JumpToPage(
+                        e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? vm.PdfReader.PageCount : 1
+                    );
                 else
                     vm.JumpSelection(toEnd: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
                 break;
 
-            case Key.D or Key.Space when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+            case Key.D
+            or Key.Space
+                when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
                 e.Handled = true;
                 await vm.ToggleTaskCompletedAsync(vm.SelectedTask);
                 break;
 
-            case Key.E when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+            case Key.E
+                when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
                 e.Handled = true;
                 vm.ToggleInspector();
                 break;
 
-            case Key.Enter when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
+            case Key.Enter
+                when vm.SelectedTask is not null && vm.ActiveMode != WorkspaceTabMode.PdfReader:
                 e.Handled = true;
                 if (!vm.IsInspectorOpen)
                     vm.OpenInspector(vm.SelectedTask);
@@ -162,7 +185,9 @@ public static class ShortcutDispatcher
                     vm.OpenPrimaryTaskFileOrNote(vm.SelectedTask);
                 break;
 
-            case Key.P when e.KeyModifiers.HasFlag(KeyModifiers.Shift) && vm.Settings.EnableElmsIntegration:
+            case Key.P
+                when e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+                    && vm.Settings.EnableElmsIntegration:
                 e.Handled = true;
                 vm.TogglePollingPaused();
                 break;
@@ -177,7 +202,8 @@ public static class ShortcutDispatcher
                 vm.ToggleQuickAddModal();
                 break;
 
-            case Key.OemQuestion or Key.Divide:
+            case Key.OemQuestion
+            or Key.Divide:
                 e.Handled = true;
                 if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                     vm.ToggleShortcutsModal();

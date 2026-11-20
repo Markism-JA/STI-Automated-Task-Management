@@ -13,7 +13,7 @@ namespace ScholarFlow.Desktop.Views;
 
 public static partial class QuizStudioViewBuilder
 {
-    private static Control BuildSplitBuilderAndPreviewView(
+    private static Grid BuildSplitBuilderAndPreviewView(
         MainWindowViewModel vm,
         QuizStudioViewModel studio
     )
@@ -40,7 +40,7 @@ public static partial class QuizStudioViewBuilder
                 studio.ShowIndividualHandouts
                     ? MaterialIconKind.ChevronUp
                     : MaterialIconKind.ChevronDown,
-                () => studio.ToggleShowIndividualHandouts(),
+                studio.ToggleShowIndividualHandouts,
                 isActive: studio.ShowIndividualHandouts
             );
             Grid.SetColumn(toggleHandoutsBtn, 1);
@@ -109,7 +109,7 @@ public static partial class QuizStudioViewBuilder
             var resetBtn = UiBuilder.GhostButton(
                 "Reset Scope",
                 MaterialIconKind.Refresh,
-                () => studio.ClearScopeFilters()
+                studio.ClearScopeFilters
             );
             Grid.SetColumn(resetBtn, 1);
             scopeHeader.Children.Add(resetBtn);
@@ -349,7 +349,7 @@ public static partial class QuizStudioViewBuilder
             var cancelAppendBtn = UiBuilder.GhostButton(
                 "Create New Deck Instead",
                 MaterialIconKind.Close,
-                () => studio.ClearAppendTarget()
+                studio.ClearAppendTarget
             );
             Grid.SetColumn(cancelAppendBtn, 1);
             appendBanner.Children.Add(cancelAppendBtn);
@@ -665,7 +665,8 @@ public static partial class QuizStudioViewBuilder
         modalityStack.Children.Add(
             new TextBlock
             {
-                Text = "Specialized Content Formats (Auto-detects whether material uses Code, Math LaTeX, or Diagrams):",
+                Text =
+                    "Specialized Content Formats (Auto-detects whether material uses Code, Math LaTeX, or Diagrams):",
                 FontSize = 11.5,
                 FontWeight = FontWeight.SemiBold,
                 Foreground = ThemeService.Brush(ThemeService.TextSecondary),
@@ -673,14 +674,32 @@ public static partial class QuizStudioViewBuilder
         );
 
         var modalityWrap = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var (mMode, mLabel, mIcon) in new[]
-                 {
-                     (QuizContentModalityMode.AutoDetect, "Smart Auto-Detect", MaterialIconKind.AutoFix),
-                     (QuizContentModalityMode.StandardProseOnly, "Prose Only", MaterialIconKind.TextBoxOutline),
-                     (QuizContentModalityMode.IncludeCodeSnippets, "Code Snippets", MaterialIconKind.CodeTags),
-                     (QuizContentModalityMode.IncludeMathLatex, "Math LaTeX (Strict MCQ)", MaterialIconKind.FunctionVariant),
-                     (QuizContentModalityMode.IncludeDiagrams, "Flow Diagrams", MaterialIconKind.SitemapOutline),
-                 })
+        foreach (
+            var (mMode, mLabel, mIcon) in new[]
+            {
+                (QuizContentModalityMode.AutoDetect, "Smart Auto-Detect", MaterialIconKind.AutoFix),
+                (
+                    QuizContentModalityMode.StandardProseOnly,
+                    "Prose Only",
+                    MaterialIconKind.TextBoxOutline
+                ),
+                (
+                    QuizContentModalityMode.IncludeCodeSnippets,
+                    "Code Snippets",
+                    MaterialIconKind.CodeTags
+                ),
+                (
+                    QuizContentModalityMode.IncludeMathLatex,
+                    "Math LaTeX (Strict MCQ)",
+                    MaterialIconKind.FunctionVariant
+                ),
+                (
+                    QuizContentModalityMode.IncludeDiagrams,
+                    "Flow Diagrams",
+                    MaterialIconKind.SitemapOutline
+                ),
+            }
+        )
         {
             var capturedMode = mMode;
             var mBtn = UiBuilder.GhostButton(
@@ -701,7 +720,8 @@ public static partial class QuizStudioViewBuilder
         customPromptHeader.Children.Add(
             new TextBlock
             {
-                Text = "Custom Focus & Style Directives (Optional — JSON schema & PDF evidence rules stay locked)",
+                Text =
+                    "Custom Focus & Style Directives (Optional — JSON schema & PDF evidence rules stay locked)",
                 FontSize = 11.5,
                 FontWeight = FontWeight.SemiBold,
                 Foreground = ThemeService.Brush(ThemeService.TextSecondary),
@@ -721,13 +741,24 @@ public static partial class QuizStudioViewBuilder
         customPromptStack.Children.Add(customPromptHeader);
 
         var directiveChips = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var (chipLabel, chipText) in new[]
-                 {
-                     ("+ Edge Cases", "Focus on edge cases, common pitfalls, and troubleshooting scenarios."),
-                     ("+ Hard Difficulty", "Target difficulty 4-5 analysis and application questions."),
-                     ("+ Concise Stems", "Keep question stems concise (1-2 sentences) and distractors subtle."),
-                     ("+ Definitions & Acronyms", "Emphasize exact technical definitions, acronyms, and comparisons.")
-                 })
+        foreach (
+            var (chipLabel, chipText) in new[]
+            {
+                (
+                    "+ Edge Cases",
+                    "Focus on edge cases, common pitfalls, and troubleshooting scenarios."
+                ),
+                ("+ Hard Difficulty", "Target difficulty 4-5 analysis and application questions."),
+                (
+                    "+ Concise Stems",
+                    "Keep question stems concise (1-2 sentences) and distractors subtle."
+                ),
+                (
+                    "+ Definitions & Acronyms",
+                    "Emphasize exact technical definitions, acronyms, and comparisons."
+                ),
+            }
+        )
         {
             var capturedText = chipText;
             var chipBtn = UiBuilder.GhostButton(
@@ -743,7 +774,8 @@ public static partial class QuizStudioViewBuilder
         var customPromptBox = new TextBox
         {
             Text = studio.CustomPromptInstructions,
-            Watermark = "e.g. Focus on TCP congestion control vs flow control, avoid trivial date questions... (max 1200 chars)",
+            Watermark =
+                "e.g. Focus on TCP congestion control vs flow control, avoid trivial date questions... (max 1200 chars)",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 52,
@@ -887,5 +919,4 @@ public static partial class QuizStudioViewBuilder
 
         return splitGrid;
     }
-
 }

@@ -1,18 +1,9 @@
-using Avalonia.Threading;
 using ScholarFlow.Core.Database;
-using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
-using ScholarFlow.Core.Services;
-using ScholarFlow.Core.Sync;
 using ScholarFlow.Core.Tasks;
-using ScholarFlow.Desktop.Services;
-using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Client;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class MainWindowViewModel
 {
@@ -36,11 +27,14 @@ public sealed partial class MainWindowViewModel
         var current = QuickAddText?.Trim() ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(replacePattern))
         {
-            current = System.Text.RegularExpressions.Regex.Replace(
-                current,
-                replacePattern,
-                "",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+            current = System
+                .Text.RegularExpressions.Regex.Replace(
+                    current,
+                    replacePattern,
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                )
+                .Trim();
         }
 
         var next = string.IsNullOrEmpty(current) ? token : $"{current} {token}";
@@ -55,7 +49,10 @@ public sealed partial class MainWindowViewModel
         var input = QuickAddText;
         if (ActiveCourse is not null && !input.Contains('#'))
             input = $"{input} #{ActiveCourse.Alias}";
-        else if (ActiveMode == WorkspaceTabMode.Calendar && !QuickAddParser.Parse(input, Courses).Task.DueDate.HasValue)
+        else if (
+            ActiveMode == WorkspaceTabMode.Calendar
+            && !QuickAddParser.Parse(input, Courses).Task.DueDate.HasValue
+        )
             input = $"{input} {Calendar.SelectedDate:yyyy-MM-dd}";
 
         var created = await _basinService.AddQuickTaskAsync(BasinRoot, input);
@@ -79,7 +76,11 @@ public sealed partial class MainWindowViewModel
         if (SearchResults.Count == 0)
             return;
 
-        SelectedSearchResultIndex = Math.Clamp(SelectedSearchResultIndex + delta, 0, SearchResults.Count - 1);
+        SelectedSearchResultIndex = Math.Clamp(
+            SelectedSearchResultIndex + delta,
+            0,
+            SearchResults.Count - 1
+        );
         NotifyStateChanged(UiChangeKind.SearchOrTaskList);
     }
 
@@ -107,16 +108,23 @@ public sealed partial class MainWindowViewModel
                 break;
 
             case SearchResultKind.Quiz when item.Quiz is not null:
-                var qCourse = Courses.FirstOrDefault(c => c.FolderName.Equals(item.Quiz.CourseFolder, StringComparison.OrdinalIgnoreCase));
+                var qCourse = Courses.FirstOrDefault(c =>
+                    c.FolderName.Equals(item.Quiz.CourseFolder, StringComparison.OrdinalIgnoreCase)
+                );
                 await SelectQuizStudioViewAsync(qCourse, item.Quiz.SourcePdfPath);
-                QuizStudio.StartQuizSession(item.Quiz, resumeSavedProgress: item.Quiz.HasInProgressAttempt);
+                QuizStudio.StartQuizSession(
+                    item.Quiz,
+                    resumeSavedProgress: item.Quiz.HasInProgressAttempt
+                );
                 break;
 
             case SearchResultKind.Task when item.Task is not null:
                 var task = item.Task;
                 if (!string.IsNullOrWhiteSpace(task.CourseFolder))
                 {
-                    var course = Courses.FirstOrDefault(c => c.FolderName.Equals(task.CourseFolder, StringComparison.OrdinalIgnoreCase));
+                    var course = Courses.FirstOrDefault(c =>
+                        c.FolderName.Equals(task.CourseFolder, StringComparison.OrdinalIgnoreCase)
+                    );
                     if (course is not null)
                     {
                         ActiveMode = WorkspaceTabMode.CourseWorkspace;
@@ -127,13 +135,17 @@ public sealed partial class MainWindowViewModel
                     else
                     {
                         ActiveMode = WorkspaceTabMode.TaskList;
-                        ActiveSmartView = task.IsCompleted ? SmartViewKind.Completed : SmartViewKind.All;
+                        ActiveSmartView = task.IsCompleted
+                            ? SmartViewKind.Completed
+                            : SmartViewKind.All;
                     }
                 }
                 else
                 {
                     ActiveMode = WorkspaceTabMode.TaskList;
-                    ActiveSmartView = task.IsCompleted ? SmartViewKind.Completed : SmartViewKind.Inbox;
+                    ActiveSmartView = task.IsCompleted
+                        ? SmartViewKind.Completed
+                        : SmartViewKind.Inbox;
                 }
                 RecomputeVisibleTasks();
                 SelectTask(task, openInspector: true);
@@ -149,17 +161,22 @@ public sealed partial class MainWindowViewModel
         // 1. Matching Courses
         foreach (var c in Courses.Where(c => !c.IsArchived))
         {
-            if (string.IsNullOrEmpty(q) ||
-                c.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase) ||
-                (c.CourseCode?.Contains(q, StringComparison.OrdinalIgnoreCase) == true))
+            if (
+                string.IsNullOrEmpty(q)
+                || c.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase)
+                || (c.CourseCode?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
+            )
             {
-                results.Add(new SearchResultItem(
-                    SearchResultKind.Course,
-                    c.Title,
-                    c.CourseCode ?? "Course Workspace",
-                    $"#{c.Alias}",
-                    Course: c));
+                results.Add(
+                    new SearchResultItem(
+                        SearchResultKind.Course,
+                        c.Title,
+                        c.CourseCode ?? "Course Workspace",
+                        $"#{c.Alias}",
+                        Course: c
+                    )
+                );
             }
         }
 
@@ -180,7 +197,10 @@ public sealed partial class MainWindowViewModel
 
         if (matchedTasks.Count < 16)
         {
-            var seenIds = new HashSet<string>(matchedTasks.Select(t => t.Id), StringComparer.OrdinalIgnoreCase);
+            var seenIds = new HashSet<string>(
+                matchedTasks.Select(t => t.Id),
+                StringComparer.OrdinalIgnoreCase
+            );
             var candidateTasks = allNodes
                 .OrderBy(t => t.IsCompleted ? 1 : 0)
                 .ThenByDescending(t => UrgencyCalculator.Explain(t).Score)
@@ -191,11 +211,20 @@ public sealed partial class MainWindowViewModel
                 if (seenIds.Contains(t.Id))
                     continue;
 
-                if (string.IsNullOrEmpty(q) ||
-                    t.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                    (t.CourseAlias?.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase) == true) ||
-                    (t.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true) ||
-                    t.Labels.Any(l => l.Contains(q.TrimStart('@'), StringComparison.OrdinalIgnoreCase)))
+                if (
+                    string.IsNullOrEmpty(q)
+                    || t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (
+                        t.CourseAlias?.Contains(
+                            q.TrimStart('#'),
+                            StringComparison.OrdinalIgnoreCase
+                        ) == true
+                    )
+                    || (t.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
+                    || t.Labels.Any(l =>
+                        l.Contains(q.TrimStart('@'), StringComparison.OrdinalIgnoreCase)
+                    )
+                )
                 {
                     matchedTasks.Add(t);
                     if (matchedTasks.Count >= 18)
@@ -206,16 +235,15 @@ public sealed partial class MainWindowViewModel
 
         foreach (var t in matchedTasks)
         {
-            var sub = t.DueDate.HasValue ? $"Due {t.DueDate.Value:MMM d}" : (t.IsCompleted ? "Completed" : "No due date");
+            var sub = t.DueDate.HasValue
+                ? $"Due {t.DueDate.Value:MMM d}"
+                : (t.IsCompleted ? "Completed" : "No due date");
             if (!string.IsNullOrWhiteSpace(t.ParentTaskId))
                 sub = $"Subtask · {sub}";
-            var badge = !string.IsNullOrWhiteSpace(t.CourseAlias) ? $"#{t.CourseAlias}" : $"P{(int)t.Priority}";
-            results.Add(new SearchResultItem(
-                SearchResultKind.Task,
-                t.Title,
-                sub,
-                badge,
-                Task: t));
+            var badge = !string.IsNullOrWhiteSpace(t.CourseAlias)
+                ? $"#{t.CourseAlias}"
+                : $"P{(int)t.Priority}";
+            results.Add(new SearchResultItem(SearchResultKind.Task, t.Title, sub, badge, Task: t));
 
             if (results.Count >= 18)
                 break;
@@ -227,20 +255,27 @@ public sealed partial class MainWindowViewModel
             foreach (var c in Courses.Where(c => !c.IsArchived))
             {
                 var masterPdf = MasterPdfService.FindExistingMasterPdfPath(BasinRoot, c.FolderName);
-                if (masterPdf is not null &&
-                    (string.IsNullOrEmpty(q) ||
-                     q.Contains("pdf", StringComparison.OrdinalIgnoreCase) ||
-                     q.Contains("master", StringComparison.OrdinalIgnoreCase) ||
-                     c.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                     c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase)))
+                if (
+                    masterPdf is not null
+                    && (
+                        string.IsNullOrEmpty(q)
+                        || q.Contains("pdf", StringComparison.OrdinalIgnoreCase)
+                        || q.Contains("master", StringComparison.OrdinalIgnoreCase)
+                        || c.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase)
+                    )
+                )
                 {
-                    results.Add(new SearchResultItem(
-                        SearchResultKind.PdfDocument,
-                        $"{c.Title} — Master Study Packet",
-                        Path.GetFileName(masterPdf),
-                        "Master PDF",
-                        Course: c,
-                        PdfPath: masterPdf));
+                    results.Add(
+                        new SearchResultItem(
+                            SearchResultKind.PdfDocument,
+                            $"{c.Title} — Master Study Packet",
+                            Path.GetFileName(masterPdf),
+                            "Master PDF",
+                            Course: c,
+                            PdfPath: masterPdf
+                        )
+                    );
                 }
             }
         }
@@ -248,30 +283,41 @@ public sealed partial class MainWindowViewModel
         // 4. Matching Test & Recall Quizzes (by title, term, course, or question prompt/tag)
         foreach (var qz in QuizStudio.SavedQuizzes)
         {
-            bool matchesQuiz = string.IsNullOrEmpty(q) ||
-                qz.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                qz.CourseTitle.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (qz.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true) ||
-                q.Contains("quiz", StringComparison.OrdinalIgnoreCase) ||
-                q.Contains("test", StringComparison.OrdinalIgnoreCase) ||
-                q.Contains("recall", StringComparison.OrdinalIgnoreCase) ||
-                qz.Questions.Any(qq => qq.Prompt.Contains(q, StringComparison.OrdinalIgnoreCase) || qq.TopicTag.Contains(q, StringComparison.OrdinalIgnoreCase));
+            bool matchesQuiz =
+                string.IsNullOrEmpty(q)
+                || qz.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || qz.CourseTitle.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (qz.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
+                || q.Contains("quiz", StringComparison.OrdinalIgnoreCase)
+                || q.Contains("test", StringComparison.OrdinalIgnoreCase)
+                || q.Contains("recall", StringComparison.OrdinalIgnoreCase)
+                || qz.Questions.Any(qq =>
+                    qq.Prompt.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || qq.TopicTag.Contains(q, StringComparison.OrdinalIgnoreCase)
+                );
 
             if (matchesQuiz)
             {
-                var sub = $"{qz.CourseTitle} · {qz.Questions.Count} items" +
-                          (qz.HasInProgressAttempt ? $" · In progress (Q{(qz.InProgressQuestionIndex ?? 0) + 1})" : "");
-                results.Add(new SearchResultItem(
-                    SearchResultKind.Quiz,
-                    qz.Title,
-                    sub,
-                    qz.Term ?? "Quiz",
-                    Quiz: qz));
+                var sub =
+                    $"{qz.CourseTitle} · {qz.Questions.Count} items"
+                    + (
+                        qz.HasInProgressAttempt
+                            ? $" · In progress (Q{(qz.InProgressQuestionIndex ?? 0) + 1})"
+                            : ""
+                    );
+                results.Add(
+                    new SearchResultItem(
+                        SearchResultKind.Quiz,
+                        qz.Title,
+                        sub,
+                        qz.Term ?? "Quiz",
+                        Quiz: qz
+                    )
+                );
             }
         }
 
-        SearchResults = results.Take(16).ToList();
+        SearchResults = [.. results.Take(16)];
         SelectedSearchResultIndex = 0;
     }
-
 }

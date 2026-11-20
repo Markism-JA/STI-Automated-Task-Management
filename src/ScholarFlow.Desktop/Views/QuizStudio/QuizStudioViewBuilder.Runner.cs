@@ -40,7 +40,7 @@ public static partial class QuizStudioViewBuilder
             UiBuilder.GhostButton(
                 "Exit to Studio",
                 MaterialIconKind.ArrowLeft,
-                () => studio.ExitActiveSession()
+                studio.ExitActiveSession
             )
         );
         topLeftActions.Children.Add(
@@ -125,9 +125,7 @@ public static partial class QuizStudioViewBuilder
 
             var navBtn = UiBuilder.GhostButton(
                 $"{qi + 1}",
-                hasRes
-                    ? (qRes.IsCorrect ? MaterialIconKind.Check : MaterialIconKind.Close)
-                    : null,
+                hasRes ? (qRes.IsCorrect ? MaterialIconKind.Check : MaterialIconKind.Close) : null,
                 () => studio.JumpToQuestion(capturedIndex),
                 isActive: isCurrent || hasRes
             );
@@ -165,7 +163,9 @@ public static partial class QuizStudioViewBuilder
         );
 
         if (!string.IsNullOrWhiteSpace(q.CodeSnippet))
-            qCardStack.Children.Add(QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage));
+            qCardStack.Children.Add(
+                QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage)
+            );
 
         if (!string.IsNullOrWhiteSpace(q.MathLatex))
             qCardStack.Children.Add(QuizRichContentRenderer.BuildMathLatexCard(q.MathLatex));
@@ -494,11 +494,10 @@ public static partial class QuizStudioViewBuilder
             verdictIcon.VerticalAlignment = VerticalAlignment.Center;
             verdictRow.Children.Add(verdictIcon);
 
-            var verdictText = studio.IsCurrentAnswerCorrect
-                ? "Correct!"
-                : q.Kind == QuizQuestionKind.Ordering
-                    ? "Incorrect  ·  Correct Sequence:"
-                    : $"Incorrect  ·  Correct Answer: {q.CorrectAnswer}";
+            var verdictText =
+                studio.IsCurrentAnswerCorrect ? "Correct!"
+                : q.Kind == QuizQuestionKind.Ordering ? "Incorrect  ·  Correct Sequence:"
+                : $"Incorrect  ·  Correct Answer: {q.CorrectAnswer}";
 
             var verdictLbl = new TextBlock
             {
@@ -518,11 +517,17 @@ public static partial class QuizStudioViewBuilder
             // Visual step-by-step sequence card for Ordering corrections (Issue #1)
             if (!studio.IsCurrentAnswerCorrect && q.Kind == QuizQuestionKind.Ordering)
             {
-                var expectedSteps = q.Options.Count >= 2
-                    ? q.Options
-                    : q.CorrectAnswer
-                        .Split(["->", "|", "\n", ";"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .ToList();
+                var expectedSteps =
+                    q.Options.Count >= 2
+                        ? q.Options
+                        :
+                        [
+                            .. q.CorrectAnswer.Split(
+                                ["->", "|", "\n", ";"],
+                                StringSplitOptions.RemoveEmptyEntries
+                                    | StringSplitOptions.TrimEntries
+                            ),
+                        ];
 
                 if (expectedSteps.Count > 0)
                 {
@@ -538,7 +543,8 @@ public static partial class QuizStudioViewBuilder
                             $"{sIdx + 1}",
                             ThemeService.Brush(ThemeService.SuccessFg),
                             ThemeService.Brush(ThemeService.SuccessBg),
-                            fontSize: 11);
+                            fontSize: 11
+                        );
                         stepNumBadge.VerticalAlignment = VerticalAlignment.Center;
                         stepRow.Children.Add(stepNumBadge);
 
@@ -553,33 +559,41 @@ public static partial class QuizStudioViewBuilder
                         Grid.SetColumn(stepLbl, 1);
                         stepRow.Children.Add(stepLbl);
 
-                        seqStack.Children.Add(new Border
-                        {
-                            Background = ThemeService.Brush(ThemeService.BgSurface),
-                            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-                            BorderThickness = new Thickness(1),
-                            CornerRadius = new CornerRadius(5),
-                            Padding = new Thickness(10, 6),
-                            Child = stepRow,
-                        });
+                        seqStack.Children.Add(
+                            new Border
+                            {
+                                Background = ThemeService.Brush(ThemeService.BgSurface),
+                                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(5),
+                                Padding = new Thickness(10, 6),
+                                Child = stepRow,
+                            }
+                        );
 
                         if (sIdx < expectedSteps.Count - 1)
                         {
-                            var arrow = UiBuilder.Icon(MaterialIconKind.ArrowDown, 13, ThemeService.Brush(ThemeService.TextMuted));
+                            var arrow = UiBuilder.Icon(
+                                MaterialIconKind.ArrowDown,
+                                13,
+                                ThemeService.Brush(ThemeService.TextMuted)
+                            );
                             arrow.HorizontalAlignment = HorizontalAlignment.Center;
                             seqStack.Children.Add(arrow);
                         }
                     }
 
-                    feedbackStack.Children.Add(new Border
-                    {
-                        Background = ThemeService.Brush(ThemeService.BgBase),
-                        BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-                        BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(6),
-                        Padding = new Thickness(10, 8),
-                        Child = seqStack,
-                    });
+                    feedbackStack.Children.Add(
+                        new Border
+                        {
+                            Background = ThemeService.Brush(ThemeService.BgBase),
+                            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(6),
+                            Padding = new Thickness(10, 8),
+                            Child = seqStack,
+                        }
+                    );
                 }
             }
 
@@ -603,8 +617,7 @@ public static partial class QuizStudioViewBuilder
                 {
                     new TextBlock
                     {
-                        Text =
-                            $"Master PDF Evidence  ·  {q.SectionTitle}  ·  Page {q.SourcePage}",
+                        Text = $"Master PDF Evidence  ·  {q.SectionTitle}  ·  Page {q.SourcePage}",
                         FontSize = 11.5,
                         FontWeight = FontWeight.SemiBold,
                         Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
@@ -632,7 +645,8 @@ public static partial class QuizStudioViewBuilder
                         $"Statement {aIdx + 1} · p. {anchor.PageNumber}",
                         MaterialIconKind.Marker,
                         () => studio.OpenEvidenceAnchorInPdfReader(q, anchor),
-                        isActive: aIdx == 0);
+                        isActive: aIdx == 0
+                    );
                     jumpBtn.Margin = new Thickness(0, 0, 6, 4);
                     jumpWrap.Children.Add(jumpBtn);
                 }
@@ -665,7 +679,7 @@ public static partial class QuizStudioViewBuilder
             var prevBtn = UiBuilder.GhostButton(
                 "Previous",
                 MaterialIconKind.ChevronLeft,
-                () => studio.PreviousQuestion()
+                studio.PreviousQuestion
             );
             srsRow.Children.Add(prevBtn);
 
@@ -712,7 +726,7 @@ public static partial class QuizStudioViewBuilder
         );
     }
 
-    private static Control BuildSessionSummaryView(
+    private static ScrollViewer BuildSessionSummaryView(
         MainWindowViewModel vm,
         QuizStudioViewModel studio
     )
@@ -722,7 +736,7 @@ public static partial class QuizStudioViewBuilder
         int correct = session.Questions.Count(q =>
             studio.SessionResults.TryGetValue(q.Id, out var r) && r.IsCorrect
         );
-        double pct = (100.0 * correct) / total;
+        double pct = 100.0 * correct / total;
 
         var stack = new StackPanel
         {
@@ -758,7 +772,7 @@ public static partial class QuizStudioViewBuilder
         var doneBtn = UiBuilder.PrimaryButton(
             "Back to Studio",
             MaterialIconKind.Check,
-            () => studio.ExitActiveSession()
+            studio.ExitActiveSession
         );
         Grid.SetColumn(doneBtn, 2);
         headerRow.Children.Add(doneBtn);

@@ -1,10 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Presenters;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Material.Icons;
 using ScholarFlow.Core.Models;
@@ -15,13 +13,12 @@ using ScholarFlow.Desktop.ViewModels;
 
 namespace ScholarFlow.Desktop.Views;
 
-
 /// <summary>
 /// MainWindow partial: Responsive collapsible navigation sidebar.
 /// </summary>
 public sealed partial class MainWindow
 {
-    private Control BuildSidebar()
+    private Border BuildSidebar()
     {
         bool compact = IsSidebarCurrentlyCompact;
         var grid = new Grid
@@ -43,7 +40,7 @@ public sealed partial class MainWindow
         {
             var expandBtn = UiBuilder.IconButton(
                 MaterialIconKind.DockLeft,
-                () => _vm.ToggleSidebar(),
+                _vm.ToggleSidebar,
                 17,
                 ThemeService.Brush(ThemeService.TextPrimary)
             );
@@ -97,7 +94,7 @@ public sealed partial class MainWindow
                     : MaterialIconKind.BellOutline;
             var notifBtn = UiBuilder.IconButton(
                 bellIcon,
-                () => _vm.ToggleNotificationDrawer(),
+                _vm.ToggleNotificationDrawer,
                 15.5,
                 _vm.UnreadNotificationsCount > 0
                     ? ThemeService.Brush(ThemeService.AccentPrimary)
@@ -108,7 +105,7 @@ public sealed partial class MainWindow
 
             var collapseBtn = UiBuilder.IconButton(
                 MaterialIconKind.DockLeft,
-                () => _vm.ToggleSidebar(),
+                _vm.ToggleSidebar,
                 15.5,
                 ThemeService.Brush(ThemeService.TextSecondary)
             );
@@ -129,7 +126,7 @@ public sealed partial class MainWindow
                 MaterialIconKind.PlusCircle,
                 0,
                 isActive: false,
-                () => _vm.OpenQuickAddModal(),
+                _vm.OpenQuickAddModal,
                 compact: compact,
                 customAccentFg: ThemeService.Brush(ThemeService.AccentPrimary)
             )
@@ -141,7 +138,7 @@ public sealed partial class MainWindow
                 MaterialIconKind.Magnify,
                 0,
                 isActive: false,
-                () => _vm.OpenSearchModal(),
+                _vm.OpenSearchModal,
                 compact: compact,
                 subtitleTag: "/"
             )
@@ -200,7 +197,7 @@ public sealed partial class MainWindow
                 MaterialIconKind.CalendarMonthOutline,
                 0,
                 _vm.ActiveMode == WorkspaceTabMode.Calendar,
-                () => _vm.SelectCalendarView(),
+                _vm.SelectCalendarView,
                 compact
             )
         );
@@ -255,7 +252,7 @@ public sealed partial class MainWindow
             coursesHeader.Children.Add(UiBuilder.SectionHeader("Courses"));
             var addCourseBtn = UiBuilder.IconButton(
                 MaterialIconKind.Plus,
-                () => _vm.ToggleAddCourseModal(),
+                _vm.ToggleAddCourseModal,
                 14,
                 ThemeService.Brush(ThemeService.TextSecondary)
             );
@@ -296,12 +293,13 @@ public sealed partial class MainWindow
             if (_vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(course.CourseId))
             {
                 var capturedCourse = course;
-                var syncCourseItem = new MenuItem { Header = $"Sync {capturedCourse.Title} from eLMS" };
-                syncCourseItem.Click += async (_, _) => await _vm.RunCourseSyncAsync(capturedCourse);
-                courseBtn.ContextMenu = new ContextMenu
+                var syncCourseItem = new MenuItem
                 {
-                    Items = { syncCourseItem }
+                    Header = $"Sync {capturedCourse.Title} from eLMS",
                 };
+                syncCourseItem.Click += async (_, _) =>
+                    await _vm.RunCourseSyncAsync(capturedCourse);
+                courseBtn.ContextMenu = new ContextMenu { Items = { syncCourseItem } };
             }
 
             coursesStack.Children.Add(courseBtn);
@@ -393,7 +391,7 @@ public sealed partial class MainWindow
 
         if (compact)
         {
-            Control CenterCompact(Control c)
+            static Control CenterCompact(Control c)
             {
                 c.HorizontalAlignment = HorizontalAlignment.Center;
                 return c;
@@ -406,7 +404,10 @@ public sealed partial class MainWindow
                     () => { }
                 );
                 syncCompact.Flyout = BuildElmsSyncFlyout();
-                ToolTip.SetTip(syncCompact, "eLMS Sync options (Fast Poll, Course Sync, Full Sync)");
+                ToolTip.SetTip(
+                    syncCompact,
+                    "eLMS Sync options (Fast Poll, Course Sync, Full Sync)"
+                );
                 footer.Children.Add(CenterCompact(syncCompact));
 
                 var pollCompact = UiBuilder.IconButton(
@@ -417,8 +418,10 @@ public sealed partial class MainWindow
                 footer.Children.Add(CenterCompact(pollCompact));
 
                 var pauseCompact = UiBuilder.IconButton(
-                    _vm.IsPollingPaused ? MaterialIconKind.PlayCircleOutline : MaterialIconKind.PauseCircleOutline,
-                    () => _vm.TogglePollingPaused(),
+                    _vm.IsPollingPaused
+                        ? MaterialIconKind.PlayCircleOutline
+                        : MaterialIconKind.PauseCircleOutline,
+                    _vm.TogglePollingPaused,
                     15,
                     _vm.IsPollingPaused
                         ? ThemeService.Brush(ThemeService.PriorityP2Fg)
@@ -432,14 +435,18 @@ public sealed partial class MainWindow
                 );
                 if (_vm.IsPollingPaused)
                 {
-                    footer.Children.Add(CenterCompact(new Border
-                    {
-                        Background = ThemeService.Brush(ThemeService.PriorityP2Bg),
-                        BorderBrush = ThemeService.Brush(ThemeService.PriorityP2Fg),
-                        BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(6),
-                        Child = pauseCompact,
-                    }));
+                    footer.Children.Add(
+                        CenterCompact(
+                            new Border
+                            {
+                                Background = ThemeService.Brush(ThemeService.PriorityP2Bg),
+                                BorderBrush = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(6),
+                                Child = pauseCompact,
+                            }
+                        )
+                    );
                 }
                 else
                 {
@@ -450,7 +457,7 @@ public sealed partial class MainWindow
             {
                 var addCourseCompact = UiBuilder.IconButton(
                     MaterialIconKind.FolderPlusOutline,
-                    () => _vm.ToggleAddCourseModal()
+                    _vm.ToggleAddCourseModal
                 );
                 ToolTip.SetTip(addCourseCompact, "Add Course");
                 footer.Children.Add(CenterCompact(addCourseCompact));
@@ -467,14 +474,14 @@ public sealed partial class MainWindow
 
             var settingsCompact = UiBuilder.IconButton(
                 MaterialIconKind.CogOutline,
-                () => _vm.ToggleSettingsModal()
+                _vm.ToggleSettingsModal
             );
             ToolTip.SetTip(settingsCompact, "Desktop Settings");
             footer.Children.Add(CenterCompact(settingsCompact));
 
             var helpCompact = UiBuilder.IconButton(
                 MaterialIconKind.KeyboardOutline,
-                () => _vm.ToggleShortcutsModal()
+                _vm.ToggleShortcutsModal
             );
             ToolTip.SetTip(helpCompact, "Keyboard Shortcuts (?)");
             footer.Children.Add(CenterCompact(helpCompact));
@@ -492,7 +499,7 @@ public sealed partial class MainWindow
                     Padding = new Thickness(8, 5),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
-                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                    Cursor = new Cursor(StandardCursorType.Hand),
                     Content = new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -500,7 +507,11 @@ public sealed partial class MainWindow
                         HorizontalAlignment = HorizontalAlignment.Center,
                         Children =
                         {
-                            UiBuilder.Icon(MaterialIconKind.PauseCircle, 13.5, ThemeService.Brush(ThemeService.PriorityP2Fg)),
+                            UiBuilder.Icon(
+                                MaterialIconKind.PauseCircle,
+                                13.5,
+                                ThemeService.Brush(ThemeService.PriorityP2Fg)
+                            ),
                             new TextBlock
                             {
                                 Text = "Polling Paused · Resume",
@@ -508,12 +519,15 @@ public sealed partial class MainWindow
                                 FontWeight = FontWeight.SemiBold,
                                 Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
                                 VerticalAlignment = VerticalAlignment.Center,
-                            }
-                        }
-                    }
+                            },
+                        },
+                    },
                 };
                 pausedBannerBtn.Click += (_, _) => _vm.TogglePollingPaused();
-                ToolTip.SetTip(pausedBannerBtn, "Background eLMS polling is paused (Shift+P to resume)");
+                ToolTip.SetTip(
+                    pausedBannerBtn,
+                    "Background eLMS polling is paused (Shift+P to resume)"
+                );
                 footer.Children.Add(pausedBannerBtn);
             }
 
@@ -542,7 +556,7 @@ public sealed partial class MainWindow
                 syncBtn = UiBuilder.GhostButton(
                     "Add Course",
                     MaterialIconKind.FolderPlusOutline,
-                    () => _vm.ToggleAddCourseModal()
+                    _vm.ToggleAddCourseModal
                 );
             }
             syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -576,7 +590,7 @@ public sealed partial class MainWindow
                     _vm.IsPollingPaused
                         ? MaterialIconKind.PlayCircleOutline
                         : MaterialIconKind.PauseCircleOutline,
-                    () => _vm.TogglePollingPaused(),
+                    _vm.TogglePollingPaused,
                     15,
                     _vm.IsPollingPaused
                         ? ThemeService.Brush(ThemeService.PriorityP2Fg)
@@ -607,7 +621,7 @@ public sealed partial class MainWindow
 
             var settingsBtn = UiBuilder.IconButton(
                 MaterialIconKind.CogOutline,
-                () => _vm.ToggleSettingsModal(),
+                _vm.ToggleSettingsModal,
                 15
             );
             settingsBtn.HorizontalAlignment = HorizontalAlignment.Center;
@@ -617,7 +631,7 @@ public sealed partial class MainWindow
 
             var helpBtn = UiBuilder.IconButton(
                 MaterialIconKind.KeyboardOutline,
-                () => _vm.ToggleShortcutsModal(),
+                _vm.ToggleShortcutsModal,
                 15
             );
             helpBtn.HorizontalAlignment = HorizontalAlignment.Center;
@@ -647,7 +661,7 @@ public sealed partial class MainWindow
         var pollItem = new MenuItem
         {
             Header = "Fast Poll Assignments (R)",
-            IsEnabled = !_vm.IsSyncing
+            IsEnabled = !_vm.IsSyncing,
         };
         pollItem.Click += async (_, _) => await _vm.RunFastPollAsync();
         flyout.Items.Add(pollItem);
@@ -655,13 +669,13 @@ public sealed partial class MainWindow
         var fullSyncItem = new MenuItem
         {
             Header = "Full eLMS Sync (All Courses)",
-            IsEnabled = !_vm.IsSyncing
+            IsEnabled = !_vm.IsSyncing,
         };
         fullSyncItem.Click += async (_, _) => await _vm.RunFullSyncAsync();
         flyout.Items.Add(fullSyncItem);
 
-        var syncableCourses = _vm.Courses
-            .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
+        var syncableCourses = _vm
+            .Courses.Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
             .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -674,7 +688,7 @@ public sealed partial class MainWindow
                 var courseItem = new MenuItem
                 {
                     Header = $"Sync Course: {captured.Title}",
-                    IsEnabled = !_vm.IsSyncing
+                    IsEnabled = !_vm.IsSyncing,
                 };
                 courseItem.Click += async (_, _) => await _vm.RunCourseSyncAsync(captured);
                 flyout.Items.Add(courseItem);
@@ -686,7 +700,7 @@ public sealed partial class MainWindow
         {
             Header = _vm.IsPollingPaused
                 ? "Resume Background Polling (Shift+P)"
-                : "Pause Background Polling (Shift+P)"
+                : "Pause Background Polling (Shift+P)",
         };
         pauseItem.Click += (_, _) => _vm.TogglePollingPaused();
         flyout.Items.Add(pauseItem);
@@ -694,7 +708,7 @@ public sealed partial class MainWindow
         return flyout;
     }
 
-    private static Control BuildNavButton(
+    private static Button BuildNavButton(
         string title,
         MaterialIconKind icon,
         int badgeCount,

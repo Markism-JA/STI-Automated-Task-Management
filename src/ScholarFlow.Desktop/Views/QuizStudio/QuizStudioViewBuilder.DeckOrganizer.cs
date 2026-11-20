@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
@@ -13,7 +12,7 @@ namespace ScholarFlow.Desktop.Views;
 
 public static partial class QuizStudioViewBuilder
 {
-    private static Control BuildDeckOrganizerView(
+    private static ScrollViewer BuildDeckOrganizerView(
         MainWindowViewModel vm,
         QuizStudioViewModel studio
     )
@@ -170,14 +169,20 @@ public static partial class QuizStudioViewBuilder
                 async () =>
                 {
                     var top = TopLevel.GetTopLevel(bulkRow);
-                    if (top?.StorageProvider is null) return;
-                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
-                    {
-                        Title = "Export Printable Quiz PDF",
-                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".pdf")}",
-                        DefaultExtension = "pdf"
-                    });
-                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (top?.StorageProvider is null)
+                        return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(
+                        new Avalonia.Platform.Storage.FilePickerSaveOptions
+                        {
+                            Title = "Export Printable Quiz PDF",
+                            SuggestedFileName =
+                                $"{Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".pdf")}",
+                            DefaultExtension = "pdf",
+                        }
+                    );
+                    var outPath = file is null
+                        ? null
+                        : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
                     if (!string.IsNullOrWhiteSpace(outPath))
                         await studio.ExportQuizToPdfFileAsync(deck, outPath);
                 }
@@ -190,14 +195,20 @@ public static partial class QuizStudioViewBuilder
                 async () =>
                 {
                     var top = TopLevel.GetTopLevel(bulkRow);
-                    if (top?.StorageProvider is null) return;
-                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
-                    {
-                        Title = "Export Quiz Deck JSON",
-                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".json")}",
-                        DefaultExtension = "json"
-                    });
-                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (top?.StorageProvider is null)
+                        return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(
+                        new Avalonia.Platform.Storage.FilePickerSaveOptions
+                        {
+                            Title = "Export Quiz Deck JSON",
+                            SuggestedFileName =
+                                $"{Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".json")}",
+                            DefaultExtension = "json",
+                        }
+                    );
+                    var outPath = file is null
+                        ? null
+                        : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
                     if (!string.IsNullOrWhiteSpace(outPath))
                         await studio.ExportQuizToJsonFileAsync(deck, outPath);
                 }
@@ -216,14 +227,14 @@ public static partial class QuizStudioViewBuilder
             UiBuilder.GhostButton(
                 "Group by Kind",
                 MaterialIconKind.FormatListGroup,
-                () => studio.SortOrganizerQuestionsByKind()
+                studio.SortOrganizerQuestionsByKind
             )
         );
         bulkRow.Children.Add(
             UiBuilder.GhostButton(
                 "Sort by PDF Page",
                 MaterialIconKind.SortNumericAscending,
-                () => studio.SortOrganizerQuestionsByPage()
+                studio.SortOrganizerQuestionsByPage
             )
         );
         Grid.SetColumn(bulkRow, 1);
@@ -277,7 +288,7 @@ public static partial class QuizStudioViewBuilder
 
         // 2. Filtered Question List with Reorder & Inline Kind-Aware Editor
         var visibleQuestions = studio.OrganizerKindFilter.HasValue
-            ? deck.Questions.Where(q => q.Kind == studio.OrganizerKindFilter.Value).ToList()
+            ? [.. deck.Questions.Where(q => q.Kind == studio.OrganizerKindFilter.Value)]
             : deck.Questions;
 
         var qListStack = new StackPanel { Spacing = 8 };
@@ -431,7 +442,9 @@ public static partial class QuizStudioViewBuilder
             );
 
             if (!string.IsNullOrWhiteSpace(q.CodeSnippet))
-                cardStack.Children.Add(QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage));
+                cardStack.Children.Add(
+                    QuizRichContentRenderer.BuildCodeSnippetCard(q.CodeSnippet, q.CodeLanguage)
+                );
 
             if (!string.IsNullOrWhiteSpace(q.MathLatex))
                 cardStack.Children.Add(QuizRichContentRenderer.BuildMathLatexCard(q.MathLatex));
@@ -652,10 +665,13 @@ public static partial class QuizStudioViewBuilder
                     {
                         int capturedIdx = oi;
                         var currentVal = capturedQ.Options[oi];
-                        bool isCorrectChoice = !isOrdering && string.Equals(
-                            currentVal.Trim(),
-                            capturedQ.CorrectAnswer.Trim(),
-                            StringComparison.OrdinalIgnoreCase);
+                        bool isCorrectChoice =
+                            !isOrdering
+                            && string.Equals(
+                                currentVal.Trim(),
+                                capturedQ.CorrectAnswer.Trim(),
+                                StringComparison.OrdinalIgnoreCase
+                            );
 
                         var optRow = new Grid
                         {
@@ -702,18 +718,27 @@ public static partial class QuizStudioViewBuilder
                         };
                         optItemBox.PropertyChanged += (_, e) =>
                         {
-                            if (e.Property == TextBox.TextProperty && capturedIdx < capturedQ.Options.Count)
+                            if (
+                                e.Property == TextBox.TextProperty
+                                && capturedIdx < capturedQ.Options.Count
+                            )
                             {
-                                var wasCorrect = !isOrdering && string.Equals(
-                                    capturedQ.Options[capturedIdx].Trim(),
-                                    capturedQ.CorrectAnswer.Trim(),
-                                    StringComparison.OrdinalIgnoreCase);
+                                var wasCorrect =
+                                    !isOrdering
+                                    && string.Equals(
+                                        capturedQ.Options[capturedIdx].Trim(),
+                                        capturedQ.CorrectAnswer.Trim(),
+                                        StringComparison.OrdinalIgnoreCase
+                                    );
                                 var nextText = optItemBox.Text ?? string.Empty;
                                 capturedQ.Options[capturedIdx] = nextText;
                                 if (wasCorrect)
                                     capturedQ.CorrectAnswer = nextText.Trim();
                                 else if (isOrdering && capturedQ.Options.Count >= 2)
-                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    capturedQ.CorrectAnswer = string.Join(
+                                        " -> ",
+                                        capturedQ.Options
+                                    );
                             }
                         };
                         Grid.SetColumn(optItemBox, 1);
@@ -725,10 +750,19 @@ public static partial class QuizStudioViewBuilder
                                 MaterialIconKind.ArrowUp,
                                 () =>
                                 {
-                                    if (capturedIdx <= 0) return;
-                                    (capturedQ.Options[capturedIdx - 1], capturedQ.Options[capturedIdx]) =
-                                        (capturedQ.Options[capturedIdx], capturedQ.Options[capturedIdx - 1]);
-                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    if (capturedIdx <= 0)
+                                        return;
+                                    (
+                                        capturedQ.Options[capturedIdx - 1],
+                                        capturedQ.Options[capturedIdx]
+                                    ) = (
+                                        capturedQ.Options[capturedIdx],
+                                        capturedQ.Options[capturedIdx - 1]
+                                    );
+                                    capturedQ.CorrectAnswer = string.Join(
+                                        " -> ",
+                                        capturedQ.Options
+                                    );
                                     vm.RequestUiRefresh();
                                 },
                                 13,
@@ -742,10 +776,19 @@ public static partial class QuizStudioViewBuilder
                                 MaterialIconKind.ArrowDown,
                                 () =>
                                 {
-                                    if (capturedIdx >= capturedQ.Options.Count - 1) return;
-                                    (capturedQ.Options[capturedIdx + 1], capturedQ.Options[capturedIdx]) =
-                                        (capturedQ.Options[capturedIdx], capturedQ.Options[capturedIdx + 1]);
-                                    capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                    if (capturedIdx >= capturedQ.Options.Count - 1)
+                                        return;
+                                    (
+                                        capturedQ.Options[capturedIdx + 1],
+                                        capturedQ.Options[capturedIdx]
+                                    ) = (
+                                        capturedQ.Options[capturedIdx],
+                                        capturedQ.Options[capturedIdx + 1]
+                                    );
+                                    capturedQ.CorrectAnswer = string.Join(
+                                        " -> ",
+                                        capturedQ.Options
+                                    );
                                     vm.RequestUiRefresh();
                                 },
                                 13,
@@ -764,7 +807,10 @@ public static partial class QuizStudioViewBuilder
                                 {
                                     capturedQ.Options.RemoveAt(capturedIdx);
                                     if (isOrdering && capturedQ.Options.Count >= 2)
-                                        capturedQ.CorrectAnswer = string.Join(" -> ", capturedQ.Options);
+                                        capturedQ.CorrectAnswer = string.Join(
+                                            " -> ",
+                                            capturedQ.Options
+                                        );
                                     vm.RequestUiRefresh();
                                 }
                             },
@@ -808,13 +854,14 @@ public static partial class QuizStudioViewBuilder
                 {
                     if (e.Property == TextBox.TextProperty)
                     {
-                        capturedQ.AcceptedAliases = (aliasBox.Text ?? string.Empty)
-                            .Split(
+                        capturedQ.AcceptedAliases =
+                        [
+                            .. (aliasBox.Text ?? string.Empty).Split(
                                 ',',
                                 StringSplitOptions.RemoveEmptyEntries
                                     | StringSplitOptions.TrimEntries
-                            )
-                            .ToList();
+                            ),
+                        ];
                     }
                 };
                 Grid.SetColumn(aliasBox, 1);
@@ -851,7 +898,9 @@ public static partial class QuizStudioViewBuilder
                 mathBox.PropertyChanged += (_, e) =>
                 {
                     if (e.Property == TextBox.TextProperty)
-                        capturedQ.MathLatex = string.IsNullOrWhiteSpace(mathBox.Text) ? null : mathBox.Text.Trim();
+                        capturedQ.MathLatex = string.IsNullOrWhiteSpace(mathBox.Text)
+                            ? null
+                            : mathBox.Text.Trim();
                 };
                 richGrid.Children.Add(mathBox);
 
@@ -864,7 +913,9 @@ public static partial class QuizStudioViewBuilder
                 diagBox.PropertyChanged += (_, e) =>
                 {
                     if (e.Property == TextBox.TextProperty)
-                        capturedQ.Diagram = string.IsNullOrWhiteSpace(diagBox.Text) ? null : diagBox.Text.Trim();
+                        capturedQ.Diagram = string.IsNullOrWhiteSpace(diagBox.Text)
+                            ? null
+                            : diagBox.Text.Trim();
                 };
                 Grid.SetColumn(diagBox, 1);
                 richGrid.Children.Add(diagBox);
@@ -882,7 +933,9 @@ public static partial class QuizStudioViewBuilder
                 codeEditBox.PropertyChanged += (_, e) =>
                 {
                     if (e.Property == TextBox.TextProperty)
-                        capturedQ.CodeSnippet = string.IsNullOrWhiteSpace(codeEditBox.Text) ? null : codeEditBox.Text;
+                        capturedQ.CodeSnippet = string.IsNullOrWhiteSpace(codeEditBox.Text)
+                            ? null
+                            : codeEditBox.Text;
                 };
                 editStack.Children.Add(codeEditBox);
 
@@ -904,18 +957,21 @@ public static partial class QuizStudioViewBuilder
             if (isFlagging)
             {
                 var flagStack = new StackPanel { Spacing = 8 };
-                flagStack.Children.Add(new TextBlock
-                {
-                    Text = "Point-to-Point AI Question Repair",
-                    FontSize = 12.5,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
-                });
+                flagStack.Children.Add(
+                    new TextBlock
+                    {
+                        Text = "Point-to-Point AI Question Repair",
+                        FontSize = 12.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
+                    }
+                );
 
                 var issueBox = new TextBox
                 {
                     Text = studio.FlagProblemDescription,
-                    Watermark = "Describe what is wrong with this question (e.g. two options are correct, wrong quote, unclear wording)...",
+                    Watermark =
+                        "Describe what is wrong with this question (e.g. two options are correct, wrong quote, unclear wording)...",
                     AcceptsReturn = true,
                     TextWrapping = TextWrapping.Wrap,
                     MinHeight = 46,
@@ -934,7 +990,10 @@ public static partial class QuizStudioViewBuilder
                     MaterialIconKind.ContentCopy,
                     async () =>
                     {
-                        var prompt = studio.BuildQuestionAiFixPrompt(capturedQ, issueBox.Text ?? string.Empty);
+                        var prompt = studio.BuildQuestionAiFixPrompt(
+                            capturedQ,
+                            issueBox.Text ?? string.Empty
+                        );
                         var top = TopLevel.GetTopLevel(flagStack);
                         if (top?.Clipboard is not null)
                             await top.Clipboard.SetTextAsync(prompt);
@@ -964,19 +1023,25 @@ public static partial class QuizStudioViewBuilder
                 var applyBtn = UiBuilder.PrimaryButton(
                     "Apply Repaired Question",
                     MaterialIconKind.Check,
-                    async () => await studio.ApplyQuestionAiFixAsync(capturedQ, fixJsonBox.Text ?? string.Empty)
+                    async () =>
+                        await studio.ApplyQuestionAiFixAsync(
+                            capturedQ,
+                            fixJsonBox.Text ?? string.Empty
+                        )
                 );
                 flagStack.Children.Add(applyBtn);
 
-                qListStack.Children.Add(new Border
-                {
-                    Background = ThemeService.Brush(ThemeService.BgElevated),
-                    BorderBrush = ThemeService.Brush(ThemeService.AccentPrimary),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
-                    Padding = new Thickness(12, 10),
-                    Child = flagStack,
-                });
+                qListStack.Children.Add(
+                    new Border
+                    {
+                        Background = ThemeService.Brush(ThemeService.BgElevated),
+                        BorderBrush = ThemeService.Brush(ThemeService.AccentPrimary),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        Padding = new Thickness(12, 10),
+                        Child = flagStack,
+                    }
+                );
             }
         }
 
@@ -999,5 +1064,4 @@ public static partial class QuizStudioViewBuilder
 
         return UiBuilder.PersistentScrollViewer($"quiz-organizer:{deck.Id}", stack);
     }
-
 }

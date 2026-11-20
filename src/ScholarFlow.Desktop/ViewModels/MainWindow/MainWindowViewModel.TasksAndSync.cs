@@ -1,18 +1,13 @@
 using Avalonia.Threading;
-using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
-using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Services;
-using ScholarFlow.Core.Sync;
 using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Services;
 using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Client;
 using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
-
 
 public sealed partial class MainWindowViewModel
 {
@@ -28,7 +23,8 @@ public sealed partial class MainWindowViewModel
         string newTitle,
         string? newDueDateIso,
         TaskPriority newPriority,
-        int newDifficulty)
+        int newDifficulty
+    )
     {
         if (!string.IsNullOrWhiteSpace(newTitle))
             task.Title = newTitle.Trim();
@@ -48,7 +44,11 @@ public sealed partial class MainWindowViewModel
 
     public TaskItem? GetParentTask(TaskItem task) =>
         TaskItem.FindParentOf(AllTasks, task.Id)
-        ?? (!string.IsNullOrWhiteSpace(task.ParentTaskId) ? TaskItem.FindById(AllTasks, task.ParentTaskId) : null);
+        ?? (
+            !string.IsNullOrWhiteSpace(task.ParentTaskId)
+                ? TaskItem.FindById(AllTasks, task.ParentTaskId)
+                : null
+        );
 
     public async Task AddSubtaskAsync(TaskItem parentTask, string subtaskInput)
     {
@@ -90,7 +90,9 @@ public sealed partial class MainWindowViewModel
         parentTask.EnsureChildTasksSynced();
 
         await MarkdownTaskCodec.UpdateTaskInFileAsync(BasinRoot, parentTask);
-        StatusText = child.IsCompleted ? $"Completed subtask: {child.Title}" : $"Reopened subtask: {child.Title}";
+        StatusText = child.IsCompleted
+            ? $"Completed subtask: {child.Title}"
+            : $"Reopened subtask: {child.Title}";
         await ReloadBasinDataAsync();
     }
 
@@ -98,8 +100,9 @@ public sealed partial class MainWindowViewModel
     {
         parentTask.EnsureChildTasksSynced();
         var idx = parentTask.ChildTasks.FindIndex(c =>
-            string.Equals(c.Id, childTask.Id, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(c.Title, childTask.Title, StringComparison.OrdinalIgnoreCase));
+            string.Equals(c.Id, childTask.Id, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(c.Title, childTask.Title, StringComparison.OrdinalIgnoreCase)
+        );
         if (idx >= 0)
         {
             await ToggleSubtaskAsync(parentTask, idx);
@@ -269,7 +272,9 @@ public sealed partial class MainWindowViewModel
 
     public void OpenTaskFile(TaskItem task, string relativeOrFullFilePath)
     {
-        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder) ? BasinRoot : Path.Combine(BasinRoot, task.CourseFolder);
+        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder)
+            ? BasinRoot
+            : Path.Combine(BasinRoot, task.CourseFolder);
         var fullPath = Path.IsPathRooted(relativeOrFullFilePath)
             ? relativeOrFullFilePath
             : Path.Combine(courseDir, relativeOrFullFilePath);
@@ -295,7 +300,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        var firstFile = task.AllFiles.FirstOrDefault() ?? task.NotePath;
+        var firstFile = (task.AllFiles.Count > 0 ? task.AllFiles[0] : null) ?? task.NotePath;
         if (!string.IsNullOrWhiteSpace(firstFile))
         {
             OpenTaskFile(task, firstFile);
@@ -324,17 +329,20 @@ public sealed partial class MainWindowViewModel
         StatusText = "Opening eLMS app window (background polling paused)...";
         NotifyStateChanged(UiChangeKind.FullLayout);
 
-        await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(url, async () =>
-        {
-            await Dispatcher.UIThread.InvokeAsync(async () =>
+        await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(
+            url,
+            async () =>
             {
-                if (!wasManuallyPaused)
-                    _pollingService.Resume();
-                StatusText = "eLMS window closed — refreshing assignments...";
-                NotifyStateChanged(UiChangeKind.FullLayout);
-                await RunFastPollAsync();
-            });
-        });
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    if (!wasManuallyPaused)
+                        _pollingService.Resume();
+                    StatusText = "eLMS window closed — refreshing assignments...";
+                    NotifyStateChanged(UiChangeKind.FullLayout);
+                    await RunFastPollAsync();
+                });
+            }
+        );
     }
 
     public bool IsPollingPaused => _pollingService.IsPaused;
@@ -393,7 +401,8 @@ public sealed partial class MainWindowViewModel
         {
             Dispatcher.UIThread.Post(() =>
             {
-                StatusText = $"[{p.Stage}] {(p.CourseTitle is not null ? $"{p.CourseTitle}: " : "")}{p.Message}";
+                StatusText =
+                    $"[{p.Stage}] {(p.CourseTitle is not null ? $"{p.CourseTitle}: " : "")}{p.Message}";
                 NotifyStateChanged(UiChangeKind.StatusOnly);
             });
         });
@@ -404,7 +413,8 @@ public sealed partial class MainWindowViewModel
             foreach (var n in report.Notifications)
                 AddNotification(n);
 
-            StatusText = $"Synced {report.CoursesSynced} courses (+{report.FilesDownloaded} files, {report.MasterPdfsCompiled} PDFs compiled)";
+            StatusText =
+                $"Synced {report.CoursesSynced} courses (+{report.FilesDownloaded} files, {report.MasterPdfsCompiled} PDFs compiled)";
             await ReloadBasinDataAsync();
         }
         catch (Exception ex)
@@ -426,7 +436,12 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            var res = await _pdfService.CompileIfStaleAsync(BasinRoot, course.FolderName, course.Title, force);
+            var res = await _pdfService.CompileIfStaleAsync(
+                BasinRoot,
+                course.FolderName,
+                course.Title,
+                force
+            );
             StatusText = res.WasRegenerated
                 ? $"Compiled {Path.GetFileName(res.OutputPdfPath)} ({res.PageCount} pages)"
                 : $"{Path.GetFileName(res.OutputPdfPath)} is already up to date";
@@ -456,7 +471,7 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            var progress = new Progress<Elms.Models.SyncProgress>(p =>
+            var progress = new Progress<SyncProgress>(p =>
             {
                 Dispatcher.UIThread.Post(() =>
                 {
@@ -465,13 +480,18 @@ public sealed partial class MainWindowViewModel
                 });
             });
 
-            var report = await _syncService.SyncCourseAsync(BasinRoot, course.FolderName, progress: progress);
+            var report = await _syncService.SyncCourseAsync(
+                BasinRoot,
+                course.FolderName,
+                progress: progress
+            );
             foreach (var n in report.Notifications)
                 AddNotification(n);
 
-            StatusText = report.Errors.Count > 0
-                ? $"{course.Title} sync finished with {report.Errors.Count} warning(s): {report.Errors[0]}"
-                : $"Synced {course.Title}: {report.FilesDownloaded} new, {report.FilesUpdated} updated, {report.MasterPdfsCompiled} PDF(s) compiled";
+            StatusText =
+                report.Errors.Count > 0
+                    ? $"{course.Title} sync finished with {report.Errors.Count} warning(s): {report.Errors[0]}"
+                    : $"Synced {course.Title}: {report.FilesDownloaded} new, {report.FilesUpdated} updated, {report.MasterPdfsCompiled} PDF(s) compiled";
             await ReloadBasinDataAsync();
         }
         catch (Exception ex)
@@ -552,9 +572,10 @@ public sealed partial class MainWindowViewModel
 
     private void RecomputeVisibleTasks()
     {
-        var viewKind = ActiveMode == WorkspaceTabMode.CourseWorkspace && ActiveCourse is not null
-            ? SmartViewKind.Course
-            : ActiveSmartView;
+        var viewKind =
+            ActiveMode == WorkspaceTabMode.CourseWorkspace && ActiveCourse is not null
+                ? SmartViewKind.Course
+                : ActiveSmartView;
 
         var targetVal = viewKind switch
         {
@@ -562,7 +583,7 @@ public sealed partial class MainWindowViewModel
             SmartViewKind.Label => ActiveLabelFilter,
             SmartViewKind.Term => ActiveTermFilter,
             SmartViewKind.Completed => CompletedCourseFilter,
-            _ => null
+            _ => null,
         };
 
         // Include subtasks with due dates in Today & Upcoming views
@@ -575,19 +596,35 @@ public sealed partial class MainWindowViewModel
             viewKind,
             targetValue: targetVal,
             searchQuery: IsSearchModalOpen ? null : SearchQuery,
-            termFilter: ActiveTermFilter);
+            termFilter: ActiveTermFilter
+        );
 
         if (SelectedTask is not null)
         {
             var prev = SelectedTask;
             var allNodes = EnumerateAllTaskNodes(AllTasks).ToList();
-            SelectedTask = TaskItem.FindById(AllTasks, prev.Id)
-                           ?? allNodes.FirstOrDefault(t =>
-                               (!string.IsNullOrWhiteSpace(prev.LmsId) && string.Equals(t.LmsId, prev.LmsId, StringComparison.OrdinalIgnoreCase)) ||
-                               (string.Equals(t.CourseFolder, prev.CourseFolder, StringComparison.OrdinalIgnoreCase) &&
-                                string.Equals(t.Title, prev.Title, StringComparison.OrdinalIgnoreCase) &&
-                                string.Equals(t.ParentTaskId ?? "", prev.ParentTaskId ?? "", StringComparison.OrdinalIgnoreCase)))
-                           ?? VisibleTasks.FirstOrDefault();
+            SelectedTask =
+                TaskItem.FindById(AllTasks, prev.Id)
+                ?? allNodes.FirstOrDefault(t =>
+                    (
+                        !string.IsNullOrWhiteSpace(prev.LmsId)
+                        && string.Equals(t.LmsId, prev.LmsId, StringComparison.OrdinalIgnoreCase)
+                    )
+                    || (
+                        string.Equals(
+                            t.CourseFolder,
+                            prev.CourseFolder,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        && string.Equals(t.Title, prev.Title, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(
+                            t.ParentTaskId ?? "",
+                            prev.ParentTaskId ?? "",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                )
+                ?? (VisibleTasks.Count > 0 ? VisibleTasks[0] : null);
             SelectedTaskNoteContent = LoadTaskNotePreview(SelectedTask);
         }
         else if (VisibleTasks.Count > 0)
@@ -602,7 +639,9 @@ public sealed partial class MainWindowViewModel
         if (task is null || string.IsNullOrWhiteSpace(task.NotePath))
             return null;
 
-        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder) ? BasinRoot : Path.Combine(BasinRoot, task.CourseFolder);
+        var courseDir = string.IsNullOrWhiteSpace(task.CourseFolder)
+            ? BasinRoot
+            : Path.Combine(BasinRoot, task.CourseFolder);
         var full = Path.Combine(courseDir, task.NotePath);
         if (!File.Exists(full))
             return null;
@@ -616,5 +655,4 @@ public sealed partial class MainWindowViewModel
             return null;
         }
     }
-
 }

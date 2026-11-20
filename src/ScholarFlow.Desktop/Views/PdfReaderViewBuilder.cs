@@ -25,7 +25,7 @@ public static class PdfReaderViewBuilder
         var root = new Grid
         {
             RowDefinitions = RowDefinitions.Parse("Auto,Auto,*"),
-            Margin = new Thickness(12, 8)
+            Margin = new Thickness(12, 8),
         };
 
         // 1. Responsive Top Toolbar
@@ -36,39 +36,37 @@ public static class PdfReaderViewBuilder
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 6),
-            Margin = new Thickness(0, 0, 0, 8)
+            Margin = new Thickness(0, 0, 0, 8),
         };
 
-        var toolbarGrid = new Grid
-        {
-            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto")
-        };
+        var toolbarGrid = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto") };
 
         var leftGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
-        var backLabel = vm.PdfOpenedFromQuiz
-            ? "Back to Quiz"
-            : vm.PdfReturnTask is not null
-                ? "Back to Task"
-                : "Back";
+        var backLabel =
+            vm.PdfOpenedFromQuiz ? "Back to Quiz"
+            : vm.PdfReturnTask is not null ? "Back to Task"
+            : "Back";
 
-        leftGroup.Children.Add(UiBuilder.GhostButton(
-            backLabel,
-            MaterialIconKind.ArrowLeft,
-            () => vm.ReturnFromPdfReader()));
+        leftGroup.Children.Add(
+            UiBuilder.GhostButton(backLabel, MaterialIconKind.ArrowLeft, vm.ReturnFromPdfReader)
+        );
 
         if (reader.BookmarkRoots.Count > 0)
         {
-            leftGroup.Children.Add(UiBuilder.GhostButton(
-                "Outline",
-                MaterialIconKind.FileTreeOutline,
-                () => reader.ToggleOutline(),
-                isActive: reader.IsOutlineVisible));
+            leftGroup.Children.Add(
+                UiBuilder.GhostButton(
+                    "Outline",
+                    MaterialIconKind.FileTreeOutline,
+                    reader.ToggleOutline,
+                    isActive: reader.IsOutlineVisible
+                )
+            );
         }
         toolbarGrid.Children.Add(leftGroup);
 
@@ -80,7 +78,7 @@ public static class PdfReaderViewBuilder
             Foreground = ThemeService.Brush(ThemeService.TextPrimary),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(12, 0),
-            TextTrimming = TextTrimming.CharacterEllipsis
+            TextTrimming = TextTrimming.CharacterEllipsis,
         };
         Grid.SetColumn(titleText, 1);
         toolbarGrid.Children.Add(titleText);
@@ -88,7 +86,7 @@ public static class PdfReaderViewBuilder
         var rightControls = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
         var navRow = new StackPanel
@@ -96,53 +94,76 @@ public static class PdfReaderViewBuilder
             Orientation = Orientation.Horizontal,
             Spacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0)
+            Margin = new Thickness(0, 0, 10, 0),
         };
-        navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.PageFirst, () => reader.JumpToPage(1)));
-        navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.ChevronLeft, () => reader.PreviousPage()));
-        navRow.Children.Add(new Border
-        {
-            Background = ThemeService.Brush(ThemeService.BgElevated),
-            CornerRadius = new CornerRadius(5),
-            Padding = new Thickness(8, 3.5),
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = new TextBlock
+        navRow.Children.Add(
+            UiBuilder.IconButton(MaterialIconKind.PageFirst, () => reader.JumpToPage(1))
+        );
+        navRow.Children.Add(
+            UiBuilder.IconButton(MaterialIconKind.ChevronLeft, reader.PreviousPage)
+        );
+        navRow.Children.Add(
+            new Border
             {
-                Text = $"{reader.CurrentPage} / {Math.Max(1, reader.PageCount)}",
-                FontSize = 12,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = ThemeService.Brush(ThemeService.TextPrimary)
+                Background = ThemeService.Brush(ThemeService.BgElevated),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 3.5),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = $"{reader.CurrentPage} / {Math.Max(1, reader.PageCount)}",
+                    FontSize = 12,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                },
             }
-        });
-        navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.ChevronRight, () => reader.NextPage()));
-        navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.PageLast, () => reader.JumpToPage(reader.PageCount)));
+        );
+        navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.ChevronRight, reader.NextPage));
+        navRow.Children.Add(
+            UiBuilder.IconButton(
+                MaterialIconKind.PageLast,
+                () => reader.JumpToPage(reader.PageCount)
+            )
+        );
         rightControls.Children.Add(navRow);
 
         var zoomRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 4,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
         };
-        zoomRow.Children.Add(UiBuilder.GhostButton(
-            "Fit Width",
-            MaterialIconKind.ArrowExpandHorizontal,
-            () => reader.ToggleFitToWidth(),
-            isActive: reader.FitToWidth));
-        zoomRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.MagnifyMinusOutline, () => reader.ZoomOut()));
-        zoomRow.Children.Add(UiBuilder.GhostButton(
-            reader.FitToWidth ? "Auto" : $"{reader.ZoomPercent}%",
-            null,
-            () => reader.ResetZoom()));
-        zoomRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.MagnifyPlusOutline, () => reader.ZoomIn()));
-        zoomRow.Children.Add(UiBuilder.GhostButton(
-            "Quiz PDF",
-            MaterialIconKind.HeadLightbulbOutline,
-            () => vm.OpenQuizStudioForCurrentPdf()));
-        zoomRow.Children.Add(UiBuilder.GhostButton(
-            "External",
-            MaterialIconKind.OpenInNew,
-            () => reader.OpenExternal()));
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
+                "Fit Width",
+                MaterialIconKind.ArrowExpandHorizontal,
+                reader.ToggleFitToWidth,
+                isActive: reader.FitToWidth
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.IconButton(MaterialIconKind.MagnifyMinusOutline, reader.ZoomOut)
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
+                reader.FitToWidth ? "Auto" : $"{reader.ZoomPercent}%",
+                null,
+                reader.ResetZoom
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.IconButton(MaterialIconKind.MagnifyPlusOutline, reader.ZoomIn)
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
+                "Quiz PDF",
+                MaterialIconKind.HeadLightbulbOutline,
+                vm.OpenQuizStudioForCurrentPdf
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton("External", MaterialIconKind.OpenInNew, reader.OpenExternal)
+        );
         rightControls.Children.Add(zoomRow);
 
         Grid.SetColumn(rightControls, 2);
@@ -156,35 +177,47 @@ public static class PdfReaderViewBuilder
             var bannerGrid = new Grid
             {
                 ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto"),
-                ColumnSpacing = 10
+                ColumnSpacing = 10,
             };
 
-            bannerGrid.Children.Add(UiBuilder.Icon(
-                MaterialIconKind.Marker,
-                18,
-                ThemeService.Brush(ThemeService.PriorityP2Fg)));
+            bannerGrid.Children.Add(
+                UiBuilder.Icon(
+                    MaterialIconKind.Marker,
+                    18,
+                    ThemeService.Brush(ThemeService.PriorityP2Fg)
+                )
+            );
 
-            var quoteStack = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            var quoteStack = new StackPanel
+            {
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
             if (!string.IsNullOrWhiteSpace(reader.ActiveEvidenceQuestionPrompt))
             {
-                quoteStack.Children.Add(new TextBlock
-                {
-                    Text = $"Grounded Evidence (Page {reader.ActiveHighlightPage.Value}) · {reader.ActiveEvidenceQuestionPrompt}",
-                    FontSize = 11.5,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                });
+                quoteStack.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            $"Grounded Evidence (Page {reader.ActiveHighlightPage.Value}) · {reader.ActiveEvidenceQuestionPrompt}",
+                        FontSize = 11.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    }
+                );
             }
             if (!string.IsNullOrWhiteSpace(reader.ActiveEvidenceQuote))
             {
-                quoteStack.Children.Add(new TextBlock
-                {
-                    Text = $"\"{reader.ActiveEvidenceQuote}\"",
-                    FontSize = 12,
-                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                    TextWrapping = TextWrapping.Wrap
-                });
+                quoteStack.Children.Add(
+                    new TextBlock
+                    {
+                        Text = $"\"{reader.ActiveEvidenceQuote}\"",
+                        FontSize = 12,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        TextWrapping = TextWrapping.Wrap,
+                    }
+                );
             }
             Grid.SetColumn(quoteStack, 1);
             bannerGrid.Children.Add(quoteStack);
@@ -195,7 +228,8 @@ public static class PdfReaderViewBuilder
                     $"Go to Page {reader.ActiveHighlightPage.Value}",
                     MaterialIconKind.Target,
                     () => reader.JumpToPage(reader.ActiveHighlightPage.Value),
-                    isActive: true);
+                    isActive: true
+                );
                 Grid.SetColumn(jumpHighlightBtn, 2);
                 bannerGrid.Children.Add(jumpHighlightBtn);
             }
@@ -204,7 +238,8 @@ public static class PdfReaderViewBuilder
                 MaterialIconKind.Close,
                 () => reader.ClearEvidenceHighlight(),
                 14,
-                ThemeService.Brush(ThemeService.TextMuted));
+                ThemeService.Brush(ThemeService.TextMuted)
+            );
             Grid.SetColumn(clearHighlightBtn, 3);
             bannerGrid.Children.Add(clearHighlightBtn);
 
@@ -216,7 +251,7 @@ public static class PdfReaderViewBuilder
                 CornerRadius = new CornerRadius(7),
                 Padding = new Thickness(12, 8),
                 Margin = new Thickness(0, 0, 0, 8),
-                Child = bannerGrid
+                Child = bannerGrid,
             };
             Grid.SetRow(bannerBorder, 1);
             root.Children.Add(bannerBorder);
@@ -228,7 +263,7 @@ public static class PdfReaderViewBuilder
         {
             ColumnDefinitions = showOutline
                 ? ColumnDefinitions.Parse("250,10,*")
-                : ColumnDefinitions.Parse("0,0,*")
+                : ColumnDefinitions.Parse("0,0,*"),
         };
 
         if (showOutline)
@@ -241,15 +276,20 @@ public static class PdfReaderViewBuilder
                 outlineStack.Children.Add(BuildBookmarkTreeNode(reader, rootNode, activeNode));
             }
 
-            body.Children.Add(new Border
-            {
-                Background = ThemeService.Brush(ThemeService.BgSurface),
-                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(6),
-                Child = UiBuilder.PersistentScrollViewer($"pdf-reader-outline:{reader.CurrentFilePath}", outlineStack)
-            });
+            body.Children.Add(
+                new Border
+                {
+                    Background = ThemeService.Brush(ThemeService.BgSurface),
+                    BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6),
+                    Child = UiBuilder.PersistentScrollViewer(
+                        $"pdf-reader-outline:{reader.CurrentFilePath}",
+                        outlineStack
+                    ),
+                }
+            );
         }
 
         // 3. Center Page Canvas
@@ -265,7 +305,7 @@ public static class PdfReaderViewBuilder
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(24),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
             };
         }
         else if (bmp is not null)
@@ -275,7 +315,7 @@ public static class PdfReaderViewBuilder
                 Source = bmp,
                 Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Top
+                VerticalAlignment = VerticalAlignment.Top,
             };
 
             if (!reader.FitToWidth)
@@ -286,18 +326,23 @@ public static class PdfReaderViewBuilder
             var pageLayerGrid = new Grid
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Top
+                VerticalAlignment = VerticalAlignment.Top,
             };
             pageLayerGrid.Children.Add(img);
 
-            if (reader.ActiveHighlightPage == reader.CurrentPage && reader.ActiveHighlights.Count > 0)
+            if (
+                reader.ActiveHighlightPage == reader.CurrentPage
+                && reader.ActiveHighlights.Count > 0
+            )
             {
-                pageLayerGrid.Children.Add(new PdfHighlightOverlayControl(reader.ActiveHighlights)
-                {
-                    IsHitTestVisible = false,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch
-                });
+                pageLayerGrid.Children.Add(
+                    new PdfHighlightOverlayControl(reader.ActiveHighlights)
+                    {
+                        IsHitTestVisible = false,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                    }
+                );
             }
 
             var pageSheet = new Border
@@ -308,10 +353,12 @@ public static class PdfReaderViewBuilder
                 CornerRadius = new CornerRadius(6),
                 Margin = new Thickness(16, 12),
                 Padding = new Thickness(4),
-                HorizontalAlignment = reader.FitToWidth ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
+                HorizontalAlignment = reader.FitToWidth
+                    ? HorizontalAlignment.Stretch
+                    : HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Top,
                 MaxWidth = reader.FitToWidth ? 860 : double.PositiveInfinity,
-                Child = pageLayerGrid
+                Child = pageLayerGrid,
             };
 
             canvasContent = new ScrollViewer
@@ -320,7 +367,7 @@ public static class PdfReaderViewBuilder
                     ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
                     : Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-                Content = pageSheet
+                Content = pageSheet,
             };
         }
         else
@@ -330,7 +377,7 @@ public static class PdfReaderViewBuilder
                 Text = "No PDF page loaded.",
                 Foreground = ThemeService.Brush(ThemeService.TextSecondary),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
             };
         }
 
@@ -340,7 +387,7 @@ public static class PdfReaderViewBuilder
             BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
-            Child = canvasContent
+            Child = canvasContent,
         };
         Grid.SetColumn(canvasBorder, 2);
         body.Children.Add(canvasBorder);
@@ -351,17 +398,18 @@ public static class PdfReaderViewBuilder
         return root;
     }
 
-    private sealed class PdfHighlightOverlayControl : Control
+    private sealed class PdfHighlightOverlayControl(IReadOnlyList<NormalizedHighlightRect> rects)
+        : Control
     {
-        private static readonly IBrush HighlightFill = new SolidColorBrush(Color.Parse("#48F59E0B"));
-        private static readonly IPen HighlightBorder = new Pen(new SolidColorBrush(Color.Parse("#E6D97706")), 1.6);
+        private static readonly IBrush HighlightFill = new SolidColorBrush(
+            Color.Parse("#48F59E0B")
+        );
+        private static readonly IPen HighlightBorder = new Pen(
+            new SolidColorBrush(Color.Parse("#E6D97706")),
+            1.6
+        );
 
-        private readonly IReadOnlyList<NormalizedHighlightRect> _rects;
-
-        public PdfHighlightOverlayControl(IReadOnlyList<NormalizedHighlightRect> rects)
-        {
-            _rects = rects;
-        }
+        private readonly IReadOnlyList<NormalizedHighlightRect> _rects = rects;
 
         public override void Render(DrawingContext context)
         {
@@ -377,26 +425,25 @@ public static class PdfReaderViewBuilder
                     r.X * w,
                     r.Y * h,
                     Math.Max(8, r.Width * w),
-                    Math.Max(10, r.Height * h));
+                    Math.Max(10, r.Height * h)
+                );
                 context.DrawRectangle(HighlightFill, HighlightBorder, rect, 3, 3);
             }
         }
     }
 
-    private static Control BuildBookmarkTreeNode(
+    private static StackPanel BuildBookmarkTreeNode(
         PdfReaderViewModel reader,
         PdfBookmarkNode node,
-        PdfBookmarkNode? activeNode)
+        PdfBookmarkNode? activeNode
+    )
     {
         bool isCurrent = ReferenceEquals(node, activeNode);
         bool hasChildren = node.Children.Count > 0;
 
         var container = new StackPanel { Spacing = 1 };
 
-        var rowGrid = new Grid
-        {
-            ColumnDefinitions = ColumnDefinitions.Parse("20,*,Auto")
-        };
+        var rowGrid = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("20,*,Auto") };
 
         if (hasChildren)
         {
@@ -405,13 +452,14 @@ public static class PdfReaderViewBuilder
                 Content = UiBuilder.Icon(
                     node.IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight,
                     14,
-                    ThemeService.Brush(ThemeService.TextSecondary)),
+                    ThemeService.Brush(ThemeService.TextSecondary)
+                ),
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(2),
                 Cursor = new Cursor(StandardCursorType.Hand),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
             };
             chevronBtn.Click += (_, e) =>
             {
@@ -425,13 +473,20 @@ public static class PdfReaderViewBuilder
             var dot = UiBuilder.Icon(
                 MaterialIconKind.FileDocumentOutline,
                 12,
-                isCurrent ? ThemeService.Brush(ThemeService.AccentPrimary) : ThemeService.Brush(ThemeService.TextMuted));
+                isCurrent
+                    ? ThemeService.Brush(ThemeService.AccentPrimary)
+                    : ThemeService.Brush(ThemeService.TextMuted)
+            );
             dot.HorizontalAlignment = HorizontalAlignment.Center;
             rowGrid.Children.Add(dot);
         }
 
-        var normalBg = isCurrent ? ThemeService.Brush(ThemeService.AccentSoftBg) : Brushes.Transparent;
-        var hoverBg = isCurrent ? ThemeService.Brush(ThemeService.AccentSoftBg) : ThemeService.Brush(ThemeService.BgHover);
+        var normalBg = isCurrent
+            ? ThemeService.Brush(ThemeService.AccentSoftBg)
+            : Brushes.Transparent;
+        var hoverBg = isCurrent
+            ? ThemeService.Brush(ThemeService.AccentSoftBg)
+            : ThemeService.Brush(ThemeService.BgHover);
 
         var titleBtn = new Button
         {
@@ -444,14 +499,14 @@ public static class PdfReaderViewBuilder
                     {
                         Text = node.Title,
                         FontSize = node.Level == 1 ? 12.5 : 12,
-                        FontWeight = isCurrent || node.Level == 1 ? FontWeight.SemiBold : FontWeight.Normal,
-                        Foreground = isCurrent
-                            ? ThemeService.Brush(ThemeService.AccentPrimary)
-                            : node.Level == 1
-                                ? ThemeService.Brush(ThemeService.TextPrimary)
-                                : ThemeService.Brush(ThemeService.TextSecondary),
+                        FontWeight =
+                            isCurrent || node.Level == 1 ? FontWeight.SemiBold : FontWeight.Normal,
+                        Foreground =
+                            isCurrent ? ThemeService.Brush(ThemeService.AccentPrimary)
+                            : node.Level == 1 ? ThemeService.Brush(ThemeService.TextPrimary)
+                            : ThemeService.Brush(ThemeService.TextSecondary),
                         TextTrimming = TextTrimming.CharacterEllipsis,
-                        VerticalAlignment = VerticalAlignment.Center
+                        VerticalAlignment = VerticalAlignment.Center,
                     },
                     new TextBlock
                     {
@@ -462,16 +517,16 @@ public static class PdfReaderViewBuilder
                             : ThemeService.Brush(ThemeService.TextMuted),
                         Margin = new Thickness(6, 0, 0, 0),
                         VerticalAlignment = VerticalAlignment.Center,
-                        [Grid.ColumnProperty] = 1
-                    }
-                }
+                        [Grid.ColumnProperty] = 1,
+                    },
+                },
             },
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(4, 4.5, 6, 4.5),
             Cursor = new Cursor(StandardCursorType.Hand),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         titleBtn.Click += (_, e) =>
         {
@@ -486,7 +541,7 @@ public static class PdfReaderViewBuilder
         {
             Background = normalBg,
             CornerRadius = new CornerRadius(5),
-            Child = rowGrid
+            Child = rowGrid,
         };
         rowBorder.PointerEntered += (_, _) => rowBorder.Background = hoverBg;
         rowBorder.PointerExited += (_, _) => rowBorder.Background = normalBg;
@@ -502,14 +557,16 @@ public static class PdfReaderViewBuilder
                 childrenStack.Children.Add(BuildBookmarkTreeNode(reader, child, activeNode));
             }
 
-            container.Children.Add(new Border
-            {
-                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-                BorderThickness = new Thickness(1, 0, 0, 0),
-                Margin = new Thickness(10, 1, 0, 3),
-                Padding = new Thickness(8, 0, 0, 0),
-                Child = childrenStack
-            });
+            container.Children.Add(
+                new Border
+                {
+                    BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                    BorderThickness = new Thickness(1, 0, 0, 0),
+                    Margin = new Thickness(10, 1, 0, 3),
+                    Padding = new Thickness(8, 0, 0, 0),
+                    Child = childrenStack,
+                }
+            );
         }
 
         return container;
