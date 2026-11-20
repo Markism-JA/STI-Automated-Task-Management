@@ -154,6 +154,24 @@ public sealed partial class QuizStudioViewModel
             question.Prompt);
     }
 
+    public void OpenEvidenceAnchorInPdfReader(QuizQuestionRecord question, GroundedEvidenceAnchor anchor)
+    {
+        if (string.IsNullOrWhiteSpace(question.SourcePdfPath) || !File.Exists(question.SourcePdfPath))
+        {
+            StatusMessage = $"Source PDF not found: {question.SourcePdfPath}";
+            IsStatusError = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        _mainVm.OpenPdfWithQuizEvidence(
+            question.SourcePdfPath,
+            anchor.PageNumber > 0 ? anchor.PageNumber : question.SourcePage,
+            anchor.HighlightRects,
+            anchor.VerbatimQuote,
+            question.Prompt);
+    }
+
     private List<PdfPageRange> GetSelectedPageRanges()
     {
         if (SelectedSectionKeys.Count == 0)

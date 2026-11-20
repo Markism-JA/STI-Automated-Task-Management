@@ -149,7 +149,8 @@ public static partial class QuizStudioViewBuilder
         {
             Text = studio.StartPage?.ToString() ?? string.Empty,
             Watermark = "From pg",
-            Width = 68,
+            MinWidth = 64,
+            MaxWidth = 88,
             FontSize = 12,
             Margin = new Thickness(6, 0, 4, 4),
         };
@@ -157,7 +158,8 @@ public static partial class QuizStudioViewBuilder
         {
             Text = studio.EndPage?.ToString() ?? string.Empty,
             Watermark = "To pg",
-            Width = 68,
+            MinWidth = 64,
+            MaxWidth = 88,
             FontSize = 12,
             Margin = new Thickness(0, 0, 4, 4),
         };
@@ -570,8 +572,8 @@ public static partial class QuizStudioViewBuilder
             var valBox = new TextBox
             {
                 Text = rawVal.ToString(),
-                Width = 60,
-                MinWidth = 60,
+                MinWidth = 54,
+                MaxWidth = 76,
                 FontSize = 12,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,

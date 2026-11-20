@@ -72,6 +72,7 @@ public sealed partial class QuizStudioViewModel
                 SectionTitle = orig.SectionTitle,
                 VerbatimQuote = orig.VerbatimQuote,
                 HighlightRects = [.. orig.HighlightRects],
+                EvidenceAnchors = [.. orig.EvidenceAnchors],
                 SrsIntervalDays = orig.SrsIntervalDays,
                 SrsEaseFactor = orig.SrsEaseFactor,
                 SrsDueDate = orig.SrsDueDate,

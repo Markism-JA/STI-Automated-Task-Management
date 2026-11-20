@@ -109,7 +109,9 @@ public static partial class QuizStudioViewBuilder
                     new ProgressBar
                     {
                         IsIndeterminate = true,
-                        Width = 160,
+                        MinWidth = 120,
+                        MaxWidth = 220,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                         Height = 4,
                         Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
                     },

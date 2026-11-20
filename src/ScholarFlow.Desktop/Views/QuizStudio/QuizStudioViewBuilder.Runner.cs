@@ -477,33 +477,111 @@ public static partial class QuizStudioViewBuilder
         {
             var feedbackStack = new StackPanel { Spacing = 10 };
 
-            var verdictRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            verdictRow.Children.Add(
-                UiBuilder.Icon(
-                    studio.IsCurrentAnswerCorrect
-                        ? MaterialIconKind.CheckCircle
-                        : MaterialIconKind.CloseCircle,
-                    18,
-                    studio.IsCurrentAnswerCorrect
-                        ? ThemeService.Brush(ThemeService.SuccessFg)
-                        : ThemeService.Brush(ThemeService.PriorityP1Fg)
-                )
+            var verdictRow = new Grid
+            {
+                ColumnDefinitions = ColumnDefinitions.Parse("Auto,*"),
+                ColumnSpacing = 8,
+            };
+            var verdictIcon = UiBuilder.Icon(
+                studio.IsCurrentAnswerCorrect
+                    ? MaterialIconKind.CheckCircle
+                    : MaterialIconKind.CloseCircle,
+                18,
+                studio.IsCurrentAnswerCorrect
+                    ? ThemeService.Brush(ThemeService.SuccessFg)
+                    : ThemeService.Brush(ThemeService.PriorityP1Fg)
             );
-            verdictRow.Children.Add(
-                new TextBlock
-                {
-                    Text = studio.IsCurrentAnswerCorrect
-                        ? "Correct!"
-                        : $"Incorrect  ·  Correct Answer: {q.CorrectAnswer}",
-                    FontSize = 14,
-                    FontWeight = FontWeight.Bold,
-                    Foreground = studio.IsCurrentAnswerCorrect
-                        ? ThemeService.Brush(ThemeService.SuccessFg)
-                        : ThemeService.Brush(ThemeService.PriorityP1Fg),
-                    VerticalAlignment = VerticalAlignment.Center,
-                }
-            );
+            verdictIcon.VerticalAlignment = VerticalAlignment.Center;
+            verdictRow.Children.Add(verdictIcon);
+
+            var verdictText = studio.IsCurrentAnswerCorrect
+                ? "Correct!"
+                : q.Kind == QuizQuestionKind.Ordering
+                    ? "Incorrect  ·  Correct Sequence:"
+                    : $"Incorrect  ·  Correct Answer: {q.CorrectAnswer}";
+
+            var verdictLbl = new TextBlock
+            {
+                Text = verdictText,
+                FontSize = 14,
+                FontWeight = FontWeight.Bold,
+                Foreground = studio.IsCurrentAnswerCorrect
+                    ? ThemeService.Brush(ThemeService.SuccessFg)
+                    : ThemeService.Brush(ThemeService.PriorityP1Fg),
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(verdictLbl, 1);
+            verdictRow.Children.Add(verdictLbl);
             feedbackStack.Children.Add(verdictRow);
+
+            // Visual step-by-step sequence card for Ordering corrections (Issue #1)
+            if (!studio.IsCurrentAnswerCorrect && q.Kind == QuizQuestionKind.Ordering)
+            {
+                var expectedSteps = q.Options.Count >= 2
+                    ? q.Options
+                    : q.CorrectAnswer
+                        .Split(["->", "|", "\n", ";"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+
+                if (expectedSteps.Count > 0)
+                {
+                    var seqStack = new StackPanel { Spacing = 4 };
+                    for (int sIdx = 0; sIdx < expectedSteps.Count; sIdx++)
+                    {
+                        var stepRow = new Grid
+                        {
+                            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*"),
+                            ColumnSpacing = 8,
+                        };
+                        var stepNumBadge = UiBuilder.Pill(
+                            $"{sIdx + 1}",
+                            ThemeService.Brush(ThemeService.SuccessFg),
+                            ThemeService.Brush(ThemeService.SuccessBg),
+                            fontSize: 11);
+                        stepNumBadge.VerticalAlignment = VerticalAlignment.Center;
+                        stepRow.Children.Add(stepNumBadge);
+
+                        var stepLbl = new TextBlock
+                        {
+                            Text = expectedSteps[sIdx],
+                            FontSize = 12.5,
+                            Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                            TextWrapping = TextWrapping.Wrap,
+                            VerticalAlignment = VerticalAlignment.Center,
+                        };
+                        Grid.SetColumn(stepLbl, 1);
+                        stepRow.Children.Add(stepLbl);
+
+                        seqStack.Children.Add(new Border
+                        {
+                            Background = ThemeService.Brush(ThemeService.BgSurface),
+                            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(5),
+                            Padding = new Thickness(10, 6),
+                            Child = stepRow,
+                        });
+
+                        if (sIdx < expectedSteps.Count - 1)
+                        {
+                            var arrow = UiBuilder.Icon(MaterialIconKind.ArrowDown, 13, ThemeService.Brush(ThemeService.TextMuted));
+                            arrow.HorizontalAlignment = HorizontalAlignment.Center;
+                            seqStack.Children.Add(arrow);
+                        }
+                    }
+
+                    feedbackStack.Children.Add(new Border
+                    {
+                        Background = ThemeService.Brush(ThemeService.BgBase),
+                        BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        Padding = new Thickness(10, 8),
+                        Child = seqStack,
+                    });
+                }
+            }
 
             if (!string.IsNullOrWhiteSpace(q.Explanation))
             {
@@ -518,6 +596,60 @@ public static partial class QuizStudioViewBuilder
                 );
             }
 
+            var evidenceStack = new StackPanel
+            {
+                Spacing = 6,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text =
+                            $"Master PDF Evidence  ·  {q.SectionTitle}  ·  Page {q.SourcePage}",
+                        FontSize = 11.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(q.VerbatimQuote)
+                            ? "(Grounded to Page " + q.SourcePage + ")"
+                            : $"\"{q.VerbatimQuote}\"",
+                        FontSize = 12.5,
+                        Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                },
+            };
+
+            if (q.EvidenceAnchors.Count > 1)
+            {
+                var jumpWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+                for (int aIdx = 0; aIdx < q.EvidenceAnchors.Count; aIdx++)
+                {
+                    var anchor = q.EvidenceAnchors[aIdx];
+                    var jumpBtn = UiBuilder.GhostButton(
+                        $"Statement {aIdx + 1} · p. {anchor.PageNumber}",
+                        MaterialIconKind.Marker,
+                        () => studio.OpenEvidenceAnchorInPdfReader(q, anchor),
+                        isActive: aIdx == 0);
+                    jumpBtn.Margin = new Thickness(0, 0, 6, 4);
+                    jumpWrap.Children.Add(jumpBtn);
+                }
+                evidenceStack.Children.Add(jumpWrap);
+            }
+            else
+            {
+                evidenceStack.Children.Add(
+                    UiBuilder.GhostButton(
+                        $"Jump to Highlighted Statement on Page {q.SourcePage} in PDF Reader",
+                        MaterialIconKind.Marker,
+                        () => studio.OpenQuestionEvidenceInPdfReader(q),
+                        isActive: true
+                    )
+                );
+            }
+
             var evidenceBox = new Border
             {
                 Background = ThemeService.Brush(ThemeService.BgBase),
@@ -525,36 +657,7 @@ public static partial class QuizStudioViewBuilder
                 BorderThickness = new Thickness(3, 0, 0, 0),
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(12, 10),
-                Child = new StackPanel
-                {
-                    Spacing = 6,
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text =
-                                $"Master PDF Evidence  ·  {q.SectionTitle}  ·  Page {q.SourcePage}",
-                            FontSize = 11.5,
-                            FontWeight = FontWeight.SemiBold,
-                            Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
-                        },
-                        new TextBlock
-                        {
-                            Text = string.IsNullOrWhiteSpace(q.VerbatimQuote)
-                                ? "(Grounded to Page " + q.SourcePage + ")"
-                                : $"\"{q.VerbatimQuote}\"",
-                            FontSize = 12.5,
-                            Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-                            TextWrapping = TextWrapping.Wrap,
-                        },
-                        UiBuilder.GhostButton(
-                            $"Jump to Highlighted Statement on Page {q.SourcePage} in PDF Reader",
-                            MaterialIconKind.Marker,
-                            () => studio.OpenQuestionEvidenceInPdfReader(q),
-                            isActive: true
-                        ),
-                    },
-                },
+                Child = evidenceStack,
             };
             feedbackStack.Children.Add(evidenceBox);
 
@@ -566,10 +669,9 @@ public static partial class QuizStudioViewBuilder
             );
             srsRow.Children.Add(prevBtn);
 
-            var rateGroup = new StackPanel
+            var rateGroup = new WrapPanel
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 6,
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
             rateGroup.Children.Add(
