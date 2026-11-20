@@ -179,6 +179,8 @@ public sealed class StiElmsClient : IElmsClient
     {
         var summariesByUrl = new Dictionary<string, ElmsAssignmentSummary>(StringComparer.OrdinalIgnoreCase);
 
+        var extraAssignmentUrls = new List<string>();
+
         try
         {
             var listHtml = await FetchAuthenticatedHtmlAsync(parsedCourse.AssignmentsListUrl, ct);
@@ -186,11 +188,49 @@ public sealed class StiElmsClient : IElmsClient
             {
                 summariesByUrl[ElmsUrlCanonicalizer.GetCanonicalUrl(summary.Url)] = summary;
             }
+
+            // Follow paginated assignment list pages (if any) so standalone/upcoming items on page 2+ aren't missed
+            var listDoc = Parsing.HtmlParsingHelpers.ParseDocument(listHtml);
+            var pageUrls = listDoc.QuerySelectorAll("a[href*=\"/student_assignments/list/\"][href*=\"page=\"]")
+                .Select(a => a.GetAttribute("href"))
+                .Where(h => !string.IsNullOrWhiteSpace(h))
+                .Select(h => Parsing.HtmlParsingHelpers.ToAbsoluteUrl(h!, BaseUrl))
+                .DistinctBy(ElmsUrlCanonicalizer.GetCanonicalUrl, StringComparer.OrdinalIgnoreCase)
+                .Where(u => !ElmsUrlCanonicalizer.GetCanonicalUrl(u).Equals(ElmsUrlCanonicalizer.GetCanonicalUrl(parsedCourse.AssignmentsListUrl), StringComparison.OrdinalIgnoreCase))
+                .Take(5)
+                .ToList();
+
+            foreach (var pageUrl in pageUrls)
+            {
+                var pageHtml = await FetchAuthenticatedHtmlAsync(pageUrl, ct);
+                foreach (var summary in AssignmentsListParser.Parse(pageHtml, courseId, BaseUrl))
+                {
+                    summariesByUrl[ElmsUrlCanonicalizer.GetCanonicalUrl(summary.Url)] = summary;
+                }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             lock (warnings)
                 warnings.Add($"Could not fetch assignments list ({parsedCourse.AssignmentsListUrl}): {ex.Message}");
+        }
+
+        // Also check Course Dashboard (/student_class_dashboard/show/{courseId}) for standalone upcoming/not-yet-started items
+        try
+        {
+            var dashHtml = await FetchAuthenticatedHtmlAsync($"{BaseUrl}/student_class_dashboard/show/{courseId}", ct);
+            var dashDoc = Parsing.HtmlParsingHelpers.ParseDocument(dashHtml);
+            foreach (var link in dashDoc.QuerySelectorAll("a[href*=\"_assignment/show/\"], a[href*=\"/student_quiz/\"], a[href*=\"/assignment/show/\"]"))
+            {
+                var href = link.GetAttribute("href");
+                if (!string.IsNullOrWhiteSpace(href))
+                    extraAssignmentUrls.Add(Parsing.HtmlParsingHelpers.ToAbsoluteUrl(href, BaseUrl));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            lock (warnings)
+                warnings.Add($"Could not fetch course dashboard ({courseId}): {ex.Message}");
         }
 
         var listedTitles = summariesByUrl.Values
@@ -205,6 +245,7 @@ public sealed class StiElmsClient : IElmsClient
 
         var targetUrls = summariesByUrl.Values.Select(s => s.Url)
             .Concat(parsedCourse.AssignmentUrls)
+            .Concat(extraAssignmentUrls)
             .Concat(moduleAssignmentUrls)
             .DistinctBy(ElmsUrlCanonicalizer.GetCanonicalUrl, StringComparer.OrdinalIgnoreCase)
             .ToList();
