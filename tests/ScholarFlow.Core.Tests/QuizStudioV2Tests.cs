@@ -405,4 +405,70 @@ public class QuizStudioV2Tests
         Assert.True(acronymQ.EvaluateAnswer("udp"));
         Assert.False(acronymQ.EvaluateAnswer("TCP")); // Must NOT fuzzy-match short 3-letter acronyms
     }
+
+    [Fact]
+    public void QuizExportService_ExportsJsonPdfAndAppliesPointToPointFix()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"scholarflow_export_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var quiz = new QuizSessionRecord
+            {
+                Id = "orig-1",
+                CourseFolder = "SQA",
+                CourseTitle = "Software Quality Assurance",
+                Term = "Prefinals",
+                Title = "SQA Practice Deck",
+                Questions =
+                [
+                    new QuizQuestionRecord
+                    {
+                        Id = "q-1",
+                        QuizId = "orig-1",
+                        Kind = QuizQuestionKind.MultipleChoice,
+                        Prompt = "What is verification?",
+                        Options = ["Are we building the product right?", "Are we building the right product?", "Unit testing", "Code review"],
+                        CorrectAnswer = "Are we building the product right?",
+                        Explanation = "Verification checks conformance to specification.",
+                        SourcePage = 3,
+                        SectionTitle = "Conformance"
+                    }
+                ]
+            };
+
+            var json = QuizExportService.ExportDeckToJson(quiz);
+            var reimported = QuizExportService.ImportDeckFromJson(json, "NewCourse", "New Course");
+            Assert.NotEqual("orig-1", reimported.Id);
+            Assert.Equal("NewCourse", reimported.CourseFolder);
+            Assert.Single(reimported.Questions);
+            Assert.Equal("What is verification?", reimported.Questions[0].Prompt);
+
+            var pdfPath = Path.Combine(tempDir, "quiz_print.pdf");
+            QuizExportService.ExportDeckToPrintablePdf(quiz, pdfPath);
+            Assert.True(File.Exists(pdfPath));
+            Assert.True(new FileInfo(pdfPath).Length > 1024);
+
+            var fixPrompt = QuizExportService.BuildSingleQuestionFixPrompt(quiz, quiz.Questions[0], "Clarify wording.");
+            Assert.Contains("Clarify wording.", fixPrompt);
+            Assert.Contains("What is verification?", fixPrompt);
+
+            QuizExportService.ApplySingleQuestionFixJson(quiz.Questions[0], """
+                {
+                  "kind": "MultipleChoice",
+                  "prompt": "Which question does software verification answer?",
+                  "options": ["Are we building the product right?", "Are we building the right product?", "Deployment", "Maintenance"],
+                  "correctAnswer": "Are we building the product right?",
+                  "explanation": "Updated explanation."
+                }
+                """);
+            Assert.Equal("Which question does software verification answer?", quiz.Questions[0].Prompt);
+            Assert.Equal("Updated explanation.", quiz.Questions[0].Explanation);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

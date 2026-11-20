@@ -81,6 +81,10 @@ public sealed partial class QuizStudioViewModel
     public QuizSessionRecord? OrganizerQuiz { get; private set; }
     public QuizQuestionKind? OrganizerKindFilter { get; private set; }
     public string? EditingQuestionId { get; private set; }
+    public string? FlaggingQuestionId { get; private set; }
+    public string FlagProblemDescription { get; set; } = string.Empty;
+    public string FlagFixPromptPreview { get; private set; } = string.Empty;
+    public string FlagFixJsonInput { get; set; } = string.Empty;
 
     public bool IsAiSettingsOpen { get; private set; }
     public bool IsManualJsonModalOpen { get; private set; }

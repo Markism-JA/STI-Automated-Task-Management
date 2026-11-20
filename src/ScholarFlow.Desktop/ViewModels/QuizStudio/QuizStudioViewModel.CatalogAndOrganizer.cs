@@ -432,4 +432,86 @@ public sealed partial class QuizStudioViewModel
         }
     }
 
+    public async Task ExportQuizToJsonFileAsync(QuizSessionRecord quiz, string filePath)
+    {
+        var json = QuizExportService.ExportDeckToJson(quiz);
+        await File.WriteAllTextAsync(filePath, json);
+        StatusMessage = $"Exported JSON deck to {Path.GetFileName(filePath)}.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task ExportQuizToPdfFileAsync(QuizSessionRecord quiz, string filePath)
+    {
+        await Task.Run(() => QuizExportService.ExportDeckToPrintablePdf(quiz, filePath));
+        StatusMessage = $"Exported printable PDF to {Path.GetFileName(filePath)}.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task ImportDeckJsonToSelectedCourseAsync(string rawJson)
+    {
+        var course = SelectedCourse ?? _mainVm.Courses.FirstOrDefault(c => !c.IsArchived);
+        var courseFolder = course?.FolderName ?? string.Empty;
+        var courseTitle = course?.Title ?? "Imported Course";
+
+        var imported = await Task.Run(() =>
+            QuizExportService.ImportDeckFromJson(rawJson, courseFolder, courseTitle, SelectedPdfPath));
+
+        await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, imported);
+        SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
+        StatusMessage = $"Imported '{imported.Title}' ({imported.Questions.Count} questions) into {courseTitle}.";
+        IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleFlagQuestionForAiFix(string questionId)
+    {
+        if (string.Equals(FlaggingQuestionId, questionId, StringComparison.OrdinalIgnoreCase))
+        {
+            FlaggingQuestionId = null;
+            FlagProblemDescription = string.Empty;
+            FlagFixPromptPreview = string.Empty;
+            FlagFixJsonInput = string.Empty;
+        }
+        else
+        {
+            FlaggingQuestionId = questionId;
+            EditingQuestionId = null;
+            FlagProblemDescription = string.Empty;
+            FlagFixPromptPreview = string.Empty;
+            FlagFixJsonInput = string.Empty;
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
+    public string BuildQuestionAiFixPrompt(QuizQuestionRecord question, string problemDescription)
+    {
+        FlagProblemDescription = problemDescription;
+        var deck = OrganizerQuiz ?? new QuizSessionRecord { Title = "Quiz Deck", CourseTitle = SelectedCourse?.Title ?? "Course" };
+        FlagFixPromptPreview = QuizExportService.BuildSingleQuestionFixPrompt(deck, question, problemDescription);
+        _mainVm.RequestUiRefresh();
+        return FlagFixPromptPreview;
+    }
+
+    public async Task ApplyQuestionAiFixAsync(QuizQuestionRecord question, string rawJson)
+    {
+        try
+        {
+            await Task.Run(() => QuizExportService.ApplySingleQuestionFixJson(question, rawJson));
+            if (OrganizerQuiz is not null)
+                await SaveOrganizerDeckAsync();
+            FlaggingQuestionId = null;
+            FlagFixPromptPreview = string.Empty;
+            FlagFixJsonInput = string.Empty;
+            StatusMessage = "Applied AI repair to question and re-grounded PDF evidence.";
+            IsStatusError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Fix JSON error: {ex.Message}";
+            IsStatusError = true;
+        }
+        _mainVm.RequestUiRefresh();
+    }
 }

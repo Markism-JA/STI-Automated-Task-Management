@@ -165,6 +165,46 @@ public static partial class QuizStudioViewBuilder
         var bulkRow = new WrapPanel { Orientation = Orientation.Horizontal };
         bulkRow.Children.Add(
             UiBuilder.GhostButton(
+                "Export PDF",
+                MaterialIconKind.FilePdfBox,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(bulkRow);
+                    if (top?.StorageProvider is null) return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+                    {
+                        Title = "Export Printable Quiz PDF",
+                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".pdf")}",
+                        DefaultExtension = "pdf"
+                    });
+                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (!string.IsNullOrWhiteSpace(outPath))
+                        await studio.ExportQuizToPdfFileAsync(deck, outPath);
+                }
+            )
+        );
+        bulkRow.Children.Add(
+            UiBuilder.GhostButton(
+                "Export JSON",
+                MaterialIconKind.CodeJson,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(bulkRow);
+                    if (top?.StorageProvider is null) return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+                    {
+                        Title = "Export Quiz Deck JSON",
+                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(deck.Title, ".json")}",
+                        DefaultExtension = "json"
+                    });
+                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (!string.IsNullOrWhiteSpace(outPath))
+                        await studio.ExportQuizToJsonFileAsync(deck, outPath);
+                }
+            )
+        );
+        bulkRow.Children.Add(
+            UiBuilder.GhostButton(
                 studio.OrganizerKindFilter.HasValue
                     ? $"Shuffle {studio.OrganizerKindFilter.Value} Only"
                     : "Shuffle All Order",
@@ -343,6 +383,19 @@ public static partial class QuizStudioViewBuilder
                 );
                 rowActions.Children.Add(pdfJumpBtn);
             }
+            bool isFlagging = string.Equals(
+                studio.FlaggingQuestionId,
+                q.Id,
+                StringComparison.OrdinalIgnoreCase
+            );
+            rowActions.Children.Add(
+                UiBuilder.GhostButton(
+                    isFlagging ? "Close AI Fix" : "Fix with AI",
+                    MaterialIconKind.AutoFix,
+                    () => studio.ToggleFlagQuestionForAiFix(capturedQ.Id),
+                    isActive: isFlagging
+                )
+            );
             rowActions.Children.Add(
                 UiBuilder.GhostButton(
                     isEditing ? "Done" : "Edit",
@@ -847,6 +900,84 @@ public static partial class QuizStudioViewBuilder
             }
 
             qListStack.Children.Add(UiBuilder.Card(cardStack, padding: new Thickness(12, 10)));
+
+            if (isFlagging)
+            {
+                var flagStack = new StackPanel { Spacing = 8 };
+                flagStack.Children.Add(new TextBlock
+                {
+                    Text = "Point-to-Point AI Question Repair",
+                    FontSize = 12.5,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.AccentPrimary),
+                });
+
+                var issueBox = new TextBox
+                {
+                    Text = studio.FlagProblemDescription,
+                    Watermark = "Describe what is wrong with this question (e.g. two options are correct, wrong quote, unclear wording)...",
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MinHeight = 46,
+                    FontSize = 12,
+                };
+                issueBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        studio.FlagProblemDescription = issueBox.Text ?? string.Empty;
+                };
+                flagStack.Children.Add(issueBox);
+
+                var promptBtnRow = new WrapPanel { Orientation = Orientation.Horizontal };
+                var copyPromptBtn = UiBuilder.GhostButton(
+                    "Build & Copy Fix Prompt",
+                    MaterialIconKind.ContentCopy,
+                    async () =>
+                    {
+                        var prompt = studio.BuildQuestionAiFixPrompt(capturedQ, issueBox.Text ?? string.Empty);
+                        var top = TopLevel.GetTopLevel(flagStack);
+                        if (top?.Clipboard is not null)
+                            await top.Clipboard.SetTextAsync(prompt);
+                    },
+                    isActive: !string.IsNullOrWhiteSpace(studio.FlagFixPromptPreview)
+                );
+                promptBtnRow.Children.Add(copyPromptBtn);
+                flagStack.Children.Add(promptBtnRow);
+
+                var fixJsonBox = new TextBox
+                {
+                    Text = studio.FlagFixJsonInput,
+                    Watermark = "Paste the repaired single-question JSON here...",
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MinHeight = 64,
+                    FontSize = 11.5,
+                    FontFamily = new FontFamily("Consolas, JetBrains Mono, monospace"),
+                };
+                fixJsonBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        studio.FlagFixJsonInput = fixJsonBox.Text ?? string.Empty;
+                };
+                flagStack.Children.Add(fixJsonBox);
+
+                var applyBtn = UiBuilder.PrimaryButton(
+                    "Apply Repaired Question",
+                    MaterialIconKind.Check,
+                    async () => await studio.ApplyQuestionAiFixAsync(capturedQ, fixJsonBox.Text ?? string.Empty)
+                );
+                flagStack.Children.Add(applyBtn);
+
+                qListStack.Children.Add(new Border
+                {
+                    Background = ThemeService.Brush(ThemeService.BgElevated),
+                    BorderBrush = ThemeService.Brush(ThemeService.AccentPrimary),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(12, 10),
+                    Child = flagStack,
+                });
+            }
         }
 
         stack.Children.Add(qListStack);

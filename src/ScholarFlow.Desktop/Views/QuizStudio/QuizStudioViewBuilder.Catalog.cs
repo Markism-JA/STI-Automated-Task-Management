@@ -72,13 +72,47 @@ public static partial class QuizStudioViewBuilder
         Grid.SetColumn(toggleAllBtn, 1);
         barGrid.Children.Add(toggleAllBtn);
 
-        var newQuizBtn = UiBuilder.PrimaryButton(
-            "New Assessment",
-            MaterialIconKind.Plus,
-            () => studio.SetSubTab(QuizStudioSubTab.Builder)
+        var headerActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        headerActions.Children.Add(
+            UiBuilder.GhostButton(
+                "Import JSON",
+                MaterialIconKind.FileImportOutline,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(barGrid);
+                    if (top?.StorageProvider is null) return;
+                    var files = await top.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+                    {
+                        Title = $"Import Quiz Deck JSON into {studio.SelectedCourse?.Title ?? "Course"}",
+                        AllowMultiple = false,
+                        FileTypeFilter =
+                        [
+                            new Avalonia.Platform.Storage.FilePickerFileType("JSON Files") { Patterns = ["*.json"] }
+                        ]
+                    });
+                    var path = files.Select(f => Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f)).FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    {
+                        var raw = await File.ReadAllTextAsync(path);
+                        await studio.ImportDeckJsonToSelectedCourseAsync(raw);
+                    }
+                }
+            )
         );
-        Grid.SetColumn(newQuizBtn, 2);
-        barGrid.Children.Add(newQuizBtn);
+        headerActions.Children.Add(
+            UiBuilder.PrimaryButton(
+                "New Assessment",
+                MaterialIconKind.Plus,
+                () => studio.SetSubTab(QuizStudioSubTab.Builder)
+            )
+        );
+        Grid.SetColumn(headerActions, 2);
+        barGrid.Children.Add(headerActions);
         stack.Children.Add(barGrid);
 
         // Term Filter & Isolated Playback Controls Bar
@@ -419,6 +453,50 @@ public static partial class QuizStudioViewBuilder
 
         if (!compact)
         {
+            var exportPdfBtn = UiBuilder.IconButton(
+                MaterialIconKind.PrinterOutline,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(actions);
+                    if (top?.StorageProvider is null) return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+                    {
+                        Title = "Export Printable Quiz PDF",
+                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(quiz.Title, ".pdf")}",
+                        DefaultExtension = "pdf"
+                    });
+                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (!string.IsNullOrWhiteSpace(outPath))
+                        await studio.ExportQuizToPdfFileAsync(quiz, outPath);
+                },
+                14.5,
+                ThemeService.Brush(ThemeService.TextSecondary)
+            );
+            ToolTip.SetTip(exportPdfBtn, "Export printable Quiz PDF");
+            actions.Children.Add(exportPdfBtn);
+
+            var exportJsonBtn = UiBuilder.IconButton(
+                MaterialIconKind.CodeJson,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(actions);
+                    if (top?.StorageProvider is null) return;
+                    var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+                    {
+                        Title = "Export Quiz Deck JSON",
+                        SuggestedFileName = $"{ScholarFlow.Elms.Parsing.FilenameSanitizer.SanitizeFileName(quiz.Title, ".json")}",
+                        DefaultExtension = "json"
+                    });
+                    var outPath = file is null ? null : Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
+                    if (!string.IsNullOrWhiteSpace(outPath))
+                        await studio.ExportQuizToJsonFileAsync(quiz, outPath);
+                },
+                14.5,
+                ThemeService.Brush(ThemeService.TextSecondary)
+            );
+            ToolTip.SetTip(exportJsonBtn, "Export Quiz Deck JSON");
+            actions.Children.Add(exportJsonBtn);
+
             actions.Children.Add(
                 UiBuilder.IconButton(
                     MaterialIconKind.TrashCanOutline,
