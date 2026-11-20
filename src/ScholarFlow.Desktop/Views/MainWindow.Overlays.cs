@@ -476,8 +476,9 @@ public sealed partial class MainWindow
             ("Space or D", "Complete / reopen selected task"),
             ("O", "Open selected assignment in STI eLMS app"),
             ("[ or Ctrl+B", "Collapse / expand left navigation sidebar"),
-            ("1 - 5", "Switch smart views (Inbox, Today, Upcoming, Calendar, Completed)"),
+            ("1 - 6", "Switch smart views (Inbox, Today, Upcoming, Calendar, Completed, Test & Recall)"),
             ("R / Ctrl+S", "Fast poll assignments / Run full eLMS sync"),
+            ("Shift+P", "Pause / resume background eLMS polling (single-session shield)"),
             ("T", "Toggle Dark / Light mode"),
         ];
 
@@ -591,6 +592,7 @@ public sealed partial class MainWindow
 
     private Control BuildStatusBar()
     {
+        bool isPaused = _vm.Settings.EnableElmsIntegration && _vm.IsPollingPaused;
         var grid = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,Auto"),
@@ -605,23 +607,41 @@ public sealed partial class MainWindow
         };
         left.Children.Add(
             UiBuilder.Icon(
-                _vm.IsSyncing ? MaterialIconKind.Sync : MaterialIconKind.CheckCircleOutline,
-                12,
-                _vm.IsSyncing
-                    ? ThemeService.Brush(ThemeService.AccentPrimary)
-                    : ThemeService.Brush(ThemeService.TextMuted)
+                isPaused ? MaterialIconKind.PauseCircle
+                : _vm.IsSyncing ? MaterialIconKind.Sync
+                : MaterialIconKind.CheckCircleOutline,
+                13,
+                isPaused ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                : _vm.IsSyncing ? ThemeService.Brush(ThemeService.AccentPrimary)
+                : ThemeService.Brush(ThemeService.TextMuted)
             )
         );
         left.Children.Add(
             new TextBlock
             {
-                Text = _vm.StatusText,
+                Text = isPaused
+                    ? "eLMS POLLING PAUSED (Browser session protected)"
+                    : _vm.StatusText,
                 FontSize = 11,
-                Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                FontWeight = isPaused ? FontWeight.SemiBold : FontWeight.Normal,
+                Foreground = isPaused
+                    ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                    : ThemeService.Brush(ThemeService.TextMuted),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             }
         );
+        if (isPaused)
+        {
+            var resumeBtn = UiBuilder.GhostButton(
+                "Resume",
+                MaterialIconKind.PlayCircleOutline,
+                () => _vm.TogglePollingPaused(),
+                isActive: true
+            );
+            resumeBtn.Padding = new Thickness(6, 1);
+            left.Children.Add(resumeBtn);
+        }
         grid.Children.Add(left);
 
         var rightHints = new StackPanel
@@ -633,9 +653,13 @@ public sealed partial class MainWindow
         rightHints.Children.Add(
             new TextBlock
             {
-                Text = "Q Add · / Search · j/k Nav · Enter Inspect · ? Help",
+                Text = _vm.Settings.EnableElmsIntegration
+                    ? "Q Add · / Search · j/k Nav · Shift+P Pause Sync · ? Help"
+                    : "Q Add · / Search · j/k Nav · Enter Inspect · ? Help",
                 FontSize = 11,
-                Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                Foreground = isPaused
+                    ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                    : ThemeService.Brush(ThemeService.TextMuted),
                 VerticalAlignment = VerticalAlignment.Center,
             }
         );
@@ -644,8 +668,12 @@ public sealed partial class MainWindow
 
         return new Border
         {
-            Background = ThemeService.Brush(ThemeService.BgSurface),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            Background = isPaused
+                ? ThemeService.Brush(ThemeService.PriorityP2Bg)
+                : ThemeService.Brush(ThemeService.BgSurface),
+            BorderBrush = isPaused
+                ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                : ThemeService.Brush(ThemeService.BorderSubtle),
             BorderThickness = new Thickness(0, 1, 0, 0),
             Child = grid,
         };

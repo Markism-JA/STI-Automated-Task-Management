@@ -162,6 +162,11 @@ public static class ShortcutDispatcher
                     vm.OpenPrimaryTaskFileOrNote(vm.SelectedTask);
                 break;
 
+            case Key.P when e.KeyModifiers.HasFlag(KeyModifiers.Shift) && vm.Settings.EnableElmsIntegration:
+                e.Handled = true;
+                vm.TogglePollingPaused();
+                break;
+
             case Key.O:
                 e.Handled = true;
                 await vm.OpenTaskInElmsAppAsync(vm.SelectedTask);

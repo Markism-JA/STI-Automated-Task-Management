@@ -382,26 +382,136 @@ public sealed partial class MainWindow
 
         if (compact)
         {
-            footer.Children.Add(
-                UiBuilder.IconButton(
-                    MaterialIconKind.CloudDownloadOutline,
+            Control CenterCompact(Control c)
+            {
+                c.HorizontalAlignment = HorizontalAlignment.Center;
+                return c;
+            }
+
+            if (_vm.Settings.EnableElmsIntegration)
+            {
+                var syncCompact = UiBuilder.IconButton(
+                    MaterialIconKind.CloudSyncOutline,
                     async () => await _vm.RunFullSyncAsync()
-                )
+                );
+                ToolTip.SetTip(syncCompact, "Sync all eLMS courses");
+                footer.Children.Add(CenterCompact(syncCompact));
+
+                var pollCompact = UiBuilder.IconButton(
+                    MaterialIconKind.Refresh,
+                    async () => await _vm.RunFastPollAsync()
+                );
+                ToolTip.SetTip(pollCompact, "Fast poll eLMS assignments");
+                footer.Children.Add(CenterCompact(pollCompact));
+
+                var pauseCompact = UiBuilder.IconButton(
+                    _vm.IsPollingPaused ? MaterialIconKind.PlayCircleOutline : MaterialIconKind.PauseCircleOutline,
+                    () => _vm.TogglePollingPaused(),
+                    15,
+                    _vm.IsPollingPaused
+                        ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                        : ThemeService.Brush(ThemeService.TextSecondary)
+                );
+                ToolTip.SetTip(
+                    pauseCompact,
+                    _vm.IsPollingPaused
+                        ? "eLMS Polling PAUSED — click to resume (Shift+P)"
+                        : "Pause eLMS polling (Shift+P)"
+                );
+                if (_vm.IsPollingPaused)
+                {
+                    footer.Children.Add(CenterCompact(new Border
+                    {
+                        Background = ThemeService.Brush(ThemeService.PriorityP2Bg),
+                        BorderBrush = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        Child = pauseCompact,
+                    }));
+                }
+                else
+                {
+                    footer.Children.Add(CenterCompact(pauseCompact));
+                }
+            }
+            else
+            {
+                var addCourseCompact = UiBuilder.IconButton(
+                    MaterialIconKind.FolderPlusOutline,
+                    () => _vm.ToggleAddCourseModal()
+                );
+                ToolTip.SetTip(addCourseCompact, "Add Course");
+                footer.Children.Add(CenterCompact(addCourseCompact));
+            }
+
+            var themeCompact = UiBuilder.IconButton(
+                ThemeService.CurrentTheme == ThemeMode.Dark
+                    ? MaterialIconKind.WeatherSunny
+                    : MaterialIconKind.WeatherNight,
+                async () => await _vm.ToggleThemeAsync()
             );
-            footer.Children.Add(
-                UiBuilder.IconButton(
-                    ThemeService.CurrentTheme == ThemeMode.Dark
-                        ? MaterialIconKind.WeatherSunny
-                        : MaterialIconKind.WeatherNight,
-                    async () => await _vm.ToggleThemeAsync()
-                )
+            ToolTip.SetTip(themeCompact, "Toggle Dark / Light theme (T)");
+            footer.Children.Add(CenterCompact(themeCompact));
+
+            var settingsCompact = UiBuilder.IconButton(
+                MaterialIconKind.CogOutline,
+                () => _vm.ToggleSettingsModal()
             );
+            ToolTip.SetTip(settingsCompact, "Desktop Settings");
+            footer.Children.Add(CenterCompact(settingsCompact));
+
+            var helpCompact = UiBuilder.IconButton(
+                MaterialIconKind.KeyboardOutline,
+                () => _vm.ToggleShortcutsModal()
+            );
+            ToolTip.SetTip(helpCompact, "Keyboard Shortcuts (?)");
+            footer.Children.Add(CenterCompact(helpCompact));
         }
         else
         {
-            var bottomRow = new Grid
+            if (_vm.Settings.EnableElmsIntegration && _vm.IsPollingPaused)
             {
-                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto,Auto,Auto"),
+                var pausedBannerBtn = new Button
+                {
+                    Background = ThemeService.Brush(ThemeService.PriorityP2Bg),
+                    BorderBrush = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 5),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 6,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Children =
+                        {
+                            UiBuilder.Icon(MaterialIconKind.PauseCircle, 13.5, ThemeService.Brush(ThemeService.PriorityP2Fg)),
+                            new TextBlock
+                            {
+                                Text = "Polling Paused · Resume",
+                                FontSize = 11.5,
+                                FontWeight = FontWeight.SemiBold,
+                                Foreground = ThemeService.Brush(ThemeService.PriorityP2Fg),
+                                VerticalAlignment = VerticalAlignment.Center,
+                            }
+                        }
+                    }
+                };
+                pausedBannerBtn.Click += (_, _) => _vm.TogglePollingPaused();
+                ToolTip.SetTip(pausedBannerBtn, "Background eLMS polling is paused (Shift+P to resume)");
+                footer.Children.Add(pausedBannerBtn);
+            }
+
+            // Row 1: Primary Sync / Add Course + Fast Poll (plenty of width so text never truncates)
+            var syncRow = new Grid
+            {
+                ColumnDefinitions = _vm.Settings.EnableElmsIntegration
+                    ? ColumnDefinitions.Parse("*,Auto")
+                    : ColumnDefinitions.Parse("*"),
+                ColumnSpacing = 4,
             };
             var syncBtn = _vm.Settings.EnableElmsIntegration
                 ? UiBuilder.GhostButton(
@@ -415,7 +525,7 @@ public sealed partial class MainWindow
                     () => _vm.ToggleAddCourseModal()
                 );
             syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-            bottomRow.Children.Add(syncBtn);
+            syncRow.Children.Add(syncBtn);
 
             if (_vm.Settings.EnableElmsIntegration)
             {
@@ -424,30 +534,42 @@ public sealed partial class MainWindow
                     async () => await _vm.RunFastPollAsync(),
                     14.5
                 );
-                pollBtn.Margin = new Thickness(4, 0, 0, 0);
-                ToolTip.SetTip(pollBtn, "Fast poll eLMS assignments now");
+                ToolTip.SetTip(pollBtn, "Fast poll eLMS assignments now (R)");
                 Grid.SetColumn(pollBtn, 1);
-                bottomRow.Children.Add(pollBtn);
+                syncRow.Children.Add(pollBtn);
+            }
+            footer.Children.Add(syncRow);
 
+            // Row 2: Evenly spaced Utility Strip (Pause/Resume, Theme, Settings, Shortcuts)
+            var utilRow = new Grid
+            {
+                ColumnDefinitions = _vm.Settings.EnableElmsIntegration
+                    ? ColumnDefinitions.Parse("*,*,*,*")
+                    : ColumnDefinitions.Parse("*,*,*"),
+            };
+
+            int utilCol = 0;
+            if (_vm.Settings.EnableElmsIntegration)
+            {
                 var pauseBtn = UiBuilder.IconButton(
                     _vm.IsPollingPaused
                         ? MaterialIconKind.PlayCircleOutline
                         : MaterialIconKind.PauseCircleOutline,
                     () => _vm.TogglePollingPaused(),
-                    14.5,
+                    15,
                     _vm.IsPollingPaused
                         ? ThemeService.Brush(ThemeService.PriorityP2Fg)
                         : ThemeService.Brush(ThemeService.TextSecondary)
                 );
-                pauseBtn.Margin = new Thickness(2, 0, 0, 0);
+                pauseBtn.HorizontalAlignment = HorizontalAlignment.Center;
                 ToolTip.SetTip(
                     pauseBtn,
                     _vm.IsPollingPaused
-                        ? "Background eLMS polling is PAUSED — click to resume"
-                        : "Pause background eLMS polling (protect active browser quiz session)"
+                        ? "Resume background eLMS polling (Shift+P)"
+                        : "Pause background eLMS polling (Shift+P)"
                 );
-                Grid.SetColumn(pauseBtn, 2);
-                bottomRow.Children.Add(pauseBtn);
+                Grid.SetColumn(pauseBtn, utilCol++);
+                utilRow.Children.Add(pauseBtn);
             }
 
             var themeBtn = UiBuilder.IconButton(
@@ -455,29 +577,34 @@ public sealed partial class MainWindow
                     ? MaterialIconKind.WeatherSunny
                     : MaterialIconKind.WeatherNight,
                 async () => await _vm.ToggleThemeAsync(),
-                14.5
+                15
             );
-            Grid.SetColumn(themeBtn, 3);
-            bottomRow.Children.Add(themeBtn);
+            themeBtn.HorizontalAlignment = HorizontalAlignment.Center;
+            ToolTip.SetTip(themeBtn, "Toggle Dark / Light theme (T)");
+            Grid.SetColumn(themeBtn, utilCol++);
+            utilRow.Children.Add(themeBtn);
 
             var settingsBtn = UiBuilder.IconButton(
                 MaterialIconKind.CogOutline,
                 () => _vm.ToggleSettingsModal(),
-                14.5
+                15
             );
+            settingsBtn.HorizontalAlignment = HorizontalAlignment.Center;
             ToolTip.SetTip(settingsBtn, "Desktop Settings (Tray, Notifications, Startup, Vault)");
-            Grid.SetColumn(settingsBtn, 4);
-            bottomRow.Children.Add(settingsBtn);
+            Grid.SetColumn(settingsBtn, utilCol++);
+            utilRow.Children.Add(settingsBtn);
 
             var helpBtn = UiBuilder.IconButton(
                 MaterialIconKind.KeyboardOutline,
                 () => _vm.ToggleShortcutsModal(),
-                14.5
+                15
             );
-            Grid.SetColumn(helpBtn, 5);
-            bottomRow.Children.Add(helpBtn);
+            helpBtn.HorizontalAlignment = HorizontalAlignment.Center;
+            ToolTip.SetTip(helpBtn, "Keyboard Shortcuts (?)");
+            Grid.SetColumn(helpBtn, utilCol);
+            utilRow.Children.Add(helpBtn);
 
-            footer.Children.Add(bottomRow);
+            footer.Children.Add(utilRow);
         }
 
         Grid.SetRow(footer, 3);
