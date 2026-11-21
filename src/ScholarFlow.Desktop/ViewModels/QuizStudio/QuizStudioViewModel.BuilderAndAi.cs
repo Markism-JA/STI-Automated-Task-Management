@@ -494,6 +494,55 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
+    public (string DisplayLabel, bool IsConfigured, string? MissingReason) GetActiveAiEngineStatus()
+    {
+        var settings = _mainVm.Settings;
+        var activeProfile = !string.IsNullOrWhiteSpace(settings.ActiveAiProfileId)
+            ? settings.SavedAiProfiles.FirstOrDefault(p =>
+                string.Equals(p.Id, settings.ActiveAiProfileId, StringComparison.OrdinalIgnoreCase)
+            )
+            : null;
+
+        string presetName = activeProfile?.Name
+            ?? (string.IsNullOrWhiteSpace(settings.AiProviderPreset) ? "Custom" : settings.AiProviderPreset);
+        string modelName = activeProfile?.ModelName ?? settings.AiModelName;
+        string displayLabel = string.IsNullOrWhiteSpace(modelName)
+            ? presetName
+            : $"{presetName} · {modelName}";
+
+        if (
+            activeProfile?.IsOffline == true
+            || string.Equals(settings.AiProviderPreset, "OfflineSmart", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return ("Offline Smart PDF Analyzer", true, null);
+        }
+
+        string baseUrl = activeProfile?.BaseUrl ?? settings.AiBaseUrl;
+        if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
+            return (displayLabel, false, "Missing or invalid AI endpoint URL");
+
+        if (string.IsNullOrWhiteSpace(modelName))
+            return (displayLabel, false, "No model name specified");
+
+        bool isLocal =
+            baseUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+            || baseUrl.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+        if (!isLocal)
+        {
+            string? key = activeProfile?.ApiKey ?? settings.AiApiKey;
+            bool hasEnvKey =
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GEMINI_API_KEY"))
+                || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
+
+            if (string.IsNullOrWhiteSpace(key) && !hasEnvKey)
+                return (displayLabel, false, "API key required for cloud provider");
+        }
+
+        return (displayLabel, true, null);
+    }
+
     public async Task GenerateQuizNowAsync(bool forceOffline = false)
     {
         if (IsGenerating)
@@ -509,6 +558,19 @@ public sealed partial class QuizStudioViewModel
             )
         )
             req.UseOfflineHeuristicFallback = true;
+
+        if (!req.UseOfflineHeuristicFallback)
+        {
+            var aiStatus = GetActiveAiEngineStatus();
+            if (!aiStatus.IsConfigured)
+            {
+                StatusMessage = $"AI Engine not configured: {aiStatus.MissingReason}. Set it up below or use Offline / Web AI JSON.";
+                IsStatusError = true;
+                IsAiSettingsOpen = true;
+                _mainVm.RequestUiRefresh();
+                return;
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(req.SourcePdfPath) || !File.Exists(req.SourcePdfPath))
         {

@@ -885,19 +885,98 @@ public static partial class QuizStudioViewBuilder
         }
         else
         {
+            bool isOfflineMode = studio.BuilderOutputMode == QuizBuilderOutputMode.OfflineSmart;
+            var aiStatus = studio.GetActiveAiEngineStatus();
+
+            if (!isOfflineMode)
+            {
+                var statusGrid = new Grid
+                {
+                    ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto"),
+                    ColumnSpacing = 8,
+                };
+
+                var fullStatusText = aiStatus.IsConfigured
+                    ? $"Active AI Engine: {aiStatus.DisplayLabel}"
+                    : $"Setup Required ({aiStatus.DisplayLabel}): {aiStatus.MissingReason}";
+
+                var statusIcon = UiBuilder.Icon(
+                    aiStatus.IsConfigured
+                        ? MaterialIconKind.RobotOutline
+                        : MaterialIconKind.AlertCircleOutline,
+                    15,
+                    aiStatus.IsConfigured
+                        ? ThemeService.Brush(ThemeService.AccentPrimary)
+                        : ThemeService.Brush(ThemeService.PriorityP2Fg)
+                );
+                statusIcon.VerticalAlignment = VerticalAlignment.Center;
+                statusGrid.Children.Add(statusIcon);
+
+                var statusText = new TextBlock
+                {
+                    Text = fullStatusText,
+                    FontSize = 12,
+                    FontWeight = aiStatus.IsConfigured ? FontWeight.Medium : FontWeight.SemiBold,
+                    Foreground = aiStatus.IsConfigured
+                        ? ThemeService.Brush(ThemeService.TextSecondary)
+                        : ThemeService.Brush(ThemeService.PriorityP2Fg),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MinWidth = 0,
+                };
+                ToolTip.SetTip(statusText, fullStatusText);
+                Grid.SetColumn(statusText, 1);
+                statusGrid.Children.Add(statusText);
+
+                var cfgBtn = UiBuilder.GhostButton(
+                    aiStatus.IsConfigured ? "Change" : "Configure",
+                    MaterialIconKind.CogOutline,
+                    studio.ToggleAiSettings,
+                    isActive: !aiStatus.IsConfigured
+                );
+                cfgBtn.VerticalAlignment = VerticalAlignment.Center;
+                ToolTip.SetTip(cfgBtn, "Open AI Engine settings");
+                Grid.SetColumn(cfgBtn, 2);
+                statusGrid.Children.Add(cfgBtn);
+
+                configCard.Children.Add(
+                    new Border
+                    {
+                        Background = aiStatus.IsConfigured
+                            ? ThemeService.Brush(ThemeService.BgBase)
+                            : ThemeService.Brush(ThemeService.PriorityP2Bg),
+                        BorderBrush = aiStatus.IsConfigured
+                            ? ThemeService.Brush(ThemeService.BorderSubtle)
+                            : ThemeService.Brush(ThemeService.PriorityP2Fg),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        Padding = new Thickness(10, 6),
+                        Child = statusGrid,
+                    }
+                );
+            }
+
             var generateActions = new WrapPanel
             {
                 Orientation = Orientation.Horizontal,
                 Margin = new Thickness(0, 2, 0, 0),
             };
-            bool isOfflineMode = studio.BuilderOutputMode == QuizBuilderOutputMode.OfflineSmart;
+            bool canSubmit = isOfflineMode || aiStatus.IsConfigured;
             var genPrimaryBtn = UiBuilder.PrimaryButton(
                 studio.IsGenerating ? "Generating Grounded Assessment..."
                     : isOfflineMode ? $"Generate {studio.QuestionCount}-Item Offline PDF Quiz"
+                    : !aiStatus.IsConfigured ? "Configure AI Engine to Generate"
                     : $"Generate {studio.QuestionCount}-Item Grounded Exam",
-                isOfflineMode ? MaterialIconKind.LightningBoltOutline : MaterialIconKind.AutoFix,
+                isOfflineMode ? MaterialIconKind.LightningBoltOutline
+                    : !aiStatus.IsConfigured ? MaterialIconKind.CogOutline
+                    : MaterialIconKind.AutoFix,
                 async () => await studio.GenerateQuizNowAsync(forceOffline: isOfflineMode)
             );
+            genPrimaryBtn.IsEnabled = !studio.IsGenerating && canSubmit;
+            if (!canSubmit)
+                ToolTip.SetTip(genPrimaryBtn, $"Configure AI Engine settings first: {aiStatus.MissingReason}");
             genPrimaryBtn.Margin = new Thickness(0, 0, 8, 4);
             generateActions.Children.Add(genPrimaryBtn);
 
