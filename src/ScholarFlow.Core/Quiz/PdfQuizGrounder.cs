@@ -24,7 +24,8 @@ public static class PdfQuizGrounder
         long LastWriteTicks,
         int TotalPages,
         (string? Term, string SectionBreadcrumb)[] PageSections,
-        string?[] PageTexts
+        ConcurrentDictionary<int, string> PageTexts,
+        object ExtractionLock
     );
 
     private static readonly ConcurrentDictionary<string, CachedPdfTextData> PdfTextCache = new(
@@ -282,16 +283,17 @@ public static class PdfQuizGrounder
                 return [];
 
             var sections = BuildPageSectionMap(doc);
-            var texts = new string?[docPages + 1];
-            for (int p = 1; p <= docPages; p++)
-            {
-                texts[p] = ExtractCleanPageText(doc.GetPage(p));
-            }
 
             if (PdfTextCache.Count >= 8)
                 PdfTextCache.Clear();
 
-            cached = new CachedPdfTextData(currentTicks, docPages, sections, texts);
+            cached = new CachedPdfTextData(
+                currentTicks,
+                docPages,
+                sections,
+                new ConcurrentDictionary<int, string>(),
+                new object()
+            );
             PdfTextCache[pdfPath] = cached;
         }
 
@@ -312,7 +314,7 @@ public static class PdfQuizGrounder
         int minP = Math.Clamp(startPage ?? 1, 1, totalPages);
         int maxP = Math.Clamp(endPage ?? totalPages, minP, totalPages);
 
-        var results = new List<GroundedPdfPage>();
+        var candidatePages = new List<int>();
         for (int p = minP; p <= maxP; p++)
         {
             if (hasExplicitRanges && !explicitRanges!.Any(r => r.Contains(p)))
@@ -350,7 +352,16 @@ public static class PdfQuizGrounder
                 continue;
             }
 
-            var text = cached.PageTexts[p] ?? string.Empty;
+            candidatePages.Add(p);
+        }
+
+        EnsurePagesExtracted(pdfPath, cached, candidatePages, maxPages + 25);
+
+        var results = new List<GroundedPdfPage>();
+        foreach (int p in candidatePages)
+        {
+            var (pageTerm, breadcrumb) = pageSections[p];
+            var text = cached.PageTexts.GetValueOrDefault(p, string.Empty);
 
             // Skip cover pages, term divider pages, table of contents, or nearly empty pages
             if (
@@ -389,9 +400,12 @@ public static class PdfQuizGrounder
             )
         )
         {
+            var fallbackRange = Enumerable.Range(minP, maxP - minP + 1).Take(maxPages + 25).ToList();
+            EnsurePagesExtracted(pdfPath, cached, fallbackRange, maxPages + 25);
+
             for (int p = minP; p <= maxP && results.Count < maxPages; p++)
             {
-                var text = cached.PageTexts[p] ?? string.Empty;
+                var text = cached.PageTexts.GetValueOrDefault(p, string.Empty);
                 if (text.Length < 55)
                     continue;
 
@@ -831,12 +845,42 @@ public static class PdfQuizGrounder
         return map;
     }
 
+    private static void EnsurePagesExtracted(
+        string pdfPath,
+        CachedPdfTextData cached,
+        IReadOnlyList<int> pagesToEnsure,
+        int maxToExtract
+    )
+    {
+        var missing = pagesToEnsure
+            .Where(p => p >= 1 && p <= cached.TotalPages && !cached.PageTexts.ContainsKey(p))
+            .Take(maxToExtract)
+            .ToList();
+
+        if (missing.Count == 0)
+            return;
+
+        lock (cached.ExtractionLock)
+        {
+            missing = missing.Where(p => !cached.PageTexts.ContainsKey(p)).ToList();
+            if (missing.Count == 0)
+                return;
+
+            using var doc = PdfDocument.Open(pdfPath);
+            foreach (int p in missing)
+            {
+                cached.PageTexts[p] = ExtractCleanPageText(doc.GetPage(p));
+            }
+        }
+    }
+
     private static string ExtractCleanPageText(Page page)
     {
         var words = GetVisibleWordsInReadingOrder(page);
         if (words.Count == 0)
             return string.Empty;
 
+        double leftMargin = words.Min(w => w.BoundingBox.Left);
         var sb = new StringBuilder();
         double? lastBottom = null;
 
@@ -846,10 +890,23 @@ public static class PdfQuizGrounder
             if (string.IsNullOrEmpty(token))
                 continue;
 
-            if (lastBottom.HasValue && Math.Abs(w.BoundingBox.Bottom - lastBottom.Value) > 5.0)
-                sb.AppendLine();
+            bool isNewLine = !lastBottom.HasValue || Math.Abs(w.BoundingBox.Bottom - lastBottom.Value) > 5.0;
+            if (isNewLine)
+            {
+                if (lastBottom.HasValue)
+                    sb.AppendLine();
+
+                double indentPts = w.BoundingBox.Left - leftMargin;
+                if (indentPts > 14.0)
+                {
+                    int spaces = Math.Clamp((int)Math.Round(indentPts / 7.0), 2, 16);
+                    sb.Append(' ', spaces);
+                }
+            }
             else if (sb.Length > 0 && sb[^1] != '\n')
+            {
                 sb.Append(' ');
+            }
 
             sb.Append(token);
             lastBottom = w.BoundingBox.Bottom;

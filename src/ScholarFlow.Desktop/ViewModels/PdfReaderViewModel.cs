@@ -1,4 +1,5 @@
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using ScholarFlow.Core.Quiz;
 using ScholarFlow.Desktop.Services;
 using UglyToad.PdfPig;
@@ -24,6 +25,9 @@ public sealed class PdfBookmarkNode
 public sealed class PdfReaderViewModel : IDisposable
 {
     private readonly Dictionary<(int Page, int Dpi), Bitmap> _pageCache = [];
+    private readonly HashSet<(int Page, int Dpi)> _pendingPageRenders = [];
+    private CancellationTokenSource? _loadCts;
+    private int? _pendingJumpPage;
     private byte[]? _pdfBytes;
 
     public string? CurrentFilePath { get; private set; }
@@ -34,6 +38,8 @@ public sealed class PdfReaderViewModel : IDisposable
     public int ZoomPercent { get; private set; } = 100;
     public bool FitToWidth { get; private set; } = true;
     public bool IsOutlineVisible { get; private set; } = true;
+    public bool IsLoadingDocument { get; private set; }
+    public bool IsRenderingPage { get; private set; }
     public IReadOnlyList<PdfBookmarkNode> BookmarkRoots { get; private set; } = [];
     public string? ErrorMessage { get; private set; }
 
@@ -46,42 +52,99 @@ public sealed class PdfReaderViewModel : IDisposable
 
     public void LoadPdf(string filePath)
     {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+
         ClearCache();
         ClearEvidenceHighlight(notify: false);
+        _pendingPageRenders.Clear();
+        _pendingJumpPage = null;
+        _pdfBytes = null;
+
         CurrentFilePath = filePath;
         ErrorMessage = null;
+        PageCount = 0;
+        CurrentPage = 1;
+        BookmarkRoots = [];
+        IsRenderingPage = false;
 
         if (!File.Exists(filePath))
         {
+            IsLoadingDocument = false;
             ErrorMessage = $"File not found: {filePath}";
-            PageCount = 0;
-            CurrentPage = 1;
-            BookmarkRoots = [];
             Changed?.Invoke(this, EventArgs.Empty);
             return;
         }
 
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        IsLoadingDocument = true;
+        Changed?.Invoke(this, EventArgs.Empty);
+
+        _ = LoadPdfInBackgroundAsync(filePath, cts);
+    }
+
+    private async Task LoadPdfInBackgroundAsync(string filePath, CancellationTokenSource cts)
+    {
+        var token = cts.Token;
         try
         {
-            _pdfBytes = File.ReadAllBytes(filePath);
-            using var doc = PdfDocument.Open(_pdfBytes);
-            PageCount = doc.NumberOfPages;
-            CurrentPage = 1;
-            BookmarkRoots = ExtractBookmarkRoots(doc);
+            var (bytes, pageCount, roots) = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                var data = File.ReadAllBytes(filePath);
+                token.ThrowIfCancellationRequested();
+                using var doc = PdfDocument.Open(data);
+                int pages = doc.NumberOfPages;
+                var tree = ExtractBookmarkRoots(doc);
+                return (data, pages, tree);
+            }, token);
+
+            if (token.IsCancellationRequested || _loadCts != cts)
+                return;
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (token.IsCancellationRequested || _loadCts != cts)
+                    return;
+
+                _pdfBytes = bytes;
+                PageCount = pageCount;
+                BookmarkRoots = roots;
+                int target = _pendingJumpPage ?? CurrentPage;
+                _pendingJumpPage = null;
+                CurrentPage = pageCount > 0 ? Math.Clamp(target, 1, pageCount) : 1;
+                IsLoadingDocument = false;
+                Changed?.Invoke(this, EventArgs.Empty);
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer LoadPdf call
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to open PDF: {ex.Message}";
-            PageCount = 0;
-            BookmarkRoots = [];
-        }
+            if (token.IsCancellationRequested || _loadCts != cts)
+                return;
 
-        Changed?.Invoke(this, EventArgs.Empty);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (token.IsCancellationRequested || _loadCts != cts)
+                    return;
+
+                ErrorMessage = $"Failed to open PDF: {ex.Message}";
+                PageCount = 0;
+                BookmarkRoots = [];
+                IsLoadingDocument = false;
+                Changed?.Invoke(this, EventArgs.Empty);
+            });
+        }
     }
 
     public Bitmap? GetCurrentPageBitmap()
     {
-        if (_pdfBytes is null || PageCount <= 0)
+        if (IsLoadingDocument || _pdfBytes is null || PageCount <= 0)
             return null;
 
         int zeroBased = Math.Clamp(CurrentPage - 1, 0, PageCount - 1);
@@ -90,38 +153,88 @@ public sealed class PdfReaderViewModel : IDisposable
         if (_pageCache.TryGetValue((zeroBased, dpi), out var cached))
             return cached;
 
+        _ = RenderPageInBackgroundAsync(_pdfBytes, zeroBased, dpi, CurrentFilePath, notifyOnComplete: true);
+        return null;
+    }
+
+    private async Task RenderPageInBackgroundAsync(
+        byte[] pdfBytes,
+        int zeroBased,
+        int dpi,
+        string? filePath,
+        bool notifyOnComplete)
+    {
+        var key = (zeroBased, dpi);
+        if (!_pendingPageRenders.Add(key))
+            return;
+
+        if (notifyOnComplete)
+            IsRenderingPage = true;
+
         try
         {
-            using var ms = new MemoryStream();
-#pragma warning disable CA1416
-            var renderOpts = new PDFtoImage.RenderOptions(
-                Dpi: dpi,
-                BackgroundColor: SkiaSharp.SKColors.White
-            );
-            PDFtoImage.Conversion.SavePng(
-                ms,
-                _pdfBytes,
-                page: (Index)zeroBased,
-                options: renderOpts
-            );
-#pragma warning restore CA1416
-            ms.Position = 0;
-            var bmp = new Bitmap(ms);
-
-            if (_pageCache.Count >= 16)
+            var pngBytes = await Task.Run(() =>
             {
-                var firstKey = _pageCache.Keys.First();
-                _pageCache[firstKey].Dispose();
-                _pageCache.Remove(firstKey);
-            }
+                using var ms = new MemoryStream();
+#pragma warning disable CA1416
+                var renderOpts = new PDFtoImage.RenderOptions(
+                    Dpi: dpi,
+                    BackgroundColor: SkiaSharp.SKColors.White
+                );
+                PDFtoImage.Conversion.SavePng(
+                    ms,
+                    pdfBytes,
+                    page: (Index)zeroBased,
+                    options: renderOpts
+                );
+#pragma warning restore CA1416
+                return ms.ToArray();
+            });
 
-            _pageCache[(zeroBased, dpi)] = bmp;
-            return bmp;
+            Dispatcher.UIThread.Post(() =>
+            {
+                _pendingPageRenders.Remove(key);
+                IsRenderingPage = _pendingPageRenders.Count > 0;
+
+                if (!string.Equals(CurrentFilePath, filePath, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                using var bmpStream = new MemoryStream(pngBytes);
+                var bmp = new Bitmap(bmpStream);
+
+                if (_pageCache.Count >= 16)
+                {
+                    var firstKey = _pageCache.Keys.First();
+                    _pageCache[firstKey].Dispose();
+                    _pageCache.Remove(firstKey);
+                }
+
+                _pageCache[key] = bmp;
+
+                if (notifyOnComplete)
+                {
+                    Changed?.Invoke(this, EventArgs.Empty);
+
+                    // Prefetch next page silently for smooth paging on large textbooks
+                    if (zeroBased + 1 < PageCount && !_pageCache.ContainsKey((zeroBased + 1, dpi)))
+                    {
+                        _ = RenderPageInBackgroundAsync(pdfBytes, zeroBased + 1, dpi, filePath, notifyOnComplete: false);
+                    }
+                }
+            });
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Render error: {ex.Message}";
-            return null;
+            Dispatcher.UIThread.Post(() =>
+            {
+                _pendingPageRenders.Remove(key);
+                IsRenderingPage = _pendingPageRenders.Count > 0;
+                if (notifyOnComplete && string.Equals(CurrentFilePath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    ErrorMessage = $"Render error: {ex.Message}";
+                    Changed?.Invoke(this, EventArgs.Empty);
+                }
+            });
         }
     }
 
@@ -145,8 +258,13 @@ public sealed class PdfReaderViewModel : IDisposable
 
     public void JumpToPage(int oneBasedPage)
     {
-        if (PageCount <= 0)
+        if (IsLoadingDocument || PageCount <= 0)
+        {
+            _pendingJumpPage = Math.Max(1, oneBasedPage);
+            CurrentPage = _pendingJumpPage.Value;
+            Changed?.Invoke(this, EventArgs.Empty);
             return;
+        }
 
         CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
         Changed?.Invoke(this, EventArgs.Empty);
@@ -159,10 +277,15 @@ public sealed class PdfReaderViewModel : IDisposable
         string? questionPrompt = null
     )
     {
-        if (PageCount > 0)
-            CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
+        if (IsLoadingDocument || PageCount <= 0)
+        {
+            _pendingJumpPage = Math.Max(1, oneBasedPage);
+            CurrentPage = _pendingJumpPage.Value;
+        }
         else
-            CurrentPage = Math.Max(1, oneBasedPage);
+        {
+            CurrentPage = Math.Clamp(oneBasedPage, 1, PageCount);
+        }
 
         ActiveHighlightPage = CurrentPage;
         ActiveHighlights = highlights ?? [];
@@ -314,5 +437,11 @@ public sealed class PdfReaderViewModel : IDisposable
         _pageCache.Clear();
     }
 
-    public void Dispose() => ClearCache();
+    public void Dispose()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        ClearCache();
+    }
 }

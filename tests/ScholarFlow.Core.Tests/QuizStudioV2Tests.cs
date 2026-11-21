@@ -328,6 +328,14 @@ public class QuizStudioV2Tests
         Assert.False(forcedProse.HasCode);
         Assert.False(forcedProse.HasMath);
         Assert.False(forcedProse.HasDiagrams);
+
+        var spacedSystemsPages = new[]
+        {
+            new GroundedPdfPage(39, null, "Chapter 1 / 1.1", "# i n c l u d e SP < s t d i o . h > linux> gcc -o hello hello.c")
+        };
+        var systemsResult = QuizLlmService.DetectContentModalities(spacedSystemsPages, "Computer Architecture");
+        Assert.True(systemsResult.HasCode);
+        Assert.Equal("c", systemsResult.DetectedLanguage);
     }
 
     [Fact]

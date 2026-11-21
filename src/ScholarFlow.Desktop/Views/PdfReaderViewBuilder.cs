@@ -370,6 +370,56 @@ public static class PdfReaderViewBuilder
                 Content = pageSheet,
             };
         }
+        else if (reader.IsLoadingDocument || reader.IsRenderingPage)
+        {
+            var skeletonLines = new StackPanel
+            {
+                Spacing = 12,
+                Margin = new Thickness(32, 36),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = reader.IsLoadingDocument
+                            ? $"Loading {reader.Title}..."
+                            : $"Rendering page {reader.CurrentPage} of {reader.PageCount}...",
+                        FontSize = 13,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 8),
+                    },
+                },
+            };
+
+            foreach (double w in new[] { 0.85, 0.92, 0.78, 0.90, 0.65, 0.88, 0.72 })
+            {
+                skeletonLines.Children.Add(
+                    new Border
+                    {
+                        Height = 12,
+                        CornerRadius = new CornerRadius(4),
+                        Background = ThemeService.Brush(ThemeService.BgHover),
+                        Width = 520 * w,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                    }
+                );
+            }
+
+            canvasContent = new Border
+            {
+                Background = ThemeService.Brush(ThemeService.BgSurface),
+                BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Margin = new Thickness(24, 18),
+                MaxWidth = 640,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = skeletonLines,
+            };
+        }
         else
         {
             canvasContent = new TextBlock

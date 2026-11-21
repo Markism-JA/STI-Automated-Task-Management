@@ -18,7 +18,7 @@ public sealed partial class QuizLlmService
         if (mode == QuizContentModalityMode.StandardProseOnly)
             return new ContentModalityProfile(HasCode: false, HasMath: false, HasDiagrams: false);
 
-        var combinedText = string.Join("\n", pages.Take(35).Select(p => p.Text));
+        var combinedText = string.Join("\n", pages.Select(p => p.Text));
         var title = courseTitle ?? string.Empty;
 
         // 1. Code Detection
@@ -45,12 +45,27 @@ public sealed partial class QuizLlmService
             codeSignals += 2;
             detectedLang ??= "javascript";
         }
-        if (Regex.IsMatch(combinedText, @"\b(#include\s*<|int\s+main\s*\(|System\.out\.println|sudo\s+|chmod\s+)\b"))
+        if (Regex.IsMatch(combinedText, @"(#include\s*<|#\s*i\s*n\s*c\s*l\s*u\s*d\s*e|\bint\s+main\s*\(|\bprintf\s*\(|\bmalloc\s*\(|\bsizeof\s*\()"))
         {
-            codeSignals += 2;
+            codeSignals += 3;
             detectedLang ??= "c";
         }
-        if (Regex.Matches(combinedText, @"[{};]").Count >= 18)
+        if (Regex.IsMatch(combinedText, @"(%(rax|eax|rbx|ebx|rcx|ecx|rdx|edx|rsp|esp|rbp|ebp|rdi|rsi)\b|\b(mov[lqwb]?|push[lq]?|pop[lq]?|retq?)\s+)"))
+        {
+            codeSignals += 3;
+            detectedLang ??= "asm";
+        }
+        if (Regex.IsMatch(combinedText, @"(\b(gcc|g\+\+|clang|make|sudo|chmod|grep|awk|curl|dotnet|python3?)\b|linux>\s+)"))
+        {
+            codeSignals += 2;
+            detectedLang ??= "bash";
+        }
+        if (Regex.IsMatch(combinedText, @"(\b(procedure|algorithm)\s+[A-Za-z_]|for\s+each\s+.+\s+do\b|while\s+.+\s+do\b|if\s+.+\s+then\b|:=)"))
+        {
+            codeSignals += 2;
+            detectedLang ??= "pseudocode";
+        }
+        if (Regex.Matches(combinedText, @"[{};]").Count >= 12)
             codeSignals += 2;
 
         bool hasCode = mode == QuizContentModalityMode.IncludeCodeSnippets || codeSignals >= 3;
@@ -102,7 +117,7 @@ public sealed partial class QuizLlmService
             ? $"\nFocus heavily on previously missed/weak topics: {string.Join(", ", weakTopics)}."
             : string.Empty;
 
-        var modalityRules = BuildModalitySystemRules(modality);
+        var modalityRules = BuildModalitySystemRules(modality, req.ModalityMode);
 
         return $$"""
             You are an expert academic examiner creating an evidence-grounded assessment from a course study PDF.
@@ -167,7 +182,9 @@ public sealed partial class QuizLlmService
             """;
     }
 
-    private static string BuildModalitySystemRules(ContentModalityProfile modality)
+    private static string BuildModalitySystemRules(
+        ContentModalityProfile modality,
+        QuizContentModalityMode mode = QuizContentModalityMode.AutoDetect)
     {
         var sb = new StringBuilder();
         sb.AppendLine("CONTENT MODALITY & SPECIALIZED FORMAT RULES:");
@@ -176,9 +193,13 @@ public sealed partial class QuizLlmService
         {
             sb.AppendLine($"- CODE SNIPPETS DETECTED ({modality.DetectedLanguage ?? "code"}): When testing programming syntax, CLI commands, queries, or code tracing, populate \"codeSnippet\" with a clean 2-12 line code block and \"codeLanguage\" (e.g. \"{modality.DetectedLanguage ?? "csharp"}\"). Leave \"codeSnippet\": null for non-code conceptual questions.");
         }
-        else
+        else if (mode == QuizContentModalityMode.StandardProseOnly)
         {
             sb.AppendLine("- NO CODE DETECTED: This study material does not require programming code. Set \"codeSnippet\": null and \"codeLanguage\": null on all questions.");
+        }
+        else
+        {
+            sb.AppendLine("- CODE SNIPPETS: Populate \"codeSnippet\" and \"codeLanguage\" ONLY if a question directly tests programming code, pseudocode, assembly, or CLI commands present in the source; otherwise set both to null.");
         }
 
         if (modality.HasMath)
