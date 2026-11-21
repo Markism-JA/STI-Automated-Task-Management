@@ -1,8 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
+using Avalonia.VisualTree;
 using Material.Icons;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Services;
@@ -306,6 +311,34 @@ public static class CourseWorkspaceViewBuilder
         return root;
     }
 
+    private static readonly Dictionary<string, Vector> SavedMaterialsScrollOffsets =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private abstract record MaterialTreeRow;
+
+    private sealed record FolderHeaderTreeRow(
+        string FolderPath,
+        string DisplayTitle,
+        int FilteredCount,
+        int TotalUnfilteredCount,
+        bool IsRootGroup,
+        bool IsCompiledOutput,
+        int EditableIndex,
+        int EditableCount
+    ) : MaterialTreeRow;
+
+    private sealed record FolderDeleteConfirmTreeRow(
+        string FolderPath,
+        string DisplayTitle,
+        int TotalUnfilteredCount
+    ) : MaterialTreeRow;
+
+    private sealed record EmptyFolderTreeRow(string FolderPath) : MaterialTreeRow;
+
+    private sealed record FileTreeRow(string FilePath, bool IsCompiledOutput) : MaterialTreeRow;
+
+    private sealed record EmptyStateTreeRow(bool IsFiltered) : MaterialTreeRow;
+
     private static readonly HashSet<string> InternalCourseManifestFiles = new(
         StringComparer.OrdinalIgnoreCase
     )
@@ -392,7 +425,7 @@ public static class CourseWorkspaceViewBuilder
             VerticalAlignment = VerticalAlignment.Center,
         };
 
-        var stack = new StackPanel { Spacing = 10, Margin = new Thickness(0, 2, 0, 20) };
+        ListBox? filesListBox = null;
         Action? refreshMaterialsList = null;
 
         var searchBox = new TextBox
@@ -573,7 +606,7 @@ public static class CourseWorkspaceViewBuilder
             outerGrid.Children.Add(stripBorder);
         }
 
-        // 3. Scrollable Folders & Files Tree (live-filtered as you type via QuickSearchMatcher)
+        // 3. Virtualized Folders & Files Tree (live-filtered as you type via QuickSearchMatcher)
         bool MatchesTypeFilter(string filePath) =>
             vm.MaterialsTypeFilter switch
             {
@@ -582,14 +615,72 @@ public static class CourseWorkspaceViewBuilder
                 _ => true,
             };
 
-        refreshMaterialsList = () =>
+        List<MaterialTreeRow> BuildRows()
         {
-            stack.Children.Clear();
+            var rows = new List<MaterialTreeRow>();
             var query = vm.MaterialsSearchQuery;
             bool hasQuery = !string.IsNullOrWhiteSpace(query);
             int renderedGroups = 0;
 
-            // Render Loose Files (Course Root) if any exist
+            void AppendGroup(
+                string folderPath,
+                string displayTitle,
+                List<string> filteredFiles,
+                int totalUnfilteredCount,
+                bool isRootGroup,
+                bool isCompiledOutput,
+                int editableIndex
+            )
+            {
+                rows.Add(
+                    new FolderHeaderTreeRow(
+                        folderPath,
+                        displayTitle,
+                        filteredFiles.Count,
+                        totalUnfilteredCount,
+                        isRootGroup,
+                        isCompiledOutput,
+                        editableIndex,
+                        editableDirs.Count
+                    )
+                );
+
+                bool isConfirmingDelete =
+                    !isRootGroup
+                    && !isCompiledOutput
+                    && string.Equals(
+                        vm.ConfirmingDeleteMaterialPath,
+                        folderPath,
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                if (isConfirmingDelete)
+                {
+                    rows.Add(
+                        new FolderDeleteConfirmTreeRow(
+                            folderPath,
+                            displayTitle,
+                            totalUnfilteredCount
+                        )
+                    );
+                }
+
+                bool isCollapsed = vm.CollapsedMaterialFolders.Contains(folderPath);
+                if (!isCollapsed)
+                {
+                    if (filteredFiles.Count == 0)
+                    {
+                        rows.Add(new EmptyFolderTreeRow(folderPath));
+                    }
+                    else
+                    {
+                        foreach (var f in filteredFiles)
+                            rows.Add(new FileTreeRow(f, isCompiledOutput));
+                    }
+                }
+                renderedGroups++;
+            }
+
+            // Loose Files (Course Root)
             if (looseRootFiles.Count > 0)
             {
                 var filteredRoot = looseRootFiles
@@ -609,28 +700,19 @@ public static class CourseWorkspaceViewBuilder
 
                 if (filteredRoot.Count > 0 || (!hasQuery && vm.MaterialsTypeFilter == "All"))
                 {
-                    stack.Children.Add(
-                        BuildMaterialGroupCard(
-                            outerGrid,
-                            vm,
-                            course,
-                            coursePath,
-                            folderPath: coursePath,
-                            displayTitle: "Loose Files (Course Root)",
-                            files: filteredRoot,
-                            totalUnfilteredCount: looseRootFiles.Count,
-                            editableDirs: editableDirs,
-                            isRootGroup: true,
-                            isCompiledOutput: false,
-                            editableIndex: -1,
-                            editableCount: editableDirs.Count
-                        )
+                    AppendGroup(
+                        coursePath,
+                        "Loose Files (Course Root)",
+                        filteredRoot,
+                        looseRootFiles.Count,
+                        isRootGroup: true,
+                        isCompiledOutput: false,
+                        editableIndex: -1
                     );
-                    renderedGroups++;
                 }
             }
 
-            // Render Folders (including empty folders when no search/type filter hides them)
+            // Subfolders
             for (int i = 0; i < allDirs.Count; i++)
             {
                 var dir = allDirs[i];
@@ -662,7 +744,6 @@ public static class CourseWorkspaceViewBuilder
                     )
                     .ToList();
 
-                // Hide empty/non-matching folders only when actively filtering
                 if (
                     (hasQuery || vm.MaterialsTypeFilter != "All")
                     && filteredFiles.Count == 0
@@ -676,110 +757,249 @@ public static class CourseWorkspaceViewBuilder
                         string.Equals(d, dir, StringComparison.OrdinalIgnoreCase)
                     );
 
-                stack.Children.Add(
-                    BuildMaterialGroupCard(
-                        outerGrid,
-                        vm,
-                        course,
-                        coursePath,
-                        folderPath: dir,
-                        displayTitle: displayDirName,
-                        files: filteredFiles,
-                        totalUnfilteredCount: rawFiles.Count,
-                        editableDirs: editableDirs,
-                        isRootGroup: false,
-                        isCompiledOutput: isMasterDir,
-                        editableIndex: editIdx,
-                        editableCount: editableDirs.Count
-                    )
+                AppendGroup(
+                    dir,
+                    displayDirName,
+                    filteredFiles,
+                    rawFiles.Count,
+                    isRootGroup: false,
+                    isCompiledOutput: isMasterDir,
+                    editableIndex: editIdx
                 );
-                renderedGroups++;
             }
 
             if (renderedGroups == 0)
-            {
-                stack.Children.Add(
-                    new Border
+                rows.Add(new EmptyStateTreeRow(hasQuery || vm.MaterialsTypeFilter != "All"));
+
+            return rows;
+        }
+
+        filesListBox = new ListBox
+        {
+            ItemsSource = BuildRows(),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Focusable = false,
+            Padding = new Thickness(0, 2, 0, 20),
+            ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel()),
+            ItemTemplate = new FuncDataTemplate<MaterialTreeRow>((row, _) =>
+                row switch
+                {
+                    FolderHeaderTreeRow fh => BuildFolderHeaderCard(
+                        outerGrid,
+                        vm,
+                        course,
+                        fh
+                    ),
+                    FolderDeleteConfirmTreeRow dc => BuildFolderDeleteConfirmRow(vm, course, dc),
+                    EmptyFolderTreeRow => new TextBlock
                     {
-                        Background = ThemeService.Brush(ThemeService.BgElevated),
-                        BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
-                        BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(8),
-                        Padding = new Thickness(16, 18),
-                        Child = new StackPanel
-                        {
-                            Spacing = 6,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            Children =
-                            {
-                                new TextBlock
-                                {
-                                    Text = hasQuery || vm.MaterialsTypeFilter != "All"
-                                        ? "No files or folders match the current search."
-                                        : "No files in this course yet.",
-                                    FontSize = 13,
-                                    FontWeight = FontWeight.SemiBold,
-                                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                                    HorizontalAlignment = HorizontalAlignment.Center,
-                                },
-                                new TextBlock
-                                {
-                                    Text = hasQuery || vm.MaterialsTypeFilter != "All"
-                                        ? "Try clearing the search query or switching back to All."
-                                        : "Use New Folder or Import Files above to organize course files.",
-                                    FontSize = 11.5,
-                                    Foreground = ThemeService.Brush(ThemeService.TextMuted),
-                                    HorizontalAlignment = HorizontalAlignment.Center,
-                                },
-                            },
-                        },
-                    }
-                );
-            }
+                        Text = "Empty folder — click + above to import files or move files here.",
+                        FontSize = 11.5,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        Margin = new Thickness(28, 2, 0, 6),
+                    },
+                    FileTreeRow fr => BuildMaterialFileRow(
+                        vm,
+                        course,
+                        coursePath,
+                        fr.FilePath,
+                        editableDirs,
+                        fr.IsCompiledOutput
+                    ),
+                    EmptyStateTreeRow es => BuildMaterialsEmptyState(es.IsFiltered),
+                    _ => new Border(),
+                }
+            ),
         };
 
-        refreshMaterialsList();
-
-        var scroller = UiBuilder.PersistentScrollViewer(
-            $"course-workspace:{course.FolderName}",
-            stack
+        filesListBox.Styles.Add(
+            new Style(x => x.OfType<ListBoxItem>())
+            {
+                Setters =
+                {
+                    new Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
+                    new Setter(Layoutable.MarginProperty, new Thickness(0, 0, 0, 2)),
+                    new Setter(TemplatedControl.BackgroundProperty, Brushes.Transparent),
+                    new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(0)),
+                    new Setter(InputElement.FocusableProperty, false),
+                },
+            }
         );
-        Grid.SetRow(scroller, 2);
-        outerGrid.Children.Add(scroller);
+        foreach (var pseudo in new[] { ":pointerover", ":selected", ":pressed" })
+        {
+            var captured = pseudo;
+            filesListBox.Styles.Add(
+                new Style(x =>
+                    x.OfType<ListBoxItem>()
+                        .Class(captured)
+                        .Template()
+                        .OfType<ContentPresenter>()
+                        .Name("PART_ContentPresenter")
+                )
+                {
+                    Setters =
+                    {
+                        new Setter(ContentPresenter.BackgroundProperty, Brushes.Transparent),
+                    },
+                }
+            );
+        }
+        filesListBox.Styles.Add(
+            new Style(x =>
+                x.OfType<ListBoxItem>()
+                    .Class(":selected")
+                    .Class(":pointerover")
+                    .Template()
+                    .OfType<ContentPresenter>()
+                    .Name("PART_ContentPresenter")
+            )
+            {
+                Setters =
+                {
+                    new Setter(ContentPresenter.BackgroundProperty, Brushes.Transparent),
+                },
+            }
+        );
+
+        var scrollKey = $"course-files:{course.FolderName}";
+        bool scrollAttached = false;
+        filesListBox.Loaded += (_, _) =>
+        {
+            var sv = filesListBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+            if (sv is null || scrollAttached)
+                return;
+
+            scrollAttached = true;
+            if (
+                SavedMaterialsScrollOffsets.TryGetValue(scrollKey, out var savedOffset)
+                && savedOffset.Y > 0
+            )
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(
+                    () => sv.Offset = savedOffset,
+                    Avalonia.Threading.DispatcherPriority.Loaded
+                );
+            }
+            sv.ScrollChanged += (_, _) => SavedMaterialsScrollOffsets[scrollKey] = sv.Offset;
+        };
+
+        refreshMaterialsList = () =>
+        {
+            filesListBox.ItemsSource = BuildRows();
+        };
+
+        Grid.SetRow(filesListBox, 2);
+        outerGrid.Children.Add(filesListBox);
         return outerGrid;
     }
 
-    private static Control BuildMaterialGroupCard(
+    private static Control BuildMaterialsEmptyState(bool isFiltered) =>
+        new Border
+        {
+            Background = ThemeService.Brush(ThemeService.BgElevated),
+            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 18),
+            Margin = new Thickness(0, 6, 0, 0),
+            Child = new StackPanel
+            {
+                Spacing = 6,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = isFiltered
+                            ? "No files or folders match the current search."
+                            : "No files in this course yet.",
+                        FontSize = 13,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    new TextBlock
+                    {
+                        Text = isFiltered
+                            ? "Try clearing the search query or switching back to All."
+                            : "Use New Folder or Import Files above to organize course files.",
+                        FontSize = 11.5,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                },
+            },
+        };
+
+    private static Control BuildFolderDeleteConfirmRow(
+        MainWindowViewModel vm,
+        BasinCourseEntry course,
+        FolderDeleteConfirmTreeRow dc
+    )
+    {
+        var confirmWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+        confirmWrap.Children.Add(
+            new TextBlock
+            {
+                Text =
+                    $"Remove '{dc.DisplayTitle}' ({dc.TotalUnfilteredCount} file{(dc.TotalUnfilteredCount == 1 ? "" : "s")})?",
+                FontSize = 11.5,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 4),
+            }
+        );
+
+        var moveAndDelBtn = UiBuilder.GhostButton(
+            "Move Files to Root & Remove",
+            MaterialIconKind.FolderMoveOutline,
+            () => vm.DeleteMaterialFolder(course, dc.FolderPath, moveFilesToRootFirst: true)
+        );
+        moveAndDelBtn.Margin = new Thickness(0, 0, 6, 4);
+        confirmWrap.Children.Add(moveAndDelBtn);
+
+        var delAllBtn = UiBuilder.GhostButton(
+            "Delete Folder & Files",
+            MaterialIconKind.DeleteOutline,
+            () => vm.DeleteMaterialFolder(course, dc.FolderPath, moveFilesToRootFirst: false)
+        );
+        delAllBtn.Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg);
+        delAllBtn.Margin = new Thickness(0, 0, 6, 4);
+        confirmWrap.Children.Add(delAllBtn);
+
+        var cancelDelBtn = UiBuilder.GhostButton("Cancel", null, vm.CancelConfirmDeleteMaterial);
+        cancelDelBtn.Margin = new Thickness(0, 0, 0, 4);
+        confirmWrap.Children.Add(cancelDelBtn);
+
+        return new Border
+        {
+            Background = ThemeService.Brush(ThemeService.BgSurface),
+            BorderBrush = ThemeService.Brush(ThemeService.PriorityP1Fg),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10, 6),
+            Margin = new Thickness(12, 2, 0, 4),
+            Child = confirmWrap,
+        };
+    }
+
+    private static Control BuildFolderHeaderCard(
         Control anchorControl,
         MainWindowViewModel vm,
         BasinCourseEntry course,
-        string coursePath,
-        string folderPath,
-        string displayTitle,
-        List<string> files,
-        int totalUnfilteredCount,
-        List<string> editableDirs,
-        bool isRootGroup,
-        bool isCompiledOutput,
-        int editableIndex,
-        int editableCount
+        FolderHeaderTreeRow fh
     )
     {
+        var folderPath = fh.FolderPath;
         bool isCollapsed = vm.CollapsedMaterialFolders.Contains(folderPath);
         bool isRenaming = string.Equals(
             vm.RenamingMaterialPath,
             folderPath,
             StringComparison.OrdinalIgnoreCase
         );
-        bool isConfirmingDelete = string.Equals(
-            vm.ConfirmingDeleteMaterialPath,
-            folderPath,
-            StringComparison.OrdinalIgnoreCase
-        );
 
-        var cardStack = new StackPanel { Spacing = 6 };
-
-        // Folder Header Row
         var headerGrid = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("Auto,Auto,*,Auto,Auto"),
@@ -795,15 +1015,15 @@ public static class CourseWorkspaceViewBuilder
         headerGrid.Children.Add(collapseBtn);
 
         var folderIcon = UiBuilder.Icon(
-            isCompiledOutput
+            fh.IsCompiledOutput
                 ? MaterialIconKind.BookCheckOutline
-                : isRootGroup
+                : fh.IsRootGroup
                     ? MaterialIconKind.FolderHomeOutline
                     : isCollapsed
                         ? MaterialIconKind.FolderOutline
                         : MaterialIconKind.FolderOpenOutline,
             16,
-            isCompiledOutput
+            fh.IsCompiledOutput
                 ? ThemeService.Brush(ThemeService.SuccessFg)
                 : ThemeService.Brush(ThemeService.AccentPrimary)
         );
@@ -811,7 +1031,7 @@ public static class CourseWorkspaceViewBuilder
         Grid.SetColumn(folderIcon, 1);
         headerGrid.Children.Add(folderIcon);
 
-        if (isRenaming && !isRootGroup && !isCompiledOutput)
+        if (isRenaming && !fh.IsRootGroup && !fh.IsCompiledOutput)
         {
             var renameRow = new Grid
             {
@@ -877,7 +1097,7 @@ public static class CourseWorkspaceViewBuilder
             titlePanel.Children.Add(
                 new TextBlock
                 {
-                    Text = displayTitle,
+                    Text = fh.DisplayTitle,
                     FontSize = 13,
                     FontWeight = FontWeight.SemiBold,
                     Foreground = ThemeService.Brush(ThemeService.TextPrimary),
@@ -885,7 +1105,7 @@ public static class CourseWorkspaceViewBuilder
                     VerticalAlignment = VerticalAlignment.Center,
                 }
             );
-            if (isCompiledOutput)
+            if (fh.IsCompiledOutput)
             {
                 titlePanel.Children.Add(
                     UiBuilder.Pill(
@@ -901,9 +1121,9 @@ public static class CourseWorkspaceViewBuilder
         }
 
         var countLabel =
-            files.Count == totalUnfilteredCount
-                ? $"{totalUnfilteredCount} file{(totalUnfilteredCount == 1 ? "" : "s")}"
-                : $"{files.Count}/{totalUnfilteredCount}";
+            fh.FilteredCount == fh.TotalUnfilteredCount
+                ? $"{fh.TotalUnfilteredCount} file{(fh.TotalUnfilteredCount == 1 ? "" : "s")}"
+                : $"{fh.FilteredCount}/{fh.TotalUnfilteredCount}";
         var countPill = UiBuilder.Pill(
             countLabel,
             ThemeService.Brush(ThemeService.TextSecondary),
@@ -914,7 +1134,6 @@ public static class CourseWorkspaceViewBuilder
         Grid.SetColumn(countPill, 3);
         headerGrid.Children.Add(countPill);
 
-        // Folder action buttons
         var folderActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -922,7 +1141,7 @@ public static class CourseWorkspaceViewBuilder
             VerticalAlignment = VerticalAlignment.Center,
         };
 
-        if (!isCompiledOutput)
+        if (!fh.IsCompiledOutput)
         {
             folderActions.Children.Add(
                 UiBuilder.IconButton(
@@ -933,14 +1152,14 @@ public static class CourseWorkspaceViewBuilder
             );
         }
 
-        if (!isRootGroup && !isCompiledOutput)
+        if (!fh.IsRootGroup && !fh.IsCompiledOutput)
         {
             var upBtn = UiBuilder.IconButton(
                 MaterialIconKind.ArrowUp,
                 () => vm.ReorderMaterialFolder(course, folderPath, -1),
                 14
             );
-            upBtn.IsEnabled = editableIndex > 0;
+            upBtn.IsEnabled = fh.EditableIndex > 0;
             folderActions.Children.Add(upBtn);
 
             var downBtn = UiBuilder.IconButton(
@@ -948,7 +1167,7 @@ public static class CourseWorkspaceViewBuilder
                 () => vm.ReorderMaterialFolder(course, folderPath, +1),
                 14
             );
-            downBtn.IsEnabled = editableIndex >= 0 && editableIndex < editableCount - 1;
+            downBtn.IsEnabled = fh.EditableIndex >= 0 && fh.EditableIndex < fh.EditableCount - 1;
             folderActions.Children.Add(downBtn);
 
             folderActions.Children.Add(
@@ -964,7 +1183,7 @@ public static class CourseWorkspaceViewBuilder
                     MaterialIconKind.DeleteOutline,
                     () =>
                     {
-                        if (totalUnfilteredCount == 0)
+                        if (fh.TotalUnfilteredCount == 0)
                             vm.DeleteMaterialFolder(course, folderPath, moveFilesToRootFirst: false);
                         else
                             vm.BeginConfirmDeleteMaterial(folderPath);
@@ -976,93 +1195,6 @@ public static class CourseWorkspaceViewBuilder
 
         Grid.SetColumn(folderActions, 4);
         headerGrid.Children.Add(folderActions);
-        cardStack.Children.Add(headerGrid);
-
-        // Inline Folder Delete Confirmation Strip (for non-empty folders)
-        if (isConfirmingDelete && !isRootGroup && !isCompiledOutput)
-        {
-            var confirmWrap = new WrapPanel { Orientation = Orientation.Horizontal };
-            confirmWrap.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        $"Remove '{displayTitle}' ({totalUnfilteredCount} file{(totalUnfilteredCount == 1 ? "" : "s")})?",
-                    FontSize = 11.5,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 8, 4),
-                }
-            );
-
-            var moveAndDelBtn = UiBuilder.GhostButton(
-                "Move Files to Root & Remove",
-                MaterialIconKind.FolderMoveOutline,
-                () => vm.DeleteMaterialFolder(course, folderPath, moveFilesToRootFirst: true)
-            );
-            moveAndDelBtn.Margin = new Thickness(0, 0, 6, 4);
-            confirmWrap.Children.Add(moveAndDelBtn);
-
-            var delAllBtn = UiBuilder.GhostButton(
-                "Delete Folder & Files",
-                MaterialIconKind.DeleteOutline,
-                () => vm.DeleteMaterialFolder(course, folderPath, moveFilesToRootFirst: false)
-            );
-            delAllBtn.Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg);
-            delAllBtn.Margin = new Thickness(0, 0, 6, 4);
-            confirmWrap.Children.Add(delAllBtn);
-
-            var cancelDelBtn = UiBuilder.GhostButton("Cancel", null, vm.CancelConfirmDeleteMaterial);
-            cancelDelBtn.Margin = new Thickness(0, 0, 0, 4);
-            confirmWrap.Children.Add(cancelDelBtn);
-
-            cardStack.Children.Add(
-                new Border
-                {
-                    Background = ThemeService.Brush(ThemeService.BgSurface),
-                    BorderBrush = ThemeService.Brush(ThemeService.PriorityP1Fg),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
-                    Padding = new Thickness(10, 6),
-                    Child = confirmWrap,
-                }
-            );
-        }
-
-        // File Rows
-        if (!isCollapsed)
-        {
-            if (files.Count == 0)
-            {
-                cardStack.Children.Add(
-                    new TextBlock
-                    {
-                        Text = "Empty folder — click + above to import files or move files here.",
-                        FontSize = 11.5,
-                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
-                        Margin = new Thickness(26, 2, 0, 2),
-                    }
-                );
-            }
-            else
-            {
-                var filesPanel = new StackPanel { Spacing = 2, Margin = new Thickness(4, 2, 0, 0) };
-                foreach (var file in files)
-                {
-                    filesPanel.Children.Add(
-                        BuildMaterialFileRow(
-                            vm,
-                            course,
-                            coursePath,
-                            file,
-                            editableDirs,
-                            isCompiledOutput
-                        )
-                    );
-                }
-                cardStack.Children.Add(filesPanel);
-            }
-        }
 
         return new Border
         {
@@ -1070,8 +1202,9 @@ public static class CourseWorkspaceViewBuilder
             BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(10, 8),
-            Child = cardStack,
+            Padding = new Thickness(10, 7),
+            Margin = new Thickness(0, 6, 0, 2),
+            Child = headerGrid,
         };
     }
 
@@ -1327,7 +1460,8 @@ public static class CourseWorkspaceViewBuilder
         {
             Background = Brushes.Transparent,
             CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(6, 5),
+            Padding = new Thickness(8, 5),
+            Margin = new Thickness(12, 0, 0, 0),
             Child = fileRow,
         };
         rowBorder.PointerEntered += (_, _) =>

@@ -102,8 +102,11 @@ public sealed partial class MainWindowViewModel
 
     public void SetCourseSubTab(bool showMaterials)
     {
+        if (ShowCourseMaterialsSubTab == showMaterials)
+            return;
+
         ShowCourseMaterialsSubTab = showMaterials;
-        NotifyStateChanged();
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
     }
 
     public void RequestUiRefresh() => NotifyStateChanged(UiChangeKind.FullLayout);
