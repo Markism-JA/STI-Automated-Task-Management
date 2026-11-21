@@ -331,7 +331,11 @@ public static partial class QuizStudioViewBuilder
         if (
             studio.ActiveSubTab == QuizStudioSubTab.Organizer
             && !studio.IsDedicatedSnipperOpen
-            && (studio.EditingQuestionDraft is not null || studio.IsDeckAiFixModalOpen)
+            && (
+                studio.EditingQuestionDraft is not null
+                || studio.IsDeckAiFixModalOpen
+                || !string.IsNullOrWhiteSpace(studio.FlaggingQuestionId)
+            )
         )
         {
             var host = new Grid();
@@ -340,6 +344,8 @@ public static partial class QuizStudioViewBuilder
                 host.Children.Add(BuildFloatingQuestionEditorOverlay(vm, studio));
             else if (studio.IsDeckAiFixModalOpen)
                 host.Children.Add(BuildDeckComprehensiveAiFixOverlay(vm, studio));
+            else if (!string.IsNullOrWhiteSpace(studio.FlaggingQuestionId))
+                host.Children.Add(BuildSingleQuestionAiFixOverlay(vm, studio));
             return host;
         }
 

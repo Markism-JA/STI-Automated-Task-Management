@@ -69,29 +69,31 @@ public static partial class ScholarFlowDatabase
                 await delOld.ExecuteNonQueryAsync(ct);
             }
 
+            await using var itemCmd = conn.CreateCommand();
+            itemCmd.Transaction = tx;
+            itemCmd.CommandText = """
+                INSERT OR REPLACE INTO quiz_questions (
+                    id, quiz_id, order_index, kind, cognitive_level, difficulty, topic_tag,
+                    prompt, options_json, correct_answer, aliases_json, explanation,
+                    source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
+                    srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
+                    code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json, image_path
+                ) VALUES (
+                    $id, $quiz_id, $order_index, $kind, $cognitive_level, $difficulty, $topic_tag,
+                    $prompt, $options_json, $correct_answer, $aliases_json, $explanation,
+                    $source_pdf_path, $source_page, $section_title, $verbatim_quote, $highlight_rects_json,
+                    $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct,
+                    $code_snippet, $code_language, $math_latex, $diagram_text, $evidence_anchors_json, $image_path
+                );
+                """;
+
             for (int i = 0; i < quiz.Questions.Count; i++)
             {
                 var q = quiz.Questions[i];
                 q.QuizId = quiz.Id;
                 q.OrderIndex = i;
 
-                await using var itemCmd = conn.CreateCommand();
-                itemCmd.Transaction = tx;
-                itemCmd.CommandText = """
-                    INSERT OR REPLACE INTO quiz_questions (
-                        id, quiz_id, order_index, kind, cognitive_level, difficulty, topic_tag,
-                        prompt, options_json, correct_answer, aliases_json, explanation,
-                        source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
-                        srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
-                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json, image_path
-                    ) VALUES (
-                        $id, $quiz_id, $order_index, $kind, $cognitive_level, $difficulty, $topic_tag,
-                        $prompt, $options_json, $correct_answer, $aliases_json, $explanation,
-                        $source_pdf_path, $source_page, $section_title, $verbatim_quote, $highlight_rects_json,
-                        $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct,
-                        $code_snippet, $code_language, $math_latex, $diagram_text, $evidence_anchors_json, $image_path
-                    );
-                    """;
+                itemCmd.Parameters.Clear();
                 itemCmd.Parameters.AddWithValue("$id", q.Id);
                 itemCmd.Parameters.AddWithValue("$quiz_id", quiz.Id);
                 itemCmd.Parameters.AddWithValue("$order_index", i);

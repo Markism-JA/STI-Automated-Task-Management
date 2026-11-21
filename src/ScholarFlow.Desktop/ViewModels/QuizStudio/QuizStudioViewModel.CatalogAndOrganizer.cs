@@ -340,11 +340,103 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
-    public void SelectOrganizerQuestion(string questionId, bool notify = true)
+    public event Action<string?, bool, bool>? OrganizerSelectionChanged;
+
+    public List<QuizQuestionRecord> GetVisibleOrganizerQuestions()
+    {
+        var deck = OrganizerQuiz;
+        if (deck is null)
+            return [];
+
+        var qSearch = OrganizerSearchQuery.Trim();
+        return deck
+            .Questions.Where(q =>
+                (!OrganizerKindFilter.HasValue || q.Kind == OrganizerKindFilter.Value)
+                && (
+                    string.IsNullOrWhiteSpace(OrganizerTopicFilter)
+                    || string.Equals(
+                        q.TopicTag,
+                        OrganizerTopicFilter,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                && OrganizerHealthFilter switch
+                {
+                    OrganizerHealthFilter.MissingEvidence =>
+                        q.HighlightRects.Count == 0 || string.IsNullOrWhiteSpace(q.VerbatimQuote),
+                    OrganizerHealthFilter.HasRichMedia =>
+                        !string.IsNullOrWhiteSpace(q.CodeSnippet)
+                        || !string.IsNullOrWhiteSpace(q.MathLatex)
+                        || !string.IsNullOrWhiteSpace(q.Diagram),
+                    OrganizerHealthFilter.FlaggedForAi =>
+                        DeckAiFixSelectedIds.Contains(q.Id)
+                        || string.Equals(
+                            FlaggingQuestionId,
+                            q.Id,
+                            StringComparison.OrdinalIgnoreCase
+                        ),
+                    _ => true,
+                }
+                && (
+                    string.IsNullOrEmpty(qSearch)
+                    || q.Prompt.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
+                    || q.CorrectAnswer.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
+                    || q.TopicTag.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
+                    || q.Options.Any(o => o.Contains(qSearch, StringComparison.OrdinalIgnoreCase))
+                )
+            )
+            .ToList();
+    }
+
+    public void SelectOrganizerQuestion(
+        string questionId,
+        bool notify = true,
+        bool scrollCardIntoView = false,
+        bool scrollTocIntoView = false
+    )
     {
         SelectedOrganizerQuestionId = questionId;
+        OrganizerSelectionChanged?.Invoke(questionId, scrollCardIntoView, scrollTocIntoView);
         if (notify)
             _mainVm.RequestUiRefresh();
+    }
+
+    public void MoveOrganizerSelection(int delta)
+    {
+        var visible = GetVisibleOrganizerQuestions();
+        if (visible.Count == 0)
+            return;
+
+        int currentIdx = visible.FindIndex(q =>
+            string.Equals(q.Id, SelectedOrganizerQuestionId, StringComparison.OrdinalIgnoreCase)
+        );
+        int nextIdx =
+            currentIdx < 0
+                ? (delta >= 0 ? 0 : visible.Count - 1)
+                : Math.Clamp(currentIdx + delta, 0, visible.Count - 1);
+
+        var target = visible[nextIdx];
+        SelectOrganizerQuestion(
+            target.Id,
+            notify: false,
+            scrollCardIntoView: true,
+            scrollTocIntoView: true
+        );
+    }
+
+    public void JumpOrganizerSelection(bool toEnd)
+    {
+        var visible = GetVisibleOrganizerQuestions();
+        if (visible.Count == 0)
+            return;
+
+        var target = toEnd ? visible[^1] : visible[0];
+        SelectOrganizerQuestion(
+            target.Id,
+            notify: false,
+            scrollCardIntoView: true,
+            scrollTocIntoView: true
+        );
     }
 
     public void SetOrganizerKindFilter(QuizQuestionKind? kind)
@@ -1205,6 +1297,18 @@ public sealed partial class QuizStudioViewModel
             FlagFixPromptPreview = string.Empty;
             FlagFixJsonInput = string.Empty;
         }
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void CloseQuestionAiFixModal()
+    {
+        if (string.IsNullOrWhiteSpace(FlaggingQuestionId))
+            return;
+
+        FlaggingQuestionId = null;
+        FlagProblemDescription = string.Empty;
+        FlagFixPromptPreview = string.Empty;
+        FlagFixJsonInput = string.Empty;
         _mainVm.RequestUiRefresh();
     }
 

@@ -225,6 +225,7 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public async Task OpenBasinAsync(string basinPath)
     {
         _watcher?.Dispose();
+        ResetWorkspaceStateForBasinSwitch();
 
         BasinRoot = Path.GetFullPath(basinPath);
         BasinConfig = await _basinService.InitializeOrOpenAsync(BasinRoot);
@@ -274,6 +275,50 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
             BasinConfig,
             startLoop: BasinConfig.BackgroundSyncEnabled
         );
+    }
+
+    private void ResetWorkspaceStateForBasinSwitch()
+    {
+        ActiveMode = WorkspaceTabMode.TaskList;
+        ActiveSmartView = SmartViewKind.Today;
+        ActiveCourse = null;
+        ShowCourseMaterialsSubTab = false;
+        ActiveTermFilter = null;
+        ActiveLabelFilter = null;
+        CompletedCourseFilter = null;
+        ActiveGrouping = TaskGroupingMode.Default;
+
+        Courses = [];
+        AllTasks = [];
+        VisibleTasks = [];
+        AllKnownLabels = [];
+        UnregisteredFiles = [];
+
+        SelectedTask = null;
+        SelectedTaskNoteContent = null;
+        PdfReturnTask = null;
+        PdfOpenedFromQuiz = false;
+        PdfReturnMode = WorkspaceTabMode.TaskList;
+
+        IsInspectorOpen = false;
+        IsAddCourseModalOpen = false;
+        IsPacketOrganizerModalOpen = false;
+        PacketOrganizerCourse = null;
+        ActivePacketPlan = null;
+        IsQuickAddModalOpen = false;
+        QuickAddText = string.Empty;
+        QuickAddChips = [];
+        IsSearchModalOpen = false;
+        SearchQuery = string.Empty;
+        SearchResults = [];
+        SelectedSearchResultIndex = 0;
+
+        Notifications.Clear();
+        UnreadNotificationsCount = 0;
+        IsNotificationDrawerOpen = false;
+
+        PdfReader.Reset();
+        QuizStudio.ResetForBasinSwitch();
     }
 
     public async Task ReloadBasinDataAsync()

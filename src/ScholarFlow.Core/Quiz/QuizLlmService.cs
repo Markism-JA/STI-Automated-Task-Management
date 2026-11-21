@@ -207,21 +207,8 @@ public sealed partial class QuizLlmService
         if (string.IsNullOrWhiteSpace(rawJson))
             throw new ArgumentException("JSON input cannot be empty.", nameof(rawJson));
 
-        var (pages, dto) = await Task.Run(() =>
-        {
-            var p = PdfQuizGrounder.ExtractGroundedPages(
-                request.SourcePdfPath,
-                request.Term,
-                request.SectionFilter,
-                request.StartPage,
-                request.EndPage,
-                request.SelectedRanges,
-                maxPages: 120);
-            var parsed = ParseQuizResponseJson(rawJson);
-            return (p, parsed);
-        }, ct);
-
-        return await BuildGroundAndPersistSessionAsync(request, dto, "Imported Web AI JSON", pages, ct);
+        var dto = await Task.Run(() => ParseQuizResponseJson(rawJson), ct);
+        return await BuildGroundAndPersistSessionAsync(request, dto, "Imported Web AI JSON", [], ct);
     }
 
     private static async Task<QuizSessionRecord> BuildGroundAndPersistSessionAsync(

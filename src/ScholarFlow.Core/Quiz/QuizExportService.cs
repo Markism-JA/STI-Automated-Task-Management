@@ -61,7 +61,13 @@ public static class QuizExportService
                 }
 
                 if (!string.IsNullOrWhiteSpace(imported.SourcePdfPath) && File.Exists(imported.SourcePdfPath))
-                    PdfQuizGrounder.GroundQuestionsToPdf(imported.SourcePdfPath, imported.Questions);
+                {
+                    var ungrounded = imported
+                        .Questions.Where(q => q.HighlightRects.Count == 0)
+                        .ToList();
+                    if (ungrounded.Count > 0)
+                        PdfQuizGrounder.GroundQuestionsToPdf(imported.SourcePdfPath, ungrounded);
+                }
 
                 return imported;
             }

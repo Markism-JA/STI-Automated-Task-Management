@@ -11,6 +11,8 @@ namespace ScholarFlow.Desktop.Views.Shell;
 /// </summary>
 public static class ShortcutDispatcher
 {
+    private static DateTime _lastOrganizerGPressUtc = DateTime.MinValue;
+
     public static async Task HandleKeyDownAsync(
         Window window,
         MainWindowViewModel vm,
@@ -47,6 +49,12 @@ public static class ShortcutDispatcher
                 {
                     e.Handled = true;
                     vm.QuizStudio.CloseDeckAiFixModal();
+                    return;
+                }
+                if (!string.IsNullOrWhiteSpace(vm.QuizStudio.FlaggingQuestionId))
+                {
+                    e.Handled = true;
+                    vm.QuizStudio.CloseQuestionAiFixModal();
                     return;
                 }
             }
@@ -198,6 +206,15 @@ public static class ShortcutDispatcher
             }
         }
 
+        bool isOrganizerActive =
+            vm.ActiveMode == WorkspaceTabMode.QuizStudio
+            && vm.QuizStudio.ActiveSubTab == QuizStudioSubTab.Organizer
+            && vm.QuizStudio.ActiveSession is null
+            && !vm.QuizStudio.IsDedicatedSnipperOpen
+            && vm.QuizStudio.EditingQuestionDraft is null
+            && !vm.QuizStudio.IsDeckAiFixModalOpen
+            && string.IsNullOrWhiteSpace(vm.QuizStudio.FlaggingQuestionId);
+
         switch (e.Key)
         {
             case Key.J or Key.Down:
@@ -206,6 +223,8 @@ public static class ShortcutDispatcher
                     vm.MoveSearchSelection(+1);
                 else if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
                     vm.PdfReader.NextPage();
+                else if (isOrganizerActive)
+                    vm.QuizStudio.MoveOrganizerSelection(+1);
                 else
                     vm.MoveSelection(+1);
                 break;
@@ -217,6 +236,8 @@ public static class ShortcutDispatcher
                     vm.MoveSearchSelection(-1);
                 else if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
                     vm.PdfReader.PreviousPage();
+                else if (isOrganizerActive)
+                    vm.QuizStudio.MoveOrganizerSelection(-1);
                 else
                     vm.MoveSelection(-1);
                 break;
@@ -253,14 +274,49 @@ public static class ShortcutDispatcher
                 vm.PdfReader.JumpToPage(vm.PdfReader.PageCount);
                 break;
 
+            case Key.Home when isOrganizerActive:
+                e.Handled = true;
+                vm.QuizStudio.JumpOrganizerSelection(toEnd: false);
+                break;
+
+            case Key.End when isOrganizerActive:
+                e.Handled = true;
+                vm.QuizStudio.JumpOrganizerSelection(toEnd: true);
+                break;
+
             case Key.G:
                 e.Handled = true;
                 if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                {
                     vm.PdfReader.JumpToPage(
                         e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? vm.PdfReader.PageCount : 1
                     );
+                }
+                else if (isOrganizerActive)
+                {
+                    if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                    {
+                        _lastOrganizerGPressUtc = DateTime.MinValue;
+                        vm.QuizStudio.JumpOrganizerSelection(toEnd: true);
+                    }
+                    else
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - _lastOrganizerGPressUtc).TotalMilliseconds <= 600)
+                        {
+                            _lastOrganizerGPressUtc = DateTime.MinValue;
+                            vm.QuizStudio.JumpOrganizerSelection(toEnd: false);
+                        }
+                        else
+                        {
+                            _lastOrganizerGPressUtc = now;
+                        }
+                    }
+                }
                 else
+                {
                     vm.JumpSelection(toEnd: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
+                }
                 break;
 
             case Key.D

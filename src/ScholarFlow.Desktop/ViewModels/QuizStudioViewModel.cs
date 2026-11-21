@@ -378,4 +378,106 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
             RebuildAvailablePdfsForCourse(SelectedPdfPath);
         _mainVm.RequestUiRefresh();
     }
+
+    /// <summary>
+    /// Clears all basin-scoped Quiz Studio, Builder, Catalog, Runner, Snipper, and Deck Organizer
+    /// state so switching basins never leaks decks, PDFs, or active sessions across workspaces.
+    /// </summary>
+    public void ResetForBasinSwitch()
+    {
+        _promptBuildCts?.Cancel();
+        _promptBuildCts?.Dispose();
+        _promptBuildCts = null;
+
+        _courseStates.Clear();
+        _outlineCache.Clear();
+        foreach (var bmp in _previewBitmapCache.Values)
+            bmp.Dispose();
+        _previewBitmapCache.Clear();
+        foreach (var bmp in _snipBitmapCache.Values)
+            bmp.Dispose();
+        _snipBitmapCache.Clear();
+        _pendingPreviewRenders.Clear();
+
+        _cachedBytesPath = null;
+        _cachedPdfBytes = null;
+
+        ActiveSubTab = QuizStudioSubTab.Catalog;
+        SelectedCourse = null;
+        AvailablePdfs = [];
+        ShowIndividualHandouts = false;
+        SelectedPdfPath = null;
+        PdfTotalPages = 0;
+        OutlineSections = [];
+        OutlineSectionRoots = [];
+        SelectedSectionKeys.Clear();
+        MatchedScopePages = [];
+        PreviewScopeIndex = 0;
+
+        SelectedTerm = null;
+        StartPage = null;
+        EndPage = null;
+        AppendTargetQuizId = null;
+        AppendTargetQuizTitle = null;
+
+        CatalogShowAllCourses = false;
+        CatalogTermFilter = null;
+        SelectedQuizIdsForMerge.Clear();
+
+        // Deck Organizer & Snipper
+        OrganizerQuiz = null;
+        OrganizerKindFilter = null;
+        OrganizerTopicFilter = null;
+        OrganizerHealthFilter = OrganizerHealthFilter.All;
+        OrganizerSearchQuery = string.Empty;
+        SelectedOrganizerQuestionId = null;
+        IsOrganizerDirty = false;
+        EditingQuestionId = null;
+        EditingQuestionDraft = null;
+        IsEditingAdvancedOpen = false;
+        EditingPageTextPreview = null;
+        EditingGroundStatus = null;
+        IsDedicatedSnipperOpen = false;
+        IsLoadingSnipPage = false;
+        EditingSnipPageBitmap = null;
+        EditingSnipPageNumber = 0;
+        EditingSnipTotalPages = 0;
+        SnipExtractedFigures = [];
+        ZoomedImagePath = null;
+        SnipOutlineRoots = [];
+        _snipOutlinePdfPath = null;
+
+        // AI Fix / Import Modals
+        FlaggingQuestionId = null;
+        IsDeckAiFixModalOpen = false;
+        DeckAiFixSelectedIds.Clear();
+        DeckAiFixInstructions = string.Empty;
+        DeckAiFixPromptPreview = string.Empty;
+        DeckAiFixJsonInput = string.Empty;
+        FlagProblemDescription = string.Empty;
+        FlagFixPromptPreview = string.Empty;
+        FlagFixJsonInput = string.Empty;
+        IsManualJsonModalOpen = false;
+        ManualJsonInput = string.Empty;
+        GeneratedPromptPreview = string.Empty;
+
+        // Catalog & Active Runner
+        SavedQuizzes = [];
+        AllDueReviewQuestions = [];
+        ActiveSession = null;
+        CurrentQuestionIndex = 0;
+        CurrentAnswerDraft = string.Empty;
+        IsAnswerRevealed = false;
+        IsCurrentAnswerCorrect = false;
+        IsShowingResultsSummary = false;
+        SessionResults.Clear();
+        OrderingDrafts.Clear();
+
+        IsGenerating = false;
+        IsInspectingPdf = false;
+        IsBuildingPrompt = false;
+        IsLoadingPreviewPage = false;
+        StatusMessage = "Select a course & PDF to generate an evidence-grounded assessment.";
+        IsStatusError = false;
+    }
 }

@@ -118,31 +118,34 @@ public static partial class QuizStudioViewBuilder
 
         // Term + Page Range Row
         var termRangeWrap = new WrapPanel { Orientation = Orientation.Horizontal };
-        var allTermBtn = UiBuilder.GhostButton(
-            "All Terms",
-            null,
-            () => studio.SelectTermScope(null),
-            isActive: string.IsNullOrEmpty(studio.SelectedTerm)
-        );
-        allTermBtn.Margin = new Thickness(0, 0, 4, 4);
-        termRangeWrap.Children.Add(allTermBtn);
-
-        foreach (var termName in AcademicTerms)
+        if (vm.ActiveTerms.Count > 0)
         {
-            var capturedTerm = termName;
-            bool isTermActive = string.Equals(
-                studio.SelectedTerm,
-                capturedTerm,
-                StringComparison.OrdinalIgnoreCase
-            );
-            var tBtn = UiBuilder.GhostButton(
-                capturedTerm,
+            var allTermBtn = UiBuilder.GhostButton(
+                "All Terms",
                 null,
-                () => studio.SelectTermScope(capturedTerm),
-                isActive: isTermActive
+                () => studio.SelectTermScope(null),
+                isActive: string.IsNullOrEmpty(studio.SelectedTerm)
             );
-            tBtn.Margin = new Thickness(0, 0, 4, 4);
-            termRangeWrap.Children.Add(tBtn);
+            allTermBtn.Margin = new Thickness(0, 0, 4, 4);
+            termRangeWrap.Children.Add(allTermBtn);
+
+            foreach (var termName in vm.ActiveTerms)
+            {
+                var capturedTerm = termName;
+                bool isTermActive = string.Equals(
+                    studio.SelectedTerm,
+                    capturedTerm,
+                    StringComparison.OrdinalIgnoreCase
+                );
+                var tBtn = UiBuilder.GhostButton(
+                    capturedTerm,
+                    null,
+                    () => studio.SelectTermScope(capturedTerm),
+                    isActive: isTermActive
+                );
+                tBtn.Margin = new Thickness(0, 0, 4, 4);
+                termRangeWrap.Children.Add(tBtn);
+            }
         }
 
         var startPageBox = new TextBox

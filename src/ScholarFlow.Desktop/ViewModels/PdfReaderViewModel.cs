@@ -442,6 +442,28 @@ public sealed class PdfReaderViewModel : IDisposable
         _pageCache.Clear();
     }
 
+    public void Reset()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+
+        ClearCache();
+        ClearEvidenceHighlight(notify: false);
+        _pendingPageRenders.Clear();
+        _pendingJumpPage = null;
+        _pdfBytes = null;
+
+        CurrentFilePath = null;
+        ErrorMessage = null;
+        PageCount = 0;
+        CurrentPage = 1;
+        BookmarkRoots = [];
+        IsLoadingDocument = false;
+        IsRenderingPage = false;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     public void Dispose()
     {
         _loadCts?.Cancel();

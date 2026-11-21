@@ -629,6 +629,7 @@ public static class PdfQuizGrounder
                 return;
 
             var pageSections = BuildPageSectionMap(doc);
+            var pageWordCache = new Dictionary<int, CachedPageWordIndex>();
 
             foreach (var q in questions)
             {
@@ -642,8 +643,9 @@ public static class PdfQuizGrounder
 
                 foreach (var quote in candidateQuotes)
                 {
-                    var rects = ComputeHighlightRects(
+                    var rects = ComputeHighlightRectsCached(
                         doc,
+                        pageWordCache,
                         q.SourcePage,
                         quote,
                         out int resolvedPage
@@ -680,8 +682,9 @@ public static class PdfQuizGrounder
                 // Fallback to whole VerbatimQuote if splitting yielded nothing
                 if (primaryRects.Count == 0 && !string.IsNullOrWhiteSpace(q.VerbatimQuote))
                 {
-                    primaryRects = ComputeHighlightRects(
+                    primaryRects = ComputeHighlightRectsCached(
                         doc,
+                        pageWordCache,
                         q.SourcePage,
                         q.VerbatimQuote,
                         out int fallbackPage
@@ -821,8 +824,64 @@ public static class PdfQuizGrounder
         return saved;
     }
 
+    private sealed record CachedPageWordIndex(
+        double Width,
+        double Height,
+        List<(Word Word, string Token)> TokenWords,
+        HashSet<string> UniqueTokens
+    );
+
+    private static CachedPageWordIndex GetOrBuildPageWordIndex(
+        PdfDocument doc,
+        Dictionary<int, CachedPageWordIndex> cache,
+        int pageNum
+    )
+    {
+        if (cache.TryGetValue(pageNum, out var existing))
+            return existing;
+
+        var page = doc.GetPage(pageNum);
+        var words = GetVisibleWordsInReadingOrder(page);
+        var tokenWords = new List<(Word Word, string Token)>(words.Count);
+        var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in words)
+        {
+            var tok = NormalizeToken(w.Text);
+            if (tok.Length > 0)
+            {
+                tokenWords.Add((w, tok));
+                if (tok.Length >= 2)
+                    unique.Add(tok);
+            }
+        }
+
+        var built = new CachedPageWordIndex(
+            Math.Max(1.0, page.Width),
+            Math.Max(1.0, page.Height),
+            tokenWords,
+            unique
+        );
+        cache[pageNum] = built;
+        return built;
+    }
+
     public static List<NormalizedHighlightRect> ComputeHighlightRects(
         PdfDocument doc,
+        int hintPage,
+        string? verbatimQuote,
+        out int resolvedPage
+    ) =>
+        ComputeHighlightRectsCached(
+            doc,
+            new Dictionary<int, CachedPageWordIndex>(),
+            hintPage,
+            verbatimQuote,
+            out resolvedPage
+        );
+
+    private static List<NormalizedHighlightRect> ComputeHighlightRectsCached(
+        PdfDocument doc,
+        Dictionary<int, CachedPageWordIndex> pageWordCache,
         int hintPage,
         string? verbatimQuote,
         out int resolvedPage
@@ -837,19 +896,21 @@ public static class PdfQuizGrounder
         if (quoteTokens.Count == 0)
             return [];
 
-        // Search hintPage first, then nearby pages (+/- 1..3), then full document if needed
-        var candidatePages = new List<int> { resolvedPage };
-        for (int delta = 1; delta <= 3; delta++)
+        var quoteSet = new HashSet<string>(
+            quoteTokens.Where(t => t.Length >= 2),
+            StringComparer.OrdinalIgnoreCase
+        );
+        if (quoteSet.Count == 0)
+            return [];
+
+        // 1. Search hintPage first, then nearby pages (+/- 1..5)
+        var localPages = new List<int>(11) { resolvedPage };
+        for (int delta = 1; delta <= 5; delta++)
         {
             if (resolvedPage - delta >= 1)
-                candidatePages.Add(resolvedPage - delta);
+                localPages.Add(resolvedPage - delta);
             if (resolvedPage + delta <= totalPages)
-                candidatePages.Add(resolvedPage + delta);
-        }
-        for (int p = 1; p <= totalPages; p++)
-        {
-            if (!candidatePages.Contains(p))
-                candidatePages.Add(p);
+                localPages.Add(resolvedPage + delta);
         }
 
         double bestScore = 0;
@@ -858,24 +919,71 @@ public static class PdfQuizGrounder
         double bestPageWidth = 1;
         double bestPageHeight = 1;
 
-        foreach (var pageNum in candidatePages)
+        foreach (var pageNum in localPages)
         {
-            var page = doc.GetPage(pageNum);
-            var words = GetVisibleWordsInReadingOrder(page);
-            if (words.Count == 0)
+            var pageIdx = GetOrBuildPageWordIndex(doc, pageWordCache, pageNum);
+            if (pageIdx.TokenWords.Count == 0)
                 continue;
 
-            var (score, span) = FindBestMatchingWordSpan(words, quoteTokens);
+            var (score, span) = FindBestMatchingWordSpanCached(
+                pageIdx.TokenWords,
+                quoteTokens,
+                quoteSet
+            );
             if (score > bestScore && span.Count > 0)
             {
                 bestScore = score;
                 bestPage = pageNum;
                 bestSpan = span;
-                bestPageWidth = Math.Max(1.0, page.Width);
-                bestPageHeight = Math.Max(1.0, page.Height);
+                bestPageWidth = pageIdx.Width;
+                bestPageHeight = pageIdx.Height;
 
-                if (bestScore >= 0.92)
+                if (bestScore >= 0.85 || (pageNum == resolvedPage && bestScore >= 0.52))
                     break;
+            }
+        }
+
+        // 2. Only scan remaining pages if the local +/- 5 page window did not find a strong match (< 0.52)
+        if (bestScore < 0.52 && totalPages > localPages.Count)
+        {
+            var localSet = new HashSet<int>(localPages);
+            int minRequiredOverlap = Math.Max(1, (int)Math.Ceiling(quoteSet.Count * 0.45));
+
+            for (int pageNum = 1; pageNum <= totalPages; pageNum++)
+            {
+                if (localSet.Contains(pageNum))
+                    continue;
+
+                var pageIdx = GetOrBuildPageWordIndex(doc, pageWordCache, pageNum);
+                if (pageIdx.TokenWords.Count == 0)
+                    continue;
+
+                // Fast O(Q) token-set prefilter skips non-matching pages without running O(W * Q) sliding window
+                int overlap = 0;
+                foreach (var qt in quoteSet)
+                {
+                    if (pageIdx.UniqueTokens.Contains(qt))
+                        overlap++;
+                }
+                if (overlap < minRequiredOverlap)
+                    continue;
+
+                var (score, span) = FindBestMatchingWordSpanCached(
+                    pageIdx.TokenWords,
+                    quoteTokens,
+                    quoteSet
+                );
+                if (score > bestScore && span.Count > 0)
+                {
+                    bestScore = score;
+                    bestPage = pageNum;
+                    bestSpan = span;
+                    bestPageWidth = pageIdx.Width;
+                    bestPageHeight = pageIdx.Height;
+
+                    if (bestScore >= 0.88)
+                        break;
+                }
             }
         }
 
@@ -886,17 +994,13 @@ public static class PdfQuizGrounder
         return BuildLineRectangles(bestSpan, bestPageWidth, bestPageHeight);
     }
 
-    private static (double Score, List<Word> Span) FindBestMatchingWordSpan(
-        IReadOnlyList<Word> pageWords,
-        List<string> quoteTokens
+    private static (double Score, List<Word> Span) FindBestMatchingWordSpanCached(
+        List<(Word Word, string Token)> tokenWords,
+        List<string> quoteTokens,
+        HashSet<string> quoteSet
     )
     {
-        var tokenWords = pageWords
-            .Select(w => (Word: w, Token: NormalizeToken(w.Text)))
-            .Where(x => x.Token.Length > 0)
-            .ToList();
-
-        if (tokenWords.Count == 0 || quoteTokens.Count == 0)
+        if (tokenWords.Count == 0 || quoteTokens.Count == 0 || quoteSet.Count == 0)
             return (0, []);
 
         int qLen = quoteTokens.Count;
@@ -905,13 +1009,6 @@ public static class PdfQuizGrounder
         double bestScore = 0;
         int bestStart = -1;
         int bestCount = 0;
-
-        var quoteSet = new HashSet<string>(
-            quoteTokens.Where(t => t.Length >= 2),
-            StringComparer.OrdinalIgnoreCase
-        );
-        if (quoteSet.Count == 0)
-            return (0, []);
 
         var consumed = new bool[qLen];
 
