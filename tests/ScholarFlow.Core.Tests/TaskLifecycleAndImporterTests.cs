@@ -131,6 +131,56 @@ public sealed class TaskLifecycleAndImporterTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task FileImportHelper_SupportsCopyMoveSymlinkAndSelfDuplicateGuard()
+    {
+        var srcDir = Path.Combine(_tempRoot, "src");
+        var dstDir = Path.Combine(_tempRoot, "dst");
+        Directory.CreateDirectory(srcDir);
+        Directory.CreateDirectory(dstDir);
+
+        var copySrc = Path.Combine(srcDir, "chapter1.pdf");
+        var moveSrc = Path.Combine(srcDir, "chapter2.pdf");
+        var linkSrc = Path.Combine(srcDir, "textbook.pdf");
+        await File.WriteAllTextAsync(copySrc, "ch1");
+        await File.WriteAllTextAsync(moveSrc, "ch2");
+        await File.WriteAllTextAsync(linkSrc, "big-book");
+
+        // 1. Copy
+        var copied = FileImportHelper.ImportItem(copySrc, dstDir, FileImportMode.Copy, out _);
+        Assert.NotNull(copied);
+        Assert.True(File.Exists(copySrc));
+        Assert.True(File.Exists(copied!));
+
+        // 2. Self-duplicate guard (importing file already in dstDir returns null)
+        var skipped = FileImportHelper.ImportItem(copied!, dstDir, FileImportMode.Copy, out _);
+        Assert.Null(skipped);
+
+        // 3. Move
+        var moved = FileImportHelper.ImportItem(moveSrc, dstDir, FileImportMode.Move, out _);
+        Assert.NotNull(moved);
+        Assert.False(File.Exists(moveSrc));
+        Assert.True(File.Exists(moved!));
+
+        // 4. Symlink (on Linux/macOS creates a real symlink; on restricted Windows falls back cleanly to copy)
+        var linked = FileImportHelper.ImportItem(
+            linkSrc,
+            dstDir,
+            FileImportMode.Symlink,
+            out bool fellBack
+        );
+        Assert.NotNull(linked);
+        Assert.True(File.Exists(linked!));
+        if (!fellBack)
+        {
+            Assert.True(FileImportHelper.IsSymbolicLink(linked!));
+            Assert.False(FileImportHelper.IsBrokenSymbolicLink(linked!));
+
+            File.Delete(linkSrc);
+            Assert.True(FileImportHelper.IsBrokenSymbolicLink(linked!));
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))

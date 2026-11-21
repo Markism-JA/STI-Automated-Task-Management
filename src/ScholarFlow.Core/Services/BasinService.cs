@@ -499,6 +499,7 @@ public sealed partial class BasinService
         string? customTitle = null,
         string? customAlias = null,
         string? courseCode = null,
+        FileImportMode importMode = FileImportMode.Copy,
         CancellationToken ct = default
     )
     {
@@ -570,7 +571,25 @@ public sealed partial class BasinService
             }
 
             var destDir = Path.Combine(basinRoot, folderName);
-            CopyDirectoryRecursive(fullSource, destDir);
+            switch (importMode)
+            {
+                case FileImportMode.Move:
+                    FileImportHelper.MoveDirectoryCrossVolumeSafe(fullSource, destDir);
+                    break;
+                case FileImportMode.Symlink:
+                    try
+                    {
+                        Directory.CreateSymbolicLink(destDir, fullSource);
+                    }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    {
+                        FileImportHelper.CopyDirectoryRecursive(fullSource, destDir);
+                    }
+                    break;
+                default:
+                    FileImportHelper.CopyDirectoryRecursive(fullSource, destDir);
+                    break;
+            }
         }
 
         var usedAliases = existing
@@ -641,32 +660,14 @@ public sealed partial class BasinService
 
             if (
                 targetDir.StartsWith(fullBasin, StringComparison.OrdinalIgnoreCase)
-                && Directory.Exists(targetDir)
+                && (Directory.Exists(targetDir) || FileImportHelper.IsSymbolicLink(targetDir))
             )
             {
-                Directory.Delete(targetDir, recursive: true);
+                if (FileImportHelper.IsSymbolicLink(targetDir))
+                    Directory.Delete(targetDir, recursive: false);
+                else
+                    Directory.Delete(targetDir, recursive: true);
             }
-        }
-    }
-
-    private static void CopyDirectoryRecursive(string sourceDir, string destDir)
-    {
-        Directory.CreateDirectory(destDir);
-
-        foreach (var file in Directory.GetFiles(sourceDir))
-        {
-            var name = Path.GetFileName(file);
-            if (name.StartsWith('.'))
-                continue;
-            File.Copy(file, Path.Combine(destDir, name), overwrite: true);
-        }
-
-        foreach (var subDir in Directory.GetDirectories(sourceDir))
-        {
-            var name = Path.GetFileName(subDir);
-            if (name.StartsWith('.'))
-                continue;
-            CopyDirectoryRecursive(subDir, Path.Combine(destDir, name));
         }
     }
 

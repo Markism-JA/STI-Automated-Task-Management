@@ -124,42 +124,6 @@ public static class CourseWorkspaceViewBuilder
             actionWrap.Children.Add(syncCourseBtn);
         }
 
-        var importPdfBtn = UiBuilder.GhostButton(
-            "Import PDFs",
-            MaterialIconKind.FilePlusOutline,
-            async () =>
-            {
-                var top = TopLevel.GetTopLevel(actionWrap);
-                if (top?.StorageProvider is null)
-                    return;
-                var files = await top.StorageProvider.OpenFilePickerAsync(
-                    new Avalonia.Platform.Storage.FilePickerOpenOptions
-                    {
-                        Title = $"Import Study PDFs into {course.Title}",
-                        AllowMultiple = true,
-                        FileTypeFilter =
-                        [
-                            new Avalonia.Platform.Storage.FilePickerFileType("PDF Documents")
-                            {
-                                Patterns = ["*.pdf"],
-                            },
-                        ],
-                    }
-                );
-                var paths = files
-                    .Select(f =>
-                        Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f)
-                    )
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .Cast<string>()
-                    .ToList();
-                if (paths.Count > 0)
-                    await vm.ImportPdfsToCourseAsync(course, paths);
-            }
-        );
-        importPdfBtn.Margin = new Thickness(0, 0, 6, 6);
-        actionWrap.Children.Add(importPdfBtn);
-
         if (hasMasterPdf)
         {
             var viewPdfBtn = UiBuilder.GhostButton(
@@ -311,8 +275,9 @@ public static class CourseWorkspaceViewBuilder
         return root;
     }
 
-    private static readonly Dictionary<string, Vector> SavedMaterialsScrollOffsets =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, Vector> SavedMaterialsScrollOffsets = new(
+        StringComparer.OrdinalIgnoreCase
+    );
 
     private abstract record MaterialTreeRow;
 
@@ -495,6 +460,27 @@ public static class CourseWorkspaceViewBuilder
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
         };
+
+        // Compact Import Mode selector (Copy | Move | Link) used by Import Files, folder '+', and Drag-and-Drop
+        foreach (
+            var (mode, label, icon) in new[]
+            {
+                (FileImportMode.Copy, "Copy", MaterialIconKind.ContentCopy),
+                (FileImportMode.Move, "Move", MaterialIconKind.FileMoveOutline),
+                (FileImportMode.Symlink, "Link", MaterialIconKind.LinkVariant),
+            }
+        )
+        {
+            var capturedMode = mode;
+            var modeBtn = UiBuilder.GhostButton(
+                label,
+                icon,
+                () => vm.SetMaterialsImportMode(capturedMode),
+                isActive: vm.MaterialsImportMode == capturedMode
+            );
+            modeBtn.Margin = new Thickness(0, 0, 3, 4);
+            rightControls.Children.Add(modeBtn);
+        }
 
         var newFolderBtn = UiBuilder.GhostButton(
             "New Folder",
@@ -782,34 +768,35 @@ public static class CourseWorkspaceViewBuilder
             Focusable = false,
             Padding = new Thickness(0, 2, 0, 20),
             ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel()),
-            ItemTemplate = new FuncDataTemplate<MaterialTreeRow>((row, _) =>
-                row switch
-                {
-                    FolderHeaderTreeRow fh => BuildFolderHeaderCard(
-                        outerGrid,
-                        vm,
-                        course,
-                        fh
-                    ),
-                    FolderDeleteConfirmTreeRow dc => BuildFolderDeleteConfirmRow(vm, course, dc),
-                    EmptyFolderTreeRow => new TextBlock
+            ItemTemplate = new FuncDataTemplate<MaterialTreeRow>(
+                (row, _) =>
+                    row switch
                     {
-                        Text = "Empty folder — click + above to import files or move files here.",
-                        FontSize = 11.5,
-                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
-                        Margin = new Thickness(28, 2, 0, 6),
-                    },
-                    FileTreeRow fr => BuildMaterialFileRow(
-                        vm,
-                        course,
-                        coursePath,
-                        fr.FilePath,
-                        editableDirs,
-                        fr.IsCompiledOutput
-                    ),
-                    EmptyStateTreeRow es => BuildMaterialsEmptyState(es.IsFiltered),
-                    _ => new Border(),
-                }
+                        FolderHeaderTreeRow fh => BuildFolderHeaderCard(outerGrid, vm, course, fh),
+                        FolderDeleteConfirmTreeRow dc => BuildFolderDeleteConfirmRow(
+                            vm,
+                            course,
+                            dc
+                        ),
+                        EmptyFolderTreeRow => new TextBlock
+                        {
+                            Text =
+                                "Empty folder — click + above to import files or move files here.",
+                            FontSize = 11.5,
+                            Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                            Margin = new Thickness(28, 2, 0, 6),
+                        },
+                        FileTreeRow fr => BuildMaterialFileRow(
+                            vm,
+                            course,
+                            coursePath,
+                            fr.FilePath,
+                            editableDirs,
+                            fr.IsCompiledOutput
+                        ),
+                        EmptyStateTreeRow es => BuildMaterialsEmptyState(es.IsFiltered),
+                        _ => new Border(),
+                    }
             ),
         };
 
@@ -855,10 +842,7 @@ public static class CourseWorkspaceViewBuilder
                     .Name("PART_ContentPresenter")
             )
             {
-                Setters =
-                {
-                    new Setter(ContentPresenter.BackgroundProperty, Brushes.Transparent),
-                },
+                Setters = { new Setter(ContentPresenter.BackgroundProperty, Brushes.Transparent) },
             }
         );
 
@@ -1015,13 +999,10 @@ public static class CourseWorkspaceViewBuilder
         headerGrid.Children.Add(collapseBtn);
 
         var folderIcon = UiBuilder.Icon(
-            fh.IsCompiledOutput
-                ? MaterialIconKind.BookCheckOutline
-                : fh.IsRootGroup
-                    ? MaterialIconKind.FolderHomeOutline
-                    : isCollapsed
-                        ? MaterialIconKind.FolderOutline
-                        : MaterialIconKind.FolderOpenOutline,
+            fh.IsCompiledOutput ? MaterialIconKind.BookCheckOutline
+                : fh.IsRootGroup ? MaterialIconKind.FolderHomeOutline
+                : isCollapsed ? MaterialIconKind.FolderOutline
+                : MaterialIconKind.FolderOpenOutline,
             16,
             fh.IsCompiledOutput
                 ? ThemeService.Brush(ThemeService.SuccessFg)
@@ -1146,7 +1127,8 @@ public static class CourseWorkspaceViewBuilder
             folderActions.Children.Add(
                 UiBuilder.IconButton(
                     MaterialIconKind.FilePlusOutline,
-                    async () => await PickAndImportFilesAsync(anchorControl, vm, course, folderPath),
+                    async () =>
+                        await PickAndImportFilesAsync(anchorControl, vm, course, folderPath),
                     14
                 )
             );
@@ -1184,7 +1166,11 @@ public static class CourseWorkspaceViewBuilder
                     () =>
                     {
                         if (fh.TotalUnfilteredCount == 0)
-                            vm.DeleteMaterialFolder(course, folderPath, moveFilesToRootFirst: false);
+                            vm.DeleteMaterialFolder(
+                                course,
+                                folderPath,
+                                moveFilesToRootFirst: false
+                            );
                         else
                             vm.BeginConfirmDeleteMaterial(folderPath);
                     },
@@ -1247,6 +1233,9 @@ public static class CourseWorkspaceViewBuilder
         fileIcon.VerticalAlignment = VerticalAlignment.Center;
         fileRow.Children.Add(fileIcon);
 
+        bool isSymlink = FileImportHelper.IsSymbolicLink(file);
+        bool isBrokenLink = isSymlink && FileImportHelper.IsBrokenSymbolicLink(file);
+
         if (isRenaming)
         {
             var renameRow = new Grid
@@ -1254,11 +1243,7 @@ public static class CourseWorkspaceViewBuilder
                 ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto"),
                 ColumnSpacing = 4,
             };
-            var renameBox = new TextBox
-            {
-                Text = fileName,
-                FontSize = 12.5,
-            };
+            var renameBox = new TextBox { Text = fileName, FontSize = 12.5 };
             void SubmitFileRename()
             {
                 if (!string.IsNullOrWhiteSpace(renameBox.Text))
@@ -1303,21 +1288,49 @@ public static class CourseWorkspaceViewBuilder
         }
         else
         {
-            var metaText = FormatFileMetadata(file);
-            var infoStack = new StackPanel
+            var metaText = isBrokenLink ? "Broken symlink target" : FormatFileMetadata(file);
+            var nameRow = new StackPanel
             {
-                Spacing = 1,
-                VerticalAlignment = VerticalAlignment.Center,
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
                 Children =
                 {
                     new TextBlock
                     {
                         Text = fileName,
                         FontSize = 12.5,
-                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                        Foreground = isBrokenLink
+                            ? ThemeService.Brush(ThemeService.PriorityP1Fg)
+                            : ThemeService.Brush(ThemeService.TextPrimary),
                         TextTrimming = TextTrimming.CharacterEllipsis,
                         MaxLines = 1,
+                        VerticalAlignment = VerticalAlignment.Center,
                     },
+                },
+            };
+            if (isSymlink)
+            {
+                nameRow.Children.Add(
+                    UiBuilder.Pill(
+                        isBrokenLink ? "Broken Link" : "Link",
+                        isBrokenLink
+                            ? ThemeService.Brush(ThemeService.PriorityP1Fg)
+                            : ThemeService.Brush(ThemeService.PriorityP3Fg),
+                        isBrokenLink
+                            ? ThemeService.Brush(ThemeService.PriorityP1Bg)
+                            : ThemeService.Brush(ThemeService.PriorityP3Bg),
+                        fontSize: 9.5
+                    )
+                );
+            }
+
+            var infoStack = new StackPanel
+            {
+                Spacing = 1,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    nameRow,
                     new TextBlock
                     {
                         Text = metaText,
@@ -1340,8 +1353,8 @@ public static class CourseWorkspaceViewBuilder
         if (isConfirmingDelete)
         {
             var confirmDelBtn = UiBuilder.GhostButton(
-                "Delete",
-                MaterialIconKind.DeleteOutline,
+                isSymlink ? "Unlink" : "Delete",
+                isSymlink ? MaterialIconKind.LinkOff : MaterialIconKind.DeleteOutline,
                 () => vm.DeleteMaterialFile(course, file)
             );
             confirmDelBtn.Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg);
@@ -1490,9 +1503,7 @@ public static class CourseWorkspaceViewBuilder
             }
         );
         var paths = files
-            .Select(f =>
-                Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f)
-            )
+            .Select(f => Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(f))
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Cast<string>()
             .ToList();

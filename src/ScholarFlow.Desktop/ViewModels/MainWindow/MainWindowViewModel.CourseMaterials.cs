@@ -15,6 +15,7 @@ public sealed partial class MainWindowViewModel
 {
     public string MaterialsSearchQuery { get; private set; } = string.Empty;
     public string MaterialsTypeFilter { get; private set; } = "All";
+    public FileImportMode MaterialsImportMode { get; private set; } = FileImportMode.Copy;
     public HashSet<string> CollapsedMaterialFolders { get; } = new(StringComparer.OrdinalIgnoreCase);
     public bool IsNewMaterialFolderBarOpen { get; private set; }
     public string? RenamingMaterialPath { get; private set; }
@@ -51,6 +52,15 @@ public sealed partial class MainWindowViewModel
             return;
 
         MaterialsTypeFilter = filter;
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public void SetMaterialsImportMode(FileImportMode mode)
+    {
+        if (MaterialsImportMode == mode)
+            return;
+
+        MaterialsImportMode = mode;
         NotifyStateChanged(UiChangeKind.SearchOrTaskList);
     }
 
@@ -385,31 +395,52 @@ public sealed partial class MainWindowViewModel
     public async Task ImportFilesToFolderAsync(
         BasinCourseEntry course,
         string targetDir,
-        IReadOnlyList<string> sourcePaths
+        IReadOnlyList<string> sourcePaths,
+        FileImportMode? modeOverride = null
     )
     {
         if (string.IsNullOrWhiteSpace(BasinRoot) || sourcePaths.Count == 0)
             return;
 
+        var mode = modeOverride ?? MaterialsImportMode;
         Directory.CreateDirectory(targetDir);
-        int copied = 0;
-        bool hasPdf = false;
+        int imported = 0;
+        int skipped = 0;
+        bool anyFallbackToCopy = false;
+        bool hasPdfOrDir = false;
 
         foreach (var src in sourcePaths)
         {
-            if (string.IsNullOrWhiteSpace(src) || !File.Exists(src))
+            if (string.IsNullOrWhiteSpace(src))
                 continue;
 
-            var destPath = GetUniqueFilePath(targetDir, Path.GetFileName(src));
-            File.Copy(src, destPath, overwrite: false);
-            copied++;
-            if (destPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                hasPdf = true;
+            try
+            {
+                var dest = FileImportHelper.ImportItem(src, targetDir, mode, out bool fellBack);
+                if (dest is null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                imported++;
+                if (fellBack)
+                    anyFallbackToCopy = true;
+                if (
+                    Directory.Exists(dest)
+                    || dest.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+                )
+                    hasPdfOrDir = true;
+            }
+            catch
+            {
+                skipped++;
+            }
         }
 
-        if (copied > 0)
+        if (imported > 0)
         {
-            if (hasPdf)
+            if (hasPdfOrDir)
                 await ReloadBasinDataAsync();
 
             var destLabel = string.Equals(
@@ -420,8 +451,25 @@ public sealed partial class MainWindowViewModel
                 ? "Course Root"
                 : Path.GetFileName(targetDir).Replace('_', ' ');
 
-            StatusText = $"Imported {copied} file(s) into '{destLabel}'";
+            var verb = mode switch
+            {
+                FileImportMode.Move => "Moved",
+                FileImportMode.Symlink => anyFallbackToCopy ? "Copied" : "Linked",
+                _ => "Copied",
+            };
+            var suffix = anyFallbackToCopy
+                ? " (symlink requires Developer Mode on Windows — copied instead)"
+                : skipped > 0
+                    ? $" ({skipped} already in folder)"
+                    : string.Empty;
+
+            StatusText = $"{verb} {imported} item(s) into '{destLabel}'{suffix}";
             NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+        }
+        else if (skipped > 0)
+        {
+            StatusText = "Skipped — selected item(s) are already in that folder.";
+            NotifyStateChanged(UiChangeKind.StatusOnly);
         }
     }
 
@@ -564,7 +612,8 @@ public sealed partial class MainWindowViewModel
 
     public void DeleteMaterialFile(BasinCourseEntry course, string filePath)
     {
-        if (string.IsNullOrWhiteSpace(BasinRoot) || !File.Exists(filePath))
+        bool isLink = FileImportHelper.IsSymbolicLink(filePath);
+        if (string.IsNullOrWhiteSpace(BasinRoot) || (!File.Exists(filePath) && !isLink))
         {
             CancelConfirmDeleteMaterial();
             return;
@@ -579,7 +628,7 @@ public sealed partial class MainWindowViewModel
             File.Delete(filePath);
             RemovePacketPlanPaths(courseDir, oldRel, isPrefix: false);
             ConfirmingDeleteMaterialPath = null;
-            StatusText = $"Deleted '{fileName}'";
+            StatusText = isLink ? $"Unlinked '{fileName}'" : $"Deleted '{fileName}'";
             NotifyStateChanged(UiChangeKind.SearchOrTaskList);
         }
         catch (Exception ex)

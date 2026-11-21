@@ -543,7 +543,8 @@ public sealed partial class MainWindowViewModel
         string sourceFolderPath,
         string? title,
         string? alias,
-        string? courseCode
+        string? courseCode,
+        FileImportMode importMode = FileImportMode.Copy
     )
     {
         if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(sourceFolderPath))
@@ -556,7 +557,8 @@ public sealed partial class MainWindowViewModel
                 sourceFolderPath,
                 title,
                 alias,
-                courseCode
+                courseCode,
+                importMode
             );
             IsAddCourseModalOpen = false;
             await ReloadBasinDataAsync();

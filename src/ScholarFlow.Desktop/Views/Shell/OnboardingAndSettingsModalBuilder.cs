@@ -7,6 +7,7 @@ using Avalonia.Platform.Storage;
 using Material.Icons;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
+using ScholarFlow.Core.Services;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -725,6 +726,7 @@ public static class OnboardingAndSettingsModalBuilder
         // 2. Mode Switcher (Create New vs Import Existing Folder)
         bool isImportMode = false;
         string? selectedImportFolder = null;
+        var selectedImportMode = FileImportMode.Copy;
 
         var titleBox = new TextBox
         {
@@ -835,6 +837,60 @@ public static class OnboardingAndSettingsModalBuilder
         Grid.SetColumn(folderPathText, 1);
         pickRow.Children.Add(folderPathText);
         importInner.Children.Add(pickRow);
+
+        var importModeRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        importModeRow.Children.Add(
+            new TextBlock
+            {
+                Text = "External folder mode:",
+                FontSize = 11,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        );
+        var importModeButtons = new List<(FileImportMode Mode, Button Btn)>();
+        void RefreshImportModeButtons()
+        {
+            foreach (var (m, b) in importModeButtons)
+            {
+                bool active = m == selectedImportMode;
+                b.Background = active
+                    ? ThemeService.Brush(ThemeService.AccentSoftBg)
+                    : Brushes.Transparent;
+                b.BorderBrush = active
+                    ? ThemeService.Brush(ThemeService.AccentPrimary)
+                    : ThemeService.Brush(ThemeService.BorderSubtle);
+            }
+        }
+        foreach (
+            var (m, lbl, ic) in new[]
+            {
+                (FileImportMode.Copy, "Copy", MaterialIconKind.ContentCopy),
+                (FileImportMode.Move, "Move", MaterialIconKind.FileMoveOutline),
+                (FileImportMode.Symlink, "Symlink", MaterialIconKind.LinkVariant),
+            }
+        )
+        {
+            var capturedM = m;
+            var mb = UiBuilder.GhostButton(
+                lbl,
+                ic,
+                () =>
+                {
+                    selectedImportMode = capturedM;
+                    RefreshImportModeButtons();
+                },
+                isActive: capturedM == selectedImportMode
+            );
+            importModeButtons.Add((capturedM, mb));
+            importModeRow.Children.Add(mb);
+        }
+        importInner.Children.Add(importModeRow);
         importInner.Children.Add(folderHintText);
         importCard.Child = importInner;
 
@@ -904,7 +960,8 @@ public static class OnboardingAndSettingsModalBuilder
                         selectedImportFolder,
                         titleBox.Text,
                         aliasBox.Text,
-                        codeBox.Text
+                        codeBox.Text,
+                        selectedImportMode
                     );
             }
             else if (!string.IsNullOrWhiteSpace(titleBox.Text))
