@@ -498,4 +498,48 @@ public class QuizStudioV2Tests
                 Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task SaveAndLoadQuizSession_PreservesImagePathAndMultilineDiagram()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"sf_img_diag_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var quiz = new QuizSessionRecord
+            {
+                Id = "img-diag-1",
+                CourseFolder = "CompArch",
+                CourseTitle = "Computer Architecture",
+                Title = "Memory Hierarchy",
+                Questions =
+                [
+                    new QuizQuestionRecord
+                    {
+                        Id = "q-img-1",
+                        QuizId = "img-diag-1",
+                        Kind = QuizQuestionKind.MultipleChoice,
+                        Prompt = "Identify the bus path.",
+                        Options = ["System Bus", "I/O Bus", "Memory Bus", "PCIe"],
+                        CorrectAnswer = "Memory Bus",
+                        Diagram = "flowchart LR\nCPU[CPU] --> L1{L1 Hit?}\nL1 -->|No| RAM[(Main Memory)]",
+                        ImagePath = ".scholarflow/quiz_media/img-diag-1/q-img-1.png",
+                        SourcePage = 44
+                    }
+                ]
+            };
+
+            await ScholarFlowDatabase.SaveQuizSessionAsync(tempDir, quiz);
+            var loaded = await ScholarFlowDatabase.LoadQuizSessionsAsync(tempDir);
+            Assert.Single(loaded);
+            var q = loaded[0].Questions[0];
+            Assert.Equal(".scholarflow/quiz_media/img-diag-1/q-img-1.png", q.ImagePath);
+            Assert.Contains("flowchart LR", q.Diagram);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

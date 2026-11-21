@@ -173,6 +173,15 @@ public static partial class QuizStudioViewBuilder
         if (!string.IsNullOrWhiteSpace(q.Diagram))
             qCardStack.Children.Add(QuizRichContentRenderer.BuildDiagramCard(q.Diagram));
 
+        var resolvedImg = studio.ResolveQuestionImageFullPath(q.ImagePath);
+        if (!string.IsNullOrWhiteSpace(resolvedImg))
+            qCardStack.Children.Add(
+                QuizRichContentRenderer.BuildQuestionImageCard(
+                    resolvedImg,
+                    () => studio.OpenImageZoom(q.ImagePath)
+                )
+            );
+
         if (
             q.Kind
                 is QuizQuestionKind.MultipleChoice
@@ -720,10 +729,62 @@ public static partial class QuizStudioViewBuilder
             stack.Children.Add(UiBuilder.Card(feedbackStack, padding: new Thickness(16, 14)));
         }
 
-        return UiBuilder.PersistentScrollViewer(
+        var scroll = UiBuilder.PersistentScrollViewer(
             $"quiz-runner:{session.Id}:{studio.CurrentQuestionIndex}",
             stack
         );
+
+        if (!string.IsNullOrWhiteSpace(studio.ZoomedImagePath) && File.Exists(studio.ZoomedImagePath))
+        {
+            var host = new Grid();
+            host.Children.Add(scroll);
+            host.Children.Add(BuildImageZoomLightbox(studio.ZoomedImagePath, studio.CloseImageZoom));
+            return host;
+        }
+
+        return scroll;
+    }
+
+    private static Control BuildImageZoomLightbox(string fullImagePath, Action onClose)
+    {
+        var closeBtn = UiBuilder.PrimaryButton("Close", MaterialIconKind.Close, onClose);
+        closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var inner = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                closeBtn,
+                new Border
+                {
+                    Background = Brushes.White,
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6),
+                    Child = new Image
+                    {
+                        Source = new Avalonia.Media.Imaging.Bitmap(fullImagePath),
+                        Stretch = Stretch.Uniform,
+                        MaxWidth = 960,
+                        MaxHeight = 680,
+                    },
+                },
+            },
+        };
+
+        var overlay = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#C8000000")),
+            Padding = new Thickness(24),
+            Child = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = inner,
+            },
+        };
+        overlay.PointerPressed += (_, _) => onClose();
+        return overlay;
     }
 
     private static ScrollViewer BuildSessionSummaryView(

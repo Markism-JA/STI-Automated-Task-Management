@@ -228,7 +228,26 @@ public static class QuizExportService
             if (!string.IsNullOrWhiteSpace(q.MathLatex))
                 DrawWrapped($"Formula: {q.MathLatex}", monoFont, XBrushes.DarkBlue, indent: 14, lineHeight: 13);
             if (!string.IsNullOrWhiteSpace(q.Diagram))
-                DrawWrapped($"Flow: {q.Diagram}", monoFont, XBrushes.DarkGreen, indent: 14, lineHeight: 13);
+                DrawWrapped($"Flow:\n{q.Diagram}", monoFont, XBrushes.DarkGreen, indent: 14, lineHeight: 13);
+
+            if (!string.IsNullOrWhiteSpace(q.ImagePath) && File.Exists(q.ImagePath))
+            {
+                try
+                {
+                    using var xImg = PdfSharpCore.Drawing.XImage.FromFile(q.ImagePath);
+                    double maxW = page.Width.Point - (margin * 2) - 28;
+                    double scale = Math.Min(1.0, Math.Min(maxW / xImg.PixelWidth, 180.0 / xImg.PixelHeight));
+                    double drawW = xImg.PixelWidth * scale;
+                    double drawH = xImg.PixelHeight * scale;
+                    EnsureSpace(drawH + 10);
+                    gfx.DrawImage(xImg, margin + 14, y, drawW, drawH);
+                    y += drawH + 8;
+                }
+                catch
+                {
+                    // Skip unreadable image
+                }
+            }
 
             if (q.Kind is QuizQuestionKind.MultipleChoice or QuizQuestionKind.Situational or QuizQuestionKind.TrueFalse)
             {

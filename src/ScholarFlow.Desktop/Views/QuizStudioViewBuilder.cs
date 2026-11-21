@@ -318,6 +318,17 @@ public static partial class QuizStudioViewBuilder
         root.Children.Add(bodyContent);
 
         if (
+            !string.IsNullOrWhiteSpace(studio.ZoomedImagePath)
+            && File.Exists(studio.ZoomedImagePath)
+        )
+        {
+            var host = new Grid();
+            host.Children.Add(root);
+            host.Children.Add(BuildImageZoomLightbox(studio.ZoomedImagePath, studio.CloseImageZoom));
+            return host;
+        }
+
+        if (
             studio.ActiveSubTab == QuizStudioSubTab.Organizer
             && !studio.IsDedicatedSnipperOpen
             && (studio.EditingQuestionDraft is not null || studio.IsDeckAiFixModalOpen)

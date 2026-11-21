@@ -213,7 +213,7 @@ public sealed partial class QuizLlmService
 
         if (modality.HasDiagrams)
         {
-            sb.AppendLine("- ARCHITECTURE / PROCESS DIAGRAMS DETECTED: When testing multi-stage pipelines, network topologies, layers, or state flows, populate \"diagram\" with a concise node-flow string using \" -> \" arrows (e.g. \"[Client] -> [API Gateway] -> [Auth Service] -> [Database]\"). Leave \"diagram\": null for standard questions.");
+            sb.AppendLine("- ARCHITECTURE / PROCESS DIAGRAMS DETECTED: When testing multi-stage pipelines, branching logic, network protocols, or state flows, populate \"diagram\" using EITHER a concise 1-line chain (\"[Client] -> [API Gateway] -> [DB]\"), a Mermaid-subset branching flowchart (\"flowchart LR\\nA[CPU] --> B{L1 Hit?}\\nB -->|Yes| C[Fast]\\nB -->|No| D[(RAM)]\"), or a sequenceDiagram (\"sequenceDiagram\\nClient ->> Server: SYN\\nServer -->> Client: SYN-ACK\"). Use \"[???]\" for cloze-style missing nodes. Leave \"diagram\": null for standard questions.");
         }
         else
         {

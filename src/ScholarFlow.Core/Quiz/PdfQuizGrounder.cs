@@ -781,6 +781,46 @@ public static class PdfQuizGrounder
         return (quote, sectionTitle, totalPages);
     }
 
+    /// <summary>
+    /// Extracts embedded raster XObject images from a 1-based PDF page (useful for slide decks)
+    /// and saves them as PNGs in outputDir, returning saved file paths.
+    /// </summary>
+    public static List<string> ExtractEmbeddedImagesFromPage(
+        string pdfPath,
+        int oneBasedPage,
+        string outputDir
+    )
+    {
+        var saved = new List<string>();
+        if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            return saved;
+
+        using var doc = PdfDocument.Open(pdfPath);
+        if (oneBasedPage < 1 || oneBasedPage > doc.NumberOfPages)
+            return saved;
+
+        var page = doc.GetPage(oneBasedPage);
+        var images = page.GetImages().ToList();
+        if (images.Count == 0)
+            return saved;
+
+        Directory.CreateDirectory(outputDir);
+        int idx = 1;
+        foreach (var img in images)
+        {
+            if (img.WidthInSamples < 48 || img.HeightInSamples < 48)
+                continue;
+
+            var outPath = Path.Combine(outputDir, $"p{oneBasedPage}_fig{idx++}.png");
+            if (img.TryGetPng(out var pngBytes) && pngBytes is { Length: > 0 })
+            {
+                File.WriteAllBytes(outPath, pngBytes);
+                saved.Add(outPath);
+            }
+        }
+        return saved;
+    }
+
     public static List<NormalizedHighlightRect> ComputeHighlightRects(
         PdfDocument doc,
         int hintPage,

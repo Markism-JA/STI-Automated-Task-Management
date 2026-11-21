@@ -83,13 +83,13 @@ public static partial class ScholarFlowDatabase
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
                         srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
-                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json
+                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json, image_path
                     ) VALUES (
                         $id, $quiz_id, $order_index, $kind, $cognitive_level, $difficulty, $topic_tag,
                         $prompt, $options_json, $correct_answer, $aliases_json, $explanation,
                         $source_pdf_path, $source_page, $section_title, $verbatim_quote, $highlight_rects_json,
                         $srs_interval_days, $srs_ease_factor, $srs_due_date, $srs_reps, $srs_lapses, $last_answered_correct,
-                        $code_snippet, $code_language, $math_latex, $diagram_text, $evidence_anchors_json
+                        $code_snippet, $code_language, $math_latex, $diagram_text, $evidence_anchors_json, $image_path
                     );
                     """;
                 itemCmd.Parameters.AddWithValue("$id", q.Id);
@@ -153,6 +153,10 @@ public static partial class ScholarFlowDatabase
                 itemCmd.Parameters.AddWithValue(
                     "$diagram_text",
                     (object?)q.Diagram ?? DBNull.Value
+                );
+                itemCmd.Parameters.AddWithValue(
+                    "$image_path",
+                    (object?)q.ImagePath ?? DBNull.Value
                 );
                 await itemCmd.ExecuteNonQueryAsync(ct);
             }
@@ -241,7 +245,7 @@ public static partial class ScholarFlowDatabase
                         prompt, options_json, correct_answer, aliases_json, explanation,
                         source_pdf_path, source_page, section_title, verbatim_quote, highlight_rects_json,
                         srs_interval_days, srs_ease_factor, srs_due_date, srs_reps, srs_lapses, last_answered_correct,
-                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json
+                        code_snippet, code_language, math_latex, diagram_text, evidence_anchors_json, image_path
                     FROM quiz_questions
                     ORDER BY quiz_id, order_index;
                     """;
@@ -311,6 +315,7 @@ public static partial class ScholarFlowDatabase
                             r.FieldCount > 24 && !r.IsDBNull(24) ? r.GetString(24) : null,
                         MathLatex = r.FieldCount > 25 && !r.IsDBNull(25) ? r.GetString(25) : null,
                         Diagram = r.FieldCount > 26 && !r.IsDBNull(26) ? r.GetString(26) : null,
+                        ImagePath = r.FieldCount > 28 && !r.IsDBNull(28) ? r.GetString(28) : null,
                     };
 
                     parentQuiz.Questions.Add(q);

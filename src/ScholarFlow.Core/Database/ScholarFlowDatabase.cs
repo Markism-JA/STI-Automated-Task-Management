@@ -157,7 +157,8 @@ public static partial class ScholarFlowDatabase
                 code_snippet TEXT NULL,
                 code_language TEXT NULL,
                 math_latex TEXT NULL,
-                diagram_text TEXT NULL
+                diagram_text TEXT NULL,
+                image_path TEXT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id);
@@ -189,6 +190,7 @@ public static partial class ScholarFlowDatabase
                 "ALTER TABLE quiz_questions ADD COLUMN math_latex TEXT NULL;",
                 "ALTER TABLE quiz_questions ADD COLUMN diagram_text TEXT NULL;",
                 "ALTER TABLE quiz_questions ADD COLUMN evidence_anchors_json TEXT NOT NULL DEFAULT '[]';",
+                "ALTER TABLE quiz_questions ADD COLUMN image_path TEXT NULL;",
             }
         )
         {

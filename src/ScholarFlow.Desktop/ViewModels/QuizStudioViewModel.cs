@@ -25,6 +25,12 @@ public enum QuizBuilderOutputMode
 /// Offline Smart PDF Analysis, SM-2/FSRS Spaced Repetition, live visual PDF scope previewing,
 /// and one-click jump to highlighted statements in the PDF Reader.
 /// </summary>
+public enum SnipCaptureMode
+{
+    PinHighlight,
+    CaptureImage,
+}
+
 public enum OrganizerHealthFilter
 {
     All,
@@ -166,6 +172,9 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     public bool SnipFitToWidth { get; private set; } = true;
     public int SnipZoomPercent { get; private set; } = 100;
     public bool IsSnipOutlineOpen { get; private set; } = true;
+    public SnipCaptureMode SnipMode { get; private set; } = SnipCaptureMode.PinHighlight;
+    public IReadOnlyList<string> SnipExtractedFigures { get; private set; } = [];
+    public string? ZoomedImagePath { get; private set; }
     public IReadOnlyList<PdfBookmarkNode> SnipOutlineRoots { get; private set; } = [];
     private string? _snipOutlinePdfPath;
     public string? FlaggingQuestionId { get; private set; }

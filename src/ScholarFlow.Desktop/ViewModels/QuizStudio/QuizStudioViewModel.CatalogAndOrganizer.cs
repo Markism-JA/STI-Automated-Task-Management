@@ -309,6 +309,7 @@ public sealed partial class QuizStudioViewModel
             CodeLanguage = orig.CodeLanguage,
             MathLatex = orig.MathLatex,
             Diagram = orig.Diagram,
+            ImagePath = orig.ImagePath,
             SourcePdfPath = orig.SourcePdfPath,
             SourcePage = orig.SourcePage,
             SectionTitle = orig.SectionTitle,
@@ -598,6 +599,140 @@ public sealed partial class QuizStudioViewModel
     public void CloseDedicatedSnipper()
     {
         IsDedicatedSnipperOpen = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetSnipMode(SnipCaptureMode mode)
+    {
+        SnipMode = mode;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public string? ResolveQuestionImageFullPath(string? storedPath)
+    {
+        if (string.IsNullOrWhiteSpace(storedPath))
+            return null;
+        if (Path.IsPathRooted(storedPath))
+            return File.Exists(storedPath) ? storedPath : null;
+        if (string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
+            return null;
+        var full = Path.Combine(_mainVm.BasinRoot, storedPath);
+        return File.Exists(full) ? full : null;
+    }
+
+    public void OpenImageZoom(string? path)
+    {
+        var full = ResolveQuestionImageFullPath(path);
+        if (string.IsNullOrWhiteSpace(full))
+            return;
+        ZoomedImagePath = full;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void CloseImageZoom()
+    {
+        ZoomedImagePath = null;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetEditingQuestionImage(string? filePath)
+    {
+        if (EditingQuestionDraft is null)
+            return;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            EditingQuestionDraft.ImagePath = null;
+            EditingGroundStatus = "Removed question image.";
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_mainVm.BasinRoot) && File.Exists(filePath))
+        {
+            var mediaDir = Path.Combine(
+                _mainVm.BasinRoot,
+                ".scholarflow",
+                "quiz_media",
+                OrganizerQuiz?.Id ?? "manual"
+            );
+            Directory.CreateDirectory(mediaDir);
+            var ext = Path.GetExtension(filePath);
+            if (string.IsNullOrWhiteSpace(ext))
+                ext = ".png";
+            var destName = $"{EditingQuestionDraft.Id}_{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
+            var destFull = Path.Combine(mediaDir, destName);
+            if (!string.Equals(Path.GetFullPath(filePath), Path.GetFullPath(destFull), StringComparison.OrdinalIgnoreCase))
+                File.Copy(filePath, destFull, overwrite: true);
+            EditingQuestionDraft.ImagePath = Path.GetRelativePath(_mainVm.BasinRoot, destFull);
+        }
+        else
+        {
+            EditingQuestionDraft.ImagePath = filePath;
+        }
+
+        EditingGroundStatus = "✓ Attached image to question.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task CaptureQuestionImageFromSnipperAsync(NormalizedHighlightRect region)
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            return;
+
+        int page = EditingSnipPageNumber > 0 ? EditingSnipPageNumber : Math.Max(1, draft.SourcePage);
+        var mediaDir = !string.IsNullOrWhiteSpace(_mainVm.BasinRoot)
+            ? Path.Combine(_mainVm.BasinRoot, ".scholarflow", "quiz_media", OrganizerQuiz?.Id ?? "manual")
+            : Path.Combine(Path.GetTempPath(), "ScholarFlow-QuizMedia");
+        var outFull = Path.Combine(mediaDir, $"{draft.Id}_p{page}_{DateTime.UtcNow:HHmmss}.png");
+
+        await Task.Run(() =>
+        {
+            byte[] pdfBytes;
+            lock (_pendingPreviewRenders)
+            {
+                if (
+                    !string.Equals(_cachedBytesPath, pdfPath, StringComparison.OrdinalIgnoreCase)
+                    || _cachedPdfBytes is null
+                )
+                {
+                    _cachedPdfBytes = File.ReadAllBytes(pdfPath);
+                    _cachedBytesPath = pdfPath;
+                }
+                pdfBytes = _cachedPdfBytes;
+            }
+            Services.PdfBitmapRenderer.CropAndSavePageRegion(pdfBytes, page - 1, region, outFull, dpi: 220);
+        });
+
+        draft.ImagePath = !string.IsNullOrWhiteSpace(_mainVm.BasinRoot)
+            ? Path.GetRelativePath(_mainVm.BasinRoot, outFull)
+            : outFull;
+        draft.SourcePage = page;
+        EditingGroundStatus = $"✓ Captured diagram/image from p.{page}";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task ExtractEmbeddedFiguresOnSnipPageAsync()
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            return;
+
+        int page = EditingSnipPageNumber > 0 ? EditingSnipPageNumber : Math.Max(1, draft.SourcePage);
+        var outDir = Path.Combine(Path.GetTempPath(), "ScholarFlow-ExtractedFigs", draft.Id);
+        var figs = await Task.Run(() =>
+            PdfQuizGrounder.ExtractEmbeddedImagesFromPage(pdfPath, page, outDir)
+        );
+        SnipExtractedFigures = figs;
+        EditingGroundStatus = figs.Count > 0
+            ? $"Found {figs.Count} embedded figure(s) on p.{page} — click one to attach."
+            : $"No embedded raster images on p.{page} (use Capture Image drag-crop for vector diagrams).";
         _mainVm.RequestUiRefresh();
     }
 

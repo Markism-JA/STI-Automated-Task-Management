@@ -169,6 +169,7 @@ public sealed class QuizQuestionRecord
     public string? CodeLanguage { get; set; }
     public string? MathLatex { get; set; }
     public string? Diagram { get; set; }
+    public string? ImagePath { get; set; }
 
     // Grounding to Master / Handout PDF
     public string SourcePdfPath { get; set; } = string.Empty;

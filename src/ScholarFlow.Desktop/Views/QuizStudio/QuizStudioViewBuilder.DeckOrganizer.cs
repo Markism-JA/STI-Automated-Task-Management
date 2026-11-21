@@ -907,6 +907,15 @@ public static partial class QuizStudioViewBuilder
         if (!string.IsNullOrWhiteSpace(q.Diagram))
             cardStack.Children.Add(QuizRichContentRenderer.BuildDiagramCard(q.Diagram));
 
+        var resolvedImg = studio.ResolveQuestionImageFullPath(q.ImagePath);
+        if (!string.IsNullOrWhiteSpace(resolvedImg))
+            cardStack.Children.Add(
+                QuizRichContentRenderer.BuildQuestionImageCard(
+                    resolvedImg,
+                    () => studio.OpenImageZoom(q.ImagePath)
+                )
+            );
+
         if (
             q.Kind
                 is QuizQuestionKind.MultipleChoice
@@ -1749,8 +1758,12 @@ public static partial class QuizStudioViewBuilder
             var diagBox = new TextBox
             {
                 Text = draft.Diagram ?? string.Empty,
-                Watermark = "Optional Flow Diagram (A -> B -> C)...",
-                FontSize = 12,
+                Watermark = "Optional Diagram (A -> B -> C, flowchart LR/TD, or sequenceDiagram)...",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.NoWrap,
+                MinHeight = 54,
+                FontSize = 11.5,
+                FontFamily = new FontFamily("Consolas, JetBrains Mono, monospace"),
             };
             diagBox.PropertyChanged += (_, e) =>
             {
@@ -1762,6 +1775,63 @@ public static partial class QuizStudioViewBuilder
             Grid.SetColumn(diagBox, 1);
             richGrid.Children.Add(diagBox);
             modalStack.Children.Add(richGrid);
+
+            var imgActionRow = new WrapPanel { Orientation = Orientation.Horizontal };
+            var browseImgBtn = UiBuilder.GhostButton(
+                "Browse Question Image...",
+                MaterialIconKind.ImagePlusOutline,
+                async () =>
+                {
+                    var top = TopLevel.GetTopLevel(modalStack);
+                    if (top?.StorageProvider is null)
+                        return;
+                    var files = await top.StorageProvider.OpenFilePickerAsync(
+                        new Avalonia.Platform.Storage.FilePickerOpenOptions
+                        {
+                            Title = "Select Diagram or Figure Image",
+                            AllowMultiple = false,
+                            FileTypeFilter =
+                            [
+                                new Avalonia.Platform.Storage.FilePickerFileType("Images")
+                                {
+                                    Patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp"],
+                                },
+                            ],
+                        }
+                    );
+                    var path =
+                        files.Count > 0
+                            ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(files[0])
+                            : null;
+                    if (!string.IsNullOrWhiteSpace(path))
+                        studio.SetEditingQuestionImage(path);
+                }
+            );
+            browseImgBtn.Margin = new Thickness(0, 0, 6, 4);
+            imgActionRow.Children.Add(browseImgBtn);
+
+            var resolvedDraftImg = studio.ResolveQuestionImageFullPath(draft.ImagePath);
+            if (!string.IsNullOrWhiteSpace(resolvedDraftImg))
+            {
+                var removeImgBtn = UiBuilder.GhostButton(
+                    "Remove Image",
+                    MaterialIconKind.ImageRemoveOutline,
+                    () => studio.SetEditingQuestionImage(null)
+                );
+                removeImgBtn.Margin = new Thickness(0, 0, 6, 4);
+                imgActionRow.Children.Add(removeImgBtn);
+            }
+            modalStack.Children.Add(imgActionRow);
+
+            if (!string.IsNullOrWhiteSpace(resolvedDraftImg))
+            {
+                modalStack.Children.Add(
+                    QuizRichContentRenderer.BuildQuestionImageCard(
+                        resolvedDraftImg,
+                        () => studio.OpenImageZoom(draft.ImagePath)
+                    )
+                );
+            }
 
             var codeEditBox = new TextBox
             {
@@ -1969,6 +2039,29 @@ public static partial class QuizStudioViewBuilder
         );
         zoomRow.Children.Add(
             UiBuilder.GhostButton(
+                "Pin Highlight",
+                MaterialIconKind.Marker,
+                () => studio.SetSnipMode(SnipCaptureMode.PinHighlight),
+                isActive: studio.SnipMode == SnipCaptureMode.PinHighlight
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
+                "Capture Image",
+                MaterialIconKind.Crop,
+                () => studio.SetSnipMode(SnipCaptureMode.CaptureImage),
+                isActive: studio.SnipMode == SnipCaptureMode.CaptureImage
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
+                "Extract Figures",
+                MaterialIconKind.ImageMultipleOutline,
+                async () => await studio.ExtractEmbeddedFiguresOnSnipPageAsync()
+            )
+        );
+        zoomRow.Children.Add(
+            UiBuilder.GhostButton(
                 $"Clear ({draft.EvidenceAnchors.Count})",
                 MaterialIconKind.Eraser,
                 studio.ClearVisualSnipHighlights
@@ -2052,7 +2145,12 @@ public static partial class QuizStudioViewBuilder
                 new PdfVisualSnipperControl(
                     pageHighlights,
                     async (rect, additive) =>
-                        await studio.ApplyVisualSnipRegionAsync(rect, additive)
+                    {
+                        if (studio.SnipMode == SnipCaptureMode.CaptureImage)
+                            await studio.CaptureQuestionImageFromSnipperAsync(rect);
+                        else
+                            await studio.ApplyVisualSnipRegionAsync(rect, additive);
+                    }
                 )
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -2108,7 +2206,7 @@ public static partial class QuizStudioViewBuilder
         Grid.SetColumn(canvasFrame, canvasCol);
         body.Children.Add(canvasFrame);
 
-        // Right Pinned Evidence Anchors Rail
+        // Right Pinned Evidence Anchors & Captured Image Rail
         var railStack = new StackPanel { Spacing = 8 };
         railStack.Children.Add(
             UiBuilder.SectionHeader($"Evidence Anchors ({draft.EvidenceAnchors.Count})")
@@ -2116,12 +2214,41 @@ public static partial class QuizStudioViewBuilder
         railStack.Children.Add(
             new TextBlock
             {
-                Text = "Drag on the PDF to pin an anchor. Hold Shift+Drag to add extra boxes to the current page's anchor.",
+                Text = studio.SnipMode == SnipCaptureMode.CaptureImage
+                    ? "Mode: Capture Image — drag a box around any diagram/figure to attach it as the question's image."
+                    : "Mode: Pin Highlight — drag on the PDF to pin an anchor (Shift+Drag adds boxes to this page).",
                 FontSize = 11,
                 Foreground = ThemeService.Brush(ThemeService.TextMuted),
                 TextWrapping = TextWrapping.Wrap,
             }
         );
+
+        var capturedImgFull = studio.ResolveQuestionImageFullPath(draft.ImagePath);
+        if (!string.IsNullOrWhiteSpace(capturedImgFull))
+        {
+            railStack.Children.Add(
+                QuizRichContentRenderer.BuildQuestionImageCard(
+                    capturedImgFull,
+                    () => studio.OpenImageZoom(draft.ImagePath)
+                )
+            );
+        }
+
+        if (studio.SnipExtractedFigures.Count > 0)
+        {
+            railStack.Children.Add(UiBuilder.SectionHeader($"Embedded Figures ({studio.SnipExtractedFigures.Count})"));
+            for (int fi = 0; fi < studio.SnipExtractedFigures.Count; fi++)
+            {
+                var figPath = studio.SnipExtractedFigures[fi];
+                railStack.Children.Add(
+                    UiBuilder.GhostButton(
+                        $"Attach Figure {fi + 1}",
+                        MaterialIconKind.ImagePlusOutline,
+                        () => studio.SetEditingQuestionImage(figPath)
+                    )
+                );
+            }
+        }
 
         for (int ai = 0; ai < draft.EvidenceAnchors.Count; ai++)
         {
