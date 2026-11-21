@@ -171,6 +171,48 @@ public static partial class QuizStudioViewBuilder
             )
         );
 
+        // Coverage & Budget Controls Row
+        var controlsRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        bool isTruncated =
+            studio.ManualPromptTotalPages > 0
+            && studio.ManualPromptIncludedPages < studio.ManualPromptTotalPages;
+        string coverageText = studio.IsBuildingPrompt
+            ? "Calculating scope coverage..."
+            : studio.ManualPromptTotalPages > 0
+                ? (
+                    isTruncated
+                        ? $"⚠ Truncated: {studio.ManualPromptIncludedPages}/{studio.ManualPromptTotalPages} pages ({studio.GeneratedPromptPreview.Length:N0} chars)"
+                        : $"Coverage: {studio.ManualPromptIncludedPages}/{studio.ManualPromptTotalPages} pages (100% · {studio.GeneratedPromptPreview.Length:N0} chars)"
+                )
+                : "Select a PDF scope";
+
+        var coveragePill = UiBuilder.Pill(
+            coverageText,
+            isTruncated
+                ? ThemeService.Brush(ThemeService.PriorityP2Fg)
+                : ThemeService.Brush(ThemeService.AccentPrimary),
+            isTruncated
+                ? ThemeService.Brush(ThemeService.PriorityP2Bg)
+                : ThemeService.Brush(ThemeService.BgElevated),
+            fontSize: 11
+        );
+        coveragePill.Margin = new Thickness(0, 0, 8, 4);
+        controlsRow.Children.Add(coveragePill);
+
+        foreach (var (label, limit) in new[] { ("48k", 48_000), ("160k", 160_000), ("Uncapped", int.MaxValue) })
+        {
+            int capturedLimit = limit;
+            var budgetBtn = UiBuilder.GhostButton(
+                $"Budget: {label}",
+                null,
+                () => studio.SetManualPromptBudget(capturedLimit),
+                isActive: studio.ManualPromptBudgetChars == capturedLimit
+            );
+            budgetBtn.Margin = new Thickness(0, 0, 4, 4);
+            controlsRow.Children.Add(budgetBtn);
+        }
+        cardStack.Children.Add(controlsRow);
+
         var split = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,12,*"),
@@ -192,6 +234,7 @@ public static partial class QuizStudioViewBuilder
         };
         split.Children.Add(promptBox);
 
+        var leftActions = new WrapPanel { Orientation = Orientation.Horizontal };
         var copyBtn = UiBuilder.GhostButton(
             "Copy Grounded Prompt",
             MaterialIconKind.ContentCopy,
@@ -202,9 +245,27 @@ public static partial class QuizStudioViewBuilder
                     await top.Clipboard.SetTextAsync(studio.GeneratedPromptPreview);
             }
         );
-        Grid.SetRow(copyBtn, 1);
-        Grid.SetColumn(copyBtn, 0);
-        split.Children.Add(copyBtn);
+        copyBtn.Margin = new Thickness(0, 0, 6, 0);
+        leftActions.Children.Add(copyBtn);
+
+        var exportPdfBtn = UiBuilder.GhostButton(
+            "Export Scoped PDF + Copy Prompt",
+            MaterialIconKind.FileExportOutline,
+            async () =>
+            {
+                var top = TopLevel.GetTopLevel(promptBox);
+                await studio.ExportScopedPdfForUploadAsync(top?.Clipboard);
+            }
+        );
+        ToolTip.SetTip(
+            exportPdfBtn,
+            "Exports only the selected pages as a lightweight PDF for Web AI upload and copies the page-mapped instruction prompt"
+        );
+        leftActions.Children.Add(exportPdfBtn);
+
+        Grid.SetRow(leftActions, 1);
+        Grid.SetColumn(leftActions, 0);
+        split.Children.Add(leftActions);
 
         var jsonInputBox = new TextBox
         {

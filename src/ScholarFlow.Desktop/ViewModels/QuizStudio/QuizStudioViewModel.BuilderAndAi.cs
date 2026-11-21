@@ -146,14 +146,20 @@ public sealed partial class QuizStudioViewModel
         var token = cts.Token;
 
         IsBuildingPrompt = true;
+        int budget = ManualPromptBudgetChars;
         try
         {
-            var (prompt, pageCount) = await Task.Run(
+            var (prompt, totalCount, includedCount) = await Task.Run(
                 () =>
                 {
                     token.ThrowIfCancellationRequested();
-                    var text = _llmService.BuildPromptForManualCopy(req, out var pages);
-                    return (text, pages.Count);
+                    var text = _llmService.BuildPromptForManualCopy(
+                        req,
+                        budget,
+                        out var pages,
+                        out var inc
+                    );
+                    return (text, pages.Count, inc);
                 },
                 token
             );
@@ -162,10 +168,13 @@ public sealed partial class QuizStudioViewModel
                 return;
 
             GeneratedPromptPreview = prompt;
+            ManualPromptTotalPages = totalCount;
+            ManualPromptIncludedPages = includedCount;
             if (updateStatus)
             {
-                StatusMessage =
-                    $"Live grounded prompt ready across {pageCount} PDF page(s) ({req.QuestionCount} items).";
+                StatusMessage = includedCount < totalCount
+                    ? $"Prompt built for {includedCount}/{totalCount} pages (budget reached — raise budget or Export Scoped PDF)."
+                    : $"Live grounded prompt ready across {includedCount}/{totalCount} PDF page(s) ({req.QuestionCount} items).";
                 IsStatusError = false;
             }
         }
@@ -404,6 +413,63 @@ public sealed partial class QuizStudioViewModel
         await AppSettingsStore.SaveAsync(settings);
         StatusMessage = $"Saved AI endpoint ({settings.AiModelName}).";
         IsStatusError = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetManualPromptBudget(int maxChars)
+    {
+        ManualPromptBudgetChars = maxChars;
+        RefreshLivePromptPreviewIfActive(force: true);
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task ExportScopedPdfForUploadAsync(
+        Avalonia.Input.Platform.IClipboard? clipboard = null)
+    {
+        var req = BuildCurrentRequest();
+        if (string.IsNullOrWhiteSpace(req.SourcePdfPath) || !File.Exists(req.SourcePdfPath))
+        {
+            StatusMessage = "Select a valid PDF file first.";
+            IsStatusError = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        try
+        {
+            var outDir = Path.Combine(Path.GetTempPath(), "ScholarFlow-Scoped");
+            var safeName = Path.GetFileNameWithoutExtension(req.SourcePdfPath);
+            var outPath = Path.Combine(outDir, $"{safeName}_Scoped_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+
+            var instructionPrompt = await Task.Run(() =>
+            {
+                var pages = PdfQuizGrounder.ExtractGroundedPages(
+                    req.SourcePdfPath,
+                    req.Term,
+                    req.SectionFilter,
+                    req.StartPage,
+                    req.EndPage,
+                    req.SelectedRanges,
+                    maxPages: 250
+                );
+                var pageNumbers = pages.Select(p => p.PageNumber).ToList();
+                PdfQuizGrounder.ExportScopedPdfPages(req.SourcePdfPath, pageNumbers, outPath);
+                var manifest = pages.Select(p => (p.PageNumber, p.SectionBreadcrumb)).ToList();
+                return _llmService.BuildInstructionPromptForUploadedPdf(req, manifest);
+            });
+
+            if (clipboard is not null)
+                await clipboard.SetTextAsync(instructionPrompt);
+
+            Services.ExternalFileLauncher.OpenLocalFile(outDir);
+            StatusMessage = $"Exported scoped PDF to {Path.GetFileName(outPath)} & copied upload prompt to clipboard.";
+            IsStatusError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Scoped PDF export failed: {ex.Message}";
+            IsStatusError = true;
+        }
         _mainVm.RequestUiRefresh();
     }
 

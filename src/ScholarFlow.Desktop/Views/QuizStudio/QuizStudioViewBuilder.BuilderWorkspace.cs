@@ -200,44 +200,79 @@ public static partial class QuizStudioViewBuilder
         termRangeWrap.Children.Add(applyPagesBtn);
         scopeCard.Children.Add(termRangeWrap);
 
-        // Clean Hairline Outline Section Tree Picker (like PdfReaderViewBuilder's Document Outline)
-        var visibleSections = studio
-            .OutlineSections.Where(s => s.Level >= 2 || studio.OutlineSections.Count <= 6)
-            .Where(s =>
-                string.IsNullOrWhiteSpace(studio.SelectedTerm)
-                || string.IsNullOrWhiteSpace(s.Term)
-                || string.Equals(s.Term, studio.SelectedTerm, StringComparison.OrdinalIgnoreCase)
+        // Hierarchical Outline Section Tree Picker (supports Mother -> Subsections + tri-state selection)
+        static bool NodeMatchesTermFilter(PdfOutlineTreeNode node, string? selectedTerm)
+        {
+            if (string.IsNullOrWhiteSpace(selectedTerm))
+                return true;
+            if (
+                string.IsNullOrWhiteSpace(node.Section.Term)
+                || string.Equals(node.Section.Term, selectedTerm, StringComparison.OrdinalIgnoreCase)
             )
+                return true;
+            return node.Children.Any(c => NodeMatchesTermFilter(c, selectedTerm));
+        }
+
+        var visibleRoots = studio
+            .OutlineSectionRoots.Where(r => NodeMatchesTermFilter(r, studio.SelectedTerm))
             .ToList();
 
-        if (visibleSections.Count > 0)
+        if (visibleRoots.Count > 0)
         {
             var treeListStack = new StackPanel { Spacing = 1 };
-            foreach (var sec in visibleSections)
+
+            void AddOutlineNodeRows(PdfOutlineTreeNode node, int depth)
             {
-                var capturedSec = sec;
-                var key = QuizStudioViewModel.GetSectionKey(capturedSec);
-                bool isChecked = studio.SelectedSectionKeys.Contains(key);
+                if (!NodeMatchesTermFilter(node, studio.SelectedTerm))
+                    return;
+
+                var capturedNode = node;
+                var capturedSec = node.Section;
+                var selState = studio.GetOutlineNodeSelectionState(capturedNode);
+                bool isSelected = selState != OutlineSelectionState.Unchecked;
                 bool isCurrentlyPreviewed =
                     studio.CurrentPreviewPdfPage >= capturedSec.StartPage
                     && studio.CurrentPreviewPdfPage <= capturedSec.EndPage;
 
                 var secRow = new Grid
                 {
-                    ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto"),
-                    ColumnSpacing = 6,
+                    ColumnDefinitions = ColumnDefinitions.Parse("Auto,Auto,*,Auto,Auto"),
+                    ColumnSpacing = 4,
+                    Margin = new Thickness(depth * 14, 0, 0, 0),
                 };
 
+                if (capturedNode.Children.Count > 0)
+                {
+                    var expandBtn = UiBuilder.IconButton(
+                        capturedNode.IsExpanded
+                            ? MaterialIconKind.ChevronDown
+                            : MaterialIconKind.ChevronRight,
+                        () => studio.ToggleOutlineNodeExpanded(capturedNode),
+                        14,
+                        ThemeService.Brush(ThemeService.TextSecondary)
+                    );
+                    secRow.Children.Add(expandBtn);
+                }
+                else
+                {
+                    secRow.Children.Add(new Border { Width = 22 });
+                }
+
+                var chkIcon = selState switch
+                {
+                    OutlineSelectionState.Checked => MaterialIconKind.CheckboxMarked,
+                    OutlineSelectionState.Indeterminate => MaterialIconKind.MinusBoxOutline,
+                    _ => MaterialIconKind.CheckboxBlankOutline,
+                };
                 var chkBtn = UiBuilder.IconButton(
-                    isChecked
-                        ? MaterialIconKind.CheckboxMarked
-                        : MaterialIconKind.CheckboxBlankOutline,
-                    () => studio.ToggleOutlineSection(capturedSec),
+                    chkIcon,
+                    () => studio.ToggleOutlineNodeSelection(capturedNode),
                     15,
-                    isChecked
+                    isSelected
                         ? ThemeService.Brush(ThemeService.AccentPrimary)
                         : ThemeService.Brush(ThemeService.TextMuted)
                 );
+                Grid.SetColumn(chkBtn, 1);
                 secRow.Children.Add(chkBtn);
 
                 var secTitleBtn = new Button
@@ -247,11 +282,12 @@ public static partial class QuizStudioViewBuilder
                         Text = capturedSec.Title,
                         FontSize = 12.5,
                         FontWeight =
-                            isChecked || isCurrentlyPreviewed
+                            isSelected || isCurrentlyPreviewed
                                 ? FontWeight.SemiBold
                                 : FontWeight.Normal,
                         Foreground =
-                            isChecked ? ThemeService.Brush(ThemeService.AccentPrimary)
+                            selState == OutlineSelectionState.Checked
+                                ? ThemeService.Brush(ThemeService.AccentPrimary)
                             : isCurrentlyPreviewed ? ThemeService.Brush(ThemeService.TextPrimary)
                             : ThemeService.Brush(ThemeService.TextSecondary),
                         TextTrimming = TextTrimming.CharacterEllipsis,
@@ -263,8 +299,8 @@ public static partial class QuizStudioViewBuilder
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Left,
                 };
-                secTitleBtn.Click += (_, _) => studio.ToggleOutlineSection(capturedSec);
-                Grid.SetColumn(secTitleBtn, 1);
+                secTitleBtn.Click += (_, _) => studio.ToggleOutlineNodeSelection(capturedNode);
+                Grid.SetColumn(secTitleBtn, 2);
                 secRow.Children.Add(secTitleBtn);
 
                 if (!string.IsNullOrWhiteSpace(capturedSec.Term))
@@ -275,7 +311,7 @@ public static partial class QuizStudioViewBuilder
                         ThemeService.Brush(ThemeService.BgElevated),
                         fontSize: 10
                     );
-                    Grid.SetColumn(termBadge, 2);
+                    Grid.SetColumn(termBadge, 3);
                     secRow.Children.Add(termBadge);
                 }
 
@@ -285,7 +321,7 @@ public static partial class QuizStudioViewBuilder
                     () => studio.JumpPreviewToSection(capturedSec),
                     isActive: isCurrentlyPreviewed
                 );
-                Grid.SetColumn(previewSecBtn, 3);
+                Grid.SetColumn(previewSecBtn, 4);
                 secRow.Children.Add(previewSecBtn);
 
                 treeListStack.Children.Add(
@@ -301,7 +337,16 @@ public static partial class QuizStudioViewBuilder
                         Child = secRow,
                     }
                 );
+
+                if (capturedNode.IsExpanded)
+                {
+                    foreach (var child in capturedNode.Children)
+                        AddOutlineNodeRows(child, depth + 1);
+                }
             }
+
+            foreach (var root in visibleRoots)
+                AddOutlineNodeRows(root, depth: 0);
 
             scopeCard.Children.Add(
                 new Border

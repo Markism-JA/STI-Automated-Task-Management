@@ -148,18 +148,59 @@ public static class PdfQuizGrounder
         bool hasNonSyllabusSections = leafSections.Any(s =>
             !s.Title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
         );
+        bool hasLevel2Sections = outlineSections.Any(s => s.Level >= 2);
         int minP = Math.Clamp(startPage ?? 1, 1, totalPages);
         int maxP = Math.Clamp(endPage ?? totalPages, minP, totalPages);
+
+        // Precompute O(1) per-page lookup tables instead of O(Pages * Sections) scans
+        var secByPage = new PdfOutlineSectionInfo?[totalPages + 1];
+        foreach (var s in outlineSections)
+        {
+            if (s.Level >= 2 && leafSections.Count > 0)
+                continue;
+            int sStart = Math.Clamp(s.StartPage, 1, totalPages);
+            int sEnd = Math.Clamp(s.EndPage, sStart, totalPages);
+            for (int p = sStart; p <= sEnd; p++)
+                secByPage[p] = s;
+        }
+        foreach (var s in leafSections)
+        {
+            int sStart = Math.Clamp(s.StartPage, 1, totalPages);
+            int sEnd = Math.Clamp(s.EndPage, sStart, totalPages);
+            for (int p = sStart; p <= sEnd; p++)
+                secByPage[p] = s;
+        }
+
+        var termDividerPages = new HashSet<int>();
+        if (hasLevel2Sections)
+        {
+            foreach (var s in outlineSections)
+            {
+                if (s.Level == 1 && TaskItem.NormalizeTerm(s.Title) is not null)
+                    termDividerPages.Add(s.StartPage);
+            }
+        }
+
+        bool[]? explicitPageMask = null;
+        if (hasExplicitRanges)
+        {
+            explicitPageMask = new bool[totalPages + 1];
+            foreach (var r in explicitRanges!)
+            {
+                int rStart = Math.Clamp(r.StartPage, 1, totalPages);
+                int rEnd = Math.Clamp(r.EndPage, rStart, totalPages);
+                for (int p = rStart; p <= rEnd; p++)
+                    explicitPageMask[p] = true;
+            }
+        }
 
         var matched = new List<(int PageNumber, string SectionTitle, string? Term)>();
         for (int p = minP; p <= maxP; p++)
         {
-            if (hasExplicitRanges && !explicitRanges!.Any(r => r.Contains(p)))
+            if (explicitPageMask is not null && !explicitPageMask[p])
                 continue;
 
-            var sec =
-                leafSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage)
-                ?? outlineSections.LastOrDefault(s => p >= s.StartPage && p <= s.EndPage);
+            var sec = secByPage[p];
 
             // Skip cover / TOC / single-page term divider headers when outline sections exist and no explicit page range was typed
             if (
@@ -173,16 +214,8 @@ public static class PdfQuizGrounder
                     continue;
 
                 // Skip the 1-page Term Divider sheet itself (Level 1 start page before Level 2 handout starts)
-                if (
-                    outlineSections.Any(s =>
-                        s.Level == 1
-                        && s.StartPage == p
-                        && TaskItem.NormalizeTerm(s.Title) is not null
-                    ) && outlineSections.Any(s => s.Level >= 2)
-                )
-                {
+                if (termDividerPages.Contains(p))
                     continue;
-                }
 
                 // Skip Course Syllabus boilerplate by default unless explicitly checked
                 if (
@@ -429,20 +462,151 @@ public static class PdfQuizGrounder
     public static string FormatPagesForPrompt(
         IReadOnlyList<GroundedPdfPage> pages,
         int maxChars = 42_000
+    ) => FormatPagesForPrompt(pages, maxChars, out _);
+
+    public static string FormatPagesForPrompt(
+        IReadOnlyList<GroundedPdfPage> pages,
+        int maxChars,
+        out int includedCount
     )
     {
+        var cleaned = StripRepeatedRunningHeadersAndFooters(pages);
         var sb = new StringBuilder();
-        foreach (var p in pages)
+        includedCount = 0;
+
+        foreach (var p in cleaned)
         {
             var header = $"=== [PAGE {p.PageNumber}] | Section: {p.SectionBreadcrumb} ===";
-            if (sb.Length + header.Length + p.Text.Length + 8 > maxChars && sb.Length > 0)
+            if (maxChars < int.MaxValue && sb.Length + header.Length + p.Text.Length + 8 > maxChars && sb.Length > 0)
                 break;
 
             sb.AppendLine(header);
             sb.AppendLine(p.Text);
             sb.AppendLine();
+            includedCount++;
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Packs pages into contiguous batches that each fit under maxCharsPerBatch
+    /// without silently dropping tail pages.
+    /// </summary>
+    public static List<List<GroundedPdfPage>> PackPagesIntoBudgets(
+        IReadOnlyList<GroundedPdfPage> pages,
+        int maxCharsPerBatch
+    )
+    {
+        var cleaned = StripRepeatedRunningHeadersAndFooters(pages);
+        var batches = new List<List<GroundedPdfPage>>();
+        if (cleaned.Count == 0)
+            return batches;
+
+        var current = new List<GroundedPdfPage>();
+        int currentChars = 0;
+
+        foreach (var p in cleaned)
+        {
+            int entryCost = p.Text.Length + p.SectionBreadcrumb.Length + 48;
+            if (current.Count > 0 && currentChars + entryCost > maxCharsPerBatch)
+            {
+                batches.Add(current);
+                current = [];
+                currentChars = 0;
+            }
+            current.Add(p);
+            currentChars += entryCost;
+        }
+
+        if (current.Count > 0)
+            batches.Add(current);
+
+        return batches;
+    }
+
+    /// <summary>
+    /// Losslessly removes repeated running headers/footers (e.g., chapter titles, page numbers,
+    /// institution footers) appearing on 3+ pages while preserving body text verbatim for grounding.
+    /// </summary>
+    public static IReadOnlyList<GroundedPdfPage> StripRepeatedRunningHeadersAndFooters(
+        IReadOnlyList<GroundedPdfPage> pages
+    )
+    {
+        if (pages.Count < 4)
+            return pages;
+
+        static string NormalizeEdgeLine(string line) =>
+            new string(line.Trim().Where(c => !char.IsDigit(c)).ToArray()).Trim();
+
+        var firstLineCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var lastLineCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var p in pages)
+        {
+            var lines = p.Text.Split('\n');
+            if (lines.Length >= 3)
+            {
+                var firstNorm = NormalizeEdgeLine(lines[0]);
+                if (firstNorm.Length is >= 4 and <= 120)
+                    firstLineCounts[firstNorm] = firstLineCounts.GetValueOrDefault(firstNorm) + 1;
+
+                var lastNorm = NormalizeEdgeLine(lines[^1]);
+                if (lastNorm.Length is >= 4 and <= 120)
+                    lastLineCounts[lastNorm] = lastLineCounts.GetValueOrDefault(lastNorm) + 1;
+            }
+        }
+
+        int threshold = Math.Max(3, pages.Count / 3);
+        var result = new List<GroundedPdfPage>(pages.Count);
+
+        foreach (var p in pages)
+        {
+            var lines = p.Text.Split('\n').ToList();
+            if (lines.Count >= 3)
+            {
+                var firstNorm = NormalizeEdgeLine(lines[0]);
+                if (firstLineCounts.GetValueOrDefault(firstNorm) >= threshold)
+                    lines.RemoveAt(0);
+
+                if (lines.Count >= 2)
+                {
+                    var lastNorm = NormalizeEdgeLine(lines[^1]);
+                    if (lastLineCounts.GetValueOrDefault(lastNorm) >= threshold)
+                        lines.RemoveAt(lines.Count - 1);
+                }
+            }
+
+            result.Add(p with { Text = string.Join('\n', lines).Trim() });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Exports only the selected 1-based pages from a source PDF into a lightweight
+    /// standalone PDF suitable for Web AI file upload.
+    /// </summary>
+    public static void ExportScopedPdfPages(
+        string sourcePdfPath,
+        IReadOnlyList<int> oneBasedPages,
+        string outputPath
+    )
+    {
+        using var input = PdfSharpCore.Pdf.IO.PdfReader.Open(
+            sourcePdfPath,
+            PdfSharpCore.Pdf.IO.PdfDocumentOpenMode.Import
+        );
+        using var output = new PdfSharpCore.Pdf.PdfDocument();
+        foreach (int p in oneBasedPages)
+        {
+            if (p >= 1 && p <= input.PageCount)
+                output.AddPage(input.Pages[p - 1]);
+        }
+
+        var dir = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+        output.Save(outputPath);
     }
 
     /// <summary>

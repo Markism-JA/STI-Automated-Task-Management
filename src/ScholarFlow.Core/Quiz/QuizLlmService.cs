@@ -27,7 +27,14 @@ public sealed partial class QuizLlmService
 
     public string BuildPromptForManualCopy(
         QuizGenerationRequest request,
-        out IReadOnlyList<GroundedPdfPage> extractedPages)
+        out IReadOnlyList<GroundedPdfPage> extractedPages) =>
+        BuildPromptForManualCopy(request, 160_000, out extractedPages, out _);
+
+    public string BuildPromptForManualCopy(
+        QuizGenerationRequest request,
+        int maxChars,
+        out IReadOnlyList<GroundedPdfPage> extractedPages,
+        out int includedPageCount)
     {
         extractedPages = PdfQuizGrounder.ExtractGroundedPages(
             request.SourcePdfPath,
@@ -36,13 +43,39 @@ public sealed partial class QuizLlmService
             request.StartPage,
             request.EndPage,
             request.SelectedRanges,
-            maxPages: 120);
+            maxPages: 250);
 
-        var groundedContent = PdfQuizGrounder.FormatPagesForPrompt(extractedPages, maxChars: 48_000);
+        var groundedContent = PdfQuizGrounder.FormatPagesForPrompt(
+            extractedPages,
+            maxChars: maxChars,
+            out includedPageCount);
         var weakTopics = ScholarFlowDatabase.GetWeakTopicTags(request.BasinRoot, request.CourseFolder);
         var modality = DetectContentModalities(extractedPages, request.CourseTitle, request.ModalityMode);
         int count = Math.Clamp(request.QuestionCount, 1, 150);
         return BuildSystemInstructions(request, weakTopics, modality) + "\n\n" + BuildUserPrompt(request, groundedContent, count, modality: modality);
+    }
+
+    public string BuildInstructionPromptForUploadedPdf(
+        QuizGenerationRequest request,
+        IReadOnlyList<(int OriginalPage, string SectionBreadcrumb)> pageManifest)
+    {
+        var weakTopics = ScholarFlowDatabase.GetWeakTopicTags(request.BasinRoot, request.CourseFolder);
+        var modality = new ContentModalityProfile(HasCode: true, HasMath: true, HasDiagrams: true);
+        int count = Math.Clamp(request.QuestionCount, 1, 150);
+
+        var sb = new StringBuilder();
+        sb.AppendLine(BuildSystemInstructions(request, weakTopics, modality));
+        sb.AppendLine();
+        sb.AppendLine("ATTACHED SCOPED PDF PAGE MAPPING:");
+        sb.AppendLine("Use the ORIGINAL page number below for \"evidence.pageNumber\" so highlights align with the source textbook:");
+        for (int i = 0; i < pageManifest.Count; i++)
+        {
+            var (origPage, section) = pageManifest[i];
+            sb.AppendLine($"- Uploaded PDF Page {i + 1} = [PAGE {origPage}] | Section: {section}");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"Generate {count} grounded questions from the attached PDF strictly following the JSON schema above.");
+        return sb.ToString();
     }
 
     public async Task<QuizSessionRecord> GenerateQuizAsync(
@@ -56,7 +89,7 @@ public sealed partial class QuizLlmService
             request.StartPage,
             request.EndPage,
             request.SelectedRanges,
-            maxPages: 150), ct);
+            maxPages: 250), ct);
 
         if (pages.Count == 0)
             throw new InvalidOperationException("No readable text pages were found in the selected PDF scope.");
@@ -85,8 +118,21 @@ public sealed partial class QuizLlmService
             var modality = DetectContentModalities(pages, request.CourseTitle, request.ModalityMode);
             var sysPrompt = BuildSystemInstructions(request, weakTopics, modality);
 
-            const int batchSize = 20;
-            int batchCount = Math.Max(1, (int)Math.Ceiling(desiredCount / (double)batchSize));
+            int batchCharBudget = isLocalEndpoint ? 28_000 : 72_000;
+            var packedBatches = PdfQuizGrounder.PackPagesIntoBudgets(pages, batchCharBudget);
+            if (packedBatches.Count > desiredCount)
+            {
+                // If fewer questions than batches, sample batches evenly across the whole scope
+                var sampled = new List<List<GroundedPdfPage>>(desiredCount);
+                for (int i = 0; i < desiredCount; i++)
+                {
+                    int idx = (int)Math.Floor(i * (packedBatches.Count / (double)desiredCount));
+                    sampled.Add(packedBatches[Math.Clamp(idx, 0, packedBatches.Count - 1)]);
+                }
+                packedBatches = sampled;
+            }
+
+            int batchCount = Math.Max(1, packedBatches.Count);
             var allQuestions = new List<GeneratedQuestionDto>();
             var allConcepts = new List<string>();
             string? firstTitle = null;
@@ -98,9 +144,10 @@ public sealed partial class QuizLlmService
                 if (remaining <= 0)
                     break;
 
-                int thisBatchCount = Math.Min(batchSize, remaining);
-                var batchPages = SlicePagesForBatch(pages, b, batchCount);
-                var groundedContent = PdfQuizGrounder.FormatPagesForPrompt(batchPages, maxChars: 38_000);
+                int batchesLeft = batchCount - b;
+                int thisBatchCount = Math.Max(1, (int)Math.Ceiling(remaining / (double)batchesLeft));
+                var batchPages = packedBatches[b];
+                var groundedContent = PdfQuizGrounder.FormatPagesForPrompt(batchPages, maxChars: int.MaxValue, out _);
                 var usrPrompt = BuildUserPrompt(request, groundedContent, thisBatchCount, b + 1, batchCount, modality);
 
                 var rawResponse = await CallOpenAiCompatibleChatAsync(
@@ -129,21 +176,6 @@ public sealed partial class QuizLlmService
         }
 
         return await BuildGroundAndPersistSessionAsync(request, dto, modelLabel, pages, ct);
-    }
-
-    private static IReadOnlyList<GroundedPdfPage> SlicePagesForBatch(
-        IReadOnlyList<GroundedPdfPage> allPages,
-        int batchIndex,
-        int totalBatches)
-    {
-        if (totalBatches <= 1 || allPages.Count <= 4)
-            return allPages;
-
-        int sliceSize = Math.Max(1, (int)Math.Ceiling(allPages.Count / (double)totalBatches));
-        int start = Math.Min(allPages.Count - 1, batchIndex * sliceSize);
-        int count = Math.Min(sliceSize, allPages.Count - start);
-        var slice = allPages.Skip(start).Take(count).ToList();
-        return slice.Count > 0 ? slice : allPages;
     }
 
     public async Task<QuizSessionRecord> ImportQuizFromJsonAsync(

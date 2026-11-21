@@ -339,6 +339,25 @@ public class QuizStudioV2Tests
     }
 
     [Fact]
+    public void PackPagesIntoBudgets_StripsRepeatedHeadersAndPreservesAllPages()
+    {
+        var pages = new[]
+        {
+            new GroundedPdfPage(37, null, "Ch 1", "37 Chapter 1 A Tour of Computer Systems\nBody page 37 content.\nSTI College"),
+            new GroundedPdfPage(38, null, "Ch 1", "38 Chapter 1 A Tour of Computer Systems\nBody page 38 content.\nSTI College"),
+            new GroundedPdfPage(39, null, "Ch 1", "39 Chapter 1 A Tour of Computer Systems\nBody page 39 content.\nSTI College"),
+            new GroundedPdfPage(40, null, "Ch 1", "40 Chapter 1 A Tour of Computer Systems\nVirtual Memory and Files.\nSTI College"),
+        };
+
+        var batches = PdfQuizGrounder.PackPagesIntoBudgets(pages, maxCharsPerBatch: 160);
+        Assert.True(batches.Count >= 2);
+        var flattened = batches.SelectMany(b => b).ToList();
+        Assert.Equal(4, flattened.Count);
+        Assert.DoesNotContain("Chapter 1 A Tour of Computer Systems", flattened[0].Text);
+        Assert.Contains("Virtual Memory and Files.", flattened[^1].Text);
+    }
+
+    [Fact]
     public async Task SaveAndLoadQuizSession_PreservesSpecializedModalityFields()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"scholarflow_test_{Guid.NewGuid():N}");

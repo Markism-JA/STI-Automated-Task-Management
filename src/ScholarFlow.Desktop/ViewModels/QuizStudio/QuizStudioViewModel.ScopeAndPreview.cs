@@ -79,6 +79,156 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
+    public void ToggleOutlineNodeExpanded(PdfOutlineTreeNode node)
+    {
+        node.IsExpanded = !node.IsExpanded;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public OutlineSelectionState GetOutlineNodeSelectionState(PdfOutlineTreeNode node)
+    {
+        if (node.Children.Count == 0)
+        {
+            return SelectedSectionKeys.Contains(GetSectionKey(node.Section))
+                ? OutlineSelectionState.Checked
+                : OutlineSelectionState.Unchecked;
+        }
+
+        var leaves = GetLeafDescendants(node);
+        int selectedCount = leaves.Count(n => SelectedSectionKeys.Contains(GetSectionKey(n.Section)));
+        if (selectedCount == 0)
+            return OutlineSelectionState.Unchecked;
+        if (selectedCount == leaves.Count)
+            return OutlineSelectionState.Checked;
+        return OutlineSelectionState.Indeterminate;
+    }
+
+    public void ToggleOutlineNodeSelection(PdfOutlineTreeNode node)
+    {
+        bool currentlyAllSelected = GetOutlineNodeSelectionState(node) == OutlineSelectionState.Checked;
+        var subtree = FlattenSubtree(node)
+            .Where(n =>
+                string.IsNullOrWhiteSpace(SelectedTerm)
+                || string.IsNullOrWhiteSpace(n.Section.Term)
+                || string.Equals(n.Section.Term, SelectedTerm, StringComparison.OrdinalIgnoreCase)
+            )
+            .ToList();
+
+        if (currentlyAllSelected)
+        {
+            foreach (var n in subtree)
+                SelectedSectionKeys.Remove(GetSectionKey(n.Section));
+        }
+        else
+        {
+            foreach (var n in subtree)
+                SelectedSectionKeys.Add(GetSectionKey(n.Section));
+        }
+
+        SyncAncestorSelectionKeys();
+        RecomputeScopePreview();
+        if (!currentlyAllSelected)
+        {
+            var idx = MatchedScopePages
+                .Select((p, i) => (p.PageNumber, Index: i))
+                .FirstOrDefault(x => x.PageNumber >= node.Section.StartPage)
+                .Index;
+            PreviewScopeIndex = idx;
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
+    private void SyncAncestorSelectionKeys()
+    {
+        bool SyncNode(PdfOutlineTreeNode node)
+        {
+            if (node.Children.Count == 0)
+                return SelectedSectionKeys.Contains(GetSectionKey(node.Section));
+
+            int selectedChildren = 0;
+            bool allChildrenSelected = true;
+            foreach (var child in node.Children)
+            {
+                bool childHasSelection = SyncNode(child);
+                if (childHasSelection)
+                    selectedChildren++;
+                if (GetOutlineNodeSelectionState(child) != OutlineSelectionState.Checked)
+                    allChildrenSelected = false;
+            }
+
+            var key = GetSectionKey(node.Section);
+            if (selectedChildren == 0)
+                SelectedSectionKeys.Remove(key);
+            else if (allChildrenSelected)
+                SelectedSectionKeys.Add(key);
+
+            return selectedChildren > 0;
+        }
+
+        foreach (var root in OutlineSectionRoots)
+            SyncNode(root);
+    }
+
+    private static List<PdfOutlineTreeNode> GetLeafDescendants(PdfOutlineTreeNode root)
+    {
+        var leaves = new List<PdfOutlineTreeNode>();
+        foreach (var n in FlattenSubtree(root))
+        {
+            if (n.Children.Count == 0)
+                leaves.Add(n);
+        }
+        return leaves;
+    }
+
+    private static List<PdfOutlineTreeNode> FlattenSubtree(PdfOutlineTreeNode root)
+    {
+        var result = new List<PdfOutlineTreeNode> { root };
+        var stack = new Stack<PdfOutlineTreeNode>();
+        for (int i = root.Children.Count - 1; i >= 0; i--)
+            stack.Push(root.Children[i]);
+
+        while (stack.Count > 0)
+        {
+            var cur = stack.Pop();
+            result.Add(cur);
+            for (int i = cur.Children.Count - 1; i >= 0; i--)
+                stack.Push(cur.Children[i]);
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<PdfOutlineTreeNode> BuildOutlineTree(
+        IReadOnlyList<PdfOutlineSectionInfo> sections)
+    {
+        if (sections.Count == 0)
+            return [];
+
+        bool collapseTopLevel = sections.Count > 20;
+        var roots = new List<PdfOutlineTreeNode>();
+        var stack = new Stack<PdfOutlineTreeNode>();
+
+        foreach (var sec in sections)
+        {
+            var node = new PdfOutlineTreeNode
+            {
+                Section = sec,
+                IsExpanded = !collapseTopLevel || sec.Level > 1,
+            };
+
+            while (stack.Count > 0 && stack.Peek().Section.Level >= sec.Level)
+                stack.Pop();
+
+            if (stack.Count == 0)
+                roots.Add(node);
+            else
+                stack.Peek().Children.Add(node);
+
+            stack.Push(node);
+        }
+
+        return roots;
+    }
+
     public void JumpPreviewToSection(PdfOutlineSectionInfo sec)
     {
         var matchIdx = -1;
@@ -197,12 +347,60 @@ public sealed partial class QuizStudioViewModel
         if (SelectedSectionKeys.Count == 0)
             return [];
 
-        return
-        [
-            .. OutlineSections
-                .Where(s => SelectedSectionKeys.Contains(GetSectionKey(s)))
-                .Select(s => new PdfPageRange(s.StartPage, s.EndPage)),
-        ];
+        var raw = new List<PdfPageRange>();
+
+        void CollectRanges(PdfOutlineTreeNode node)
+        {
+            var key = GetSectionKey(node.Section);
+            if (node.Children.Count == 0)
+            {
+                if (SelectedSectionKeys.Contains(key))
+                    raw.Add(new PdfPageRange(node.Section.StartPage, node.Section.EndPage));
+                return;
+            }
+
+            // For parent nodes with children, only emit exclusive intro pages before the first child
+            // so deselecting any child subsection genuinely excludes that child's pages.
+            if (SelectedSectionKeys.Contains(key))
+            {
+                int firstChildStart = node.Children.Min(c => c.Section.StartPage);
+                if (firstChildStart > node.Section.StartPage)
+                    raw.Add(new PdfPageRange(node.Section.StartPage, firstChildStart - 1));
+            }
+
+            foreach (var child in node.Children)
+                CollectRanges(child);
+        }
+
+        if (OutlineSectionRoots.Count > 0)
+        {
+            foreach (var root in OutlineSectionRoots)
+                CollectRanges(root);
+        }
+        else
+        {
+            raw.AddRange(
+                OutlineSections
+                    .Where(s => SelectedSectionKeys.Contains(GetSectionKey(s)))
+                    .Select(s => new PdfPageRange(s.StartPage, s.EndPage))
+            );
+        }
+
+        raw = raw.OrderBy(r => r.StartPage).ThenBy(r => r.EndPage).ToList();
+        if (raw.Count <= 1)
+            return raw;
+
+        var merged = new List<PdfPageRange> { raw[0] };
+        for (int i = 1; i < raw.Count; i++)
+        {
+            var last = merged[^1];
+            var cur = raw[i];
+            if (cur.StartPage <= last.EndPage + 1)
+                merged[^1] = new PdfPageRange(last.StartPage, Math.Max(last.EndPage, cur.EndPage));
+            else
+                merged.Add(cur);
+        }
+        return merged;
     }
 
     public Bitmap? GetCurrentPreviewBitmap()
@@ -232,7 +430,7 @@ public sealed partial class QuizStudioViewModel
         IsLoadingPreviewPage = true;
         try
         {
-            var pngBytes = await Task.Run(() =>
+            var rendered = await Task.Run(() =>
             {
                 byte[] pdfBytes;
                 lock (_pendingPreviewRenders)
@@ -251,24 +449,14 @@ public sealed partial class QuizStudioViewModel
                     pdfBytes = _cachedPdfBytes;
                 }
 
-                using var ms = new MemoryStream();
-#pragma warning disable CA1416
-                var renderOpts = new PDFtoImage.RenderOptions(
-                    Dpi: 135,
-                    BackgroundColor: SkiaSharp.SKColors.White
-                );
-                PDFtoImage.Conversion.SavePng(
-                    ms,
+                return Services.PdfBitmapRenderer.RenderPagePixels(
                     pdfBytes,
-                    page: (Index)(pageOneBased - 1),
-                    options: renderOpts
+                    pageOneBased - 1,
+                    dpi: 135
                 );
-#pragma warning restore CA1416
-                return ms.ToArray();
             });
 
-            using var bmpStream = new MemoryStream(pngBytes);
-            var bmp = new Bitmap(bmpStream);
+            var bmp = Services.PdfBitmapRenderer.CreateWriteableBitmap(rendered);
 
             if (_previewBitmapCache.Count >= 18)
             {
@@ -374,6 +562,7 @@ public sealed partial class QuizStudioViewModel
         {
             PdfTotalPages = 0;
             OutlineSections = [];
+            OutlineSectionRoots = [];
             MatchedScopePages = [];
             PreviewScopeIndex = 0;
             return;
@@ -383,6 +572,7 @@ public sealed partial class QuizStudioViewModel
         {
             PdfTotalPages = cached.TotalPages;
             OutlineSections = cached.Sections;
+            OutlineSectionRoots = BuildOutlineTree(cached.Sections);
             RecomputeScopePreview();
         }
         else
@@ -407,6 +597,7 @@ public sealed partial class QuizStudioViewModel
             {
                 PdfTotalPages = totalPages;
                 OutlineSections = sections;
+                OutlineSectionRoots = BuildOutlineTree(sections);
                 RecomputeScopePreview();
             }
         }

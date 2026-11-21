@@ -25,6 +25,20 @@ public enum QuizBuilderOutputMode
 /// Offline Smart PDF Analysis, SM-2/FSRS Spaced Repetition, live visual PDF scope previewing,
 /// and one-click jump to highlighted statements in the PDF Reader.
 /// </summary>
+public enum OutlineSelectionState
+{
+    Unchecked,
+    Indeterminate,
+    Checked,
+}
+
+public sealed class PdfOutlineTreeNode
+{
+    public required PdfOutlineSectionInfo Section { get; init; }
+    public List<PdfOutlineTreeNode> Children { get; } = [];
+    public bool IsExpanded { get; set; } = true;
+}
+
 public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
 {
     private readonly MainWindowViewModel _mainVm = mainVm;
@@ -48,6 +62,7 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     public string? SelectedPdfPath { get; private set; }
     public int PdfTotalPages { get; private set; }
     public IReadOnlyList<PdfOutlineSectionInfo> OutlineSections { get; private set; } = [];
+    public IReadOnlyList<PdfOutlineTreeNode> OutlineSectionRoots { get; private set; } = [];
     public HashSet<string> SelectedSectionKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string? SelectedTerm { get; private set; }
@@ -113,6 +128,9 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     public bool IsManualJsonModalOpen { get; private set; }
     public string ManualJsonInput { get; set; } = string.Empty;
     public string GeneratedPromptPreview { get; private set; } = string.Empty;
+    public int ManualPromptBudgetChars { get; private set; } = 160_000;
+    public int ManualPromptTotalPages { get; private set; }
+    public int ManualPromptIncludedPages { get; private set; }
 
     public bool IsGenerating { get; private set; }
     public bool IsInspectingPdf { get; private set; }

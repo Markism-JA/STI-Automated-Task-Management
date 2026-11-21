@@ -173,23 +173,9 @@ public sealed class PdfReaderViewModel : IDisposable
 
         try
         {
-            var pngBytes = await Task.Run(() =>
-            {
-                using var ms = new MemoryStream();
-#pragma warning disable CA1416
-                var renderOpts = new PDFtoImage.RenderOptions(
-                    Dpi: dpi,
-                    BackgroundColor: SkiaSharp.SKColors.White
-                );
-                PDFtoImage.Conversion.SavePng(
-                    ms,
-                    pdfBytes,
-                    page: (Index)zeroBased,
-                    options: renderOpts
-                );
-#pragma warning restore CA1416
-                return ms.ToArray();
-            });
+            var rendered = await Task.Run(
+                () => PdfBitmapRenderer.RenderPagePixels(pdfBytes, zeroBased, dpi)
+            );
 
             Dispatcher.UIThread.Post(() =>
             {
@@ -199,8 +185,7 @@ public sealed class PdfReaderViewModel : IDisposable
                 if (!string.Equals(CurrentFilePath, filePath, StringComparison.OrdinalIgnoreCase))
                     return;
 
-                using var bmpStream = new MemoryStream(pngBytes);
-                var bmp = new Bitmap(bmpStream);
+                var bmp = PdfBitmapRenderer.CreateWriteableBitmap(rendered);
 
                 if (_pageCache.Count >= 16)
                 {
