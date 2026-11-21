@@ -56,9 +56,22 @@ public static class BasinTaskSynchronizer
     {
         var tasksPath = BasinService.GetCourseTasksPath(basinRoot, course.FolderName);
         var existingTasks = await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct);
-        var courseTermMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
+        var basinConfig = await new BasinService().InitializeOrOpenAsync(basinRoot, ct: ct);
+        bool isStiProvider = string.Equals(
+            basinConfig.ProviderId,
+            SyncProviderIds.StiElms,
+            StringComparison.OrdinalIgnoreCase
+        );
+        var courseTermMap = BasinService.LoadCourseTermMap(
+            basinRoot,
+            course.FolderName,
+            basinConfig.Terms,
+            useStiSyllabusFallback: isStiProvider
+        );
         var courseDir = Path.Combine(basinRoot, course.FolderName);
-        var syllabusPdfPath = SyllabusTermParser.FindSyllabusPdfPath(courseDir);
+        var syllabusPdfPath = isStiProvider
+            ? SyllabusTermParser.FindSyllabusPdfPath(courseDir)
+            : null;
 
         var incomingTasks = new List<TaskItem>();
         foreach (var a in assignments)
@@ -112,7 +125,9 @@ public static class BasinTaskSynchronizer
                 courseTermMap,
                 a.TermHeader,
                 a.Title,
-                a.ParentModuleTitle
+                a.ParentModuleTitle,
+                basinConfig.Terms,
+                useStiNumericFallback: isStiProvider
             );
             if (resolvedTerm is null && syllabusPdfPath is not null)
             {

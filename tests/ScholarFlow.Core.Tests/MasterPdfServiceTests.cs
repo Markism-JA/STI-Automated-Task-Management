@@ -110,8 +110,87 @@ public sealed class MasterPdfServiceTests : IDisposable
         Assert.Single(deduped);
         Assert.Equal("Platform_Technology_(Operating_System)", deduped[0].FolderName);
         Assert.Equal("5725166", deduped[0].CourseId);
+        Assert.True(deduped[0].IsSyncableCourse);
+        Assert.Equal(CourseOrigin.Synced, deduped[0].Origin);
         Assert.True(File.Exists(Path.Combine(basin, "Platform_Technology_(Operating_System)", "05_Handout_1", "05.txt")));
         Assert.False(Directory.Exists(Path.Combine(basin, "Platform_Technology_(Operating_Systems)")));
+    }
+
+    [Fact]
+    public async Task CompileIfStaleAsync_SupportsCustomPacketPlanPageRangesExclusionsAndFlatLocalBasins()
+    {
+        var basin = Path.Combine(_tempRoot, "LocalBookBasin");
+        var svc = new BasinService();
+        var cfg = await svc.InitializeOrOpenAsync(basin, "Knowledge Hub");
+        cfg.ProviderId = SyncProviderIds.None;
+        cfg.Terms = [];
+        await svc.SaveBasinConfigAsync(basin, cfg);
+
+        var courseDir = Path.Combine(basin, "Rust_Systems");
+        var ch1Dir = Path.Combine(courseDir, "01_Ownership");
+        var ch2Dir = Path.Combine(courseDir, "02_Lifetimes");
+        Directory.CreateDirectory(ch1Dir);
+        Directory.CreateDirectory(ch2Dir);
+
+        CreateSamplePdf(Path.Combine(ch1Dir, "01_Ownership.pdf")); // 1 portrait + 1 landscape (=3 compiled pages)
+        CreateSamplePdf(Path.Combine(ch2Dir, "02_Lifetimes.pdf"));
+
+        // 1. Flat compilation when BasinConfig.Terms is empty (no forced Prelims/Finals divider pages)
+        var pdfService = new MasterPdfService();
+        var flatRes = await pdfService.CompileIfStaleAsync(basin, "Rust_Systems", "Rust Systems");
+        Assert.True(flatRes.WasRegenerated);
+        // Cover (1) + TOC (1) + ch1 (3) + ch2 (3) = 8 pages (no section divider pages!)
+        Assert.Equal(8, flatRes.PageCount);
+
+        using (var flatDoc = UglyToad.PdfPig.PdfDocument.Open(flatRes.OutputPdfPath))
+        {
+            Assert.True(flatDoc.TryGetBookmarks(out var flatBookmarks));
+            var rootTitles = flatBookmarks.Roots.Select(r => r.Title).ToList();
+            Assert.DoesNotContain("Prelims", rootTitles);
+            Assert.Contains("01 Ownership", rootTitles);
+            Assert.Contains("02 Lifetimes", rootTitles);
+        }
+
+        // 2. Custom packet.json with custom section, page range ("1-1" -> portrait page only), and exclusion
+        var customPlan = CoursePacketPlan.LoadOrBuildPlan(
+            courseDir,
+            configuredTerms: [],
+            useStiSyllabusFallback: false
+        );
+        customPlan.Sections.Clear();
+        customPlan.Sections.Add(
+            new PacketSectionPlan
+            {
+                Title = "Part I: Core Memory Model",
+                Items =
+                [
+                    new PacketItemPlan
+                    {
+                        RelativePath = "01_Ownership/01_Ownership.pdf",
+                        DisplayTitle = "Chapter 1: Ownership (Page 1 Only)",
+                        PageRanges = "1-1",
+                        IsExcluded = false,
+                    },
+                    new PacketItemPlan
+                    {
+                        RelativePath = "02_Lifetimes/02_Lifetimes.pdf",
+                        DisplayTitle = "Chapter 2: Lifetimes (Excluded)",
+                        IsExcluded = true,
+                    },
+                ],
+            }
+        );
+        CoursePacketPlan.SavePlan(courseDir, customPlan);
+
+        // Saving packet.json invalidates the fingerprint and recompiles
+        var customRes = await pdfService.CompileIfStaleAsync(basin, "Rust_Systems", "Rust Systems");
+        Assert.True(customRes.WasRegenerated);
+        // Cover (1) + TOC (1) + Part I divider (1) + Chapter 1 page 1 only (1) = 4 pages
+        Assert.Equal(4, customRes.PageCount);
+
+        var filter = CoursePacketPlan.ParsePageRangeFilter("1-2, 5, 8-", 9);
+        Assert.NotNull(filter);
+        Assert.Equal([1, 2, 5, 8, 9], filter.OrderBy(x => x).ToArray());
     }
 
     private static void CreateSamplePdf(string path)

@@ -1,4 +1,5 @@
 using ScholarFlow.Core.Models;
+using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Services;
 using ScholarFlow.Desktop.Services;
 
@@ -241,6 +242,260 @@ public sealed partial class MainWindowViewModel
             ? $"Excluded '{course.Title}' from {ActiveProviderName} sync"
             : $"Included '{course.Title}' in {ActiveProviderName} sync";
         NotifyStateChanged(UiChangeKind.FullLayout);
+    }
+
+    public async Task AddBasinTermAsync(string termName)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(termName))
+            return;
+
+        var clean = termName.Trim();
+        if (BasinConfig.Terms.Contains(clean, StringComparer.OrdinalIgnoreCase))
+            return;
+
+        BasinConfig.Terms.Add(clean);
+        await _basinService.SaveBasinConfigAsync(BasinRoot, BasinConfig);
+        StatusText = $"Added term '{clean}' to {BasinConfig.Name}";
+        NotifyStateChanged(UiChangeKind.FullLayout);
+    }
+
+    public async Task RemoveBasinTermAsync(string termName)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(termName))
+            return;
+
+        var idx = BasinConfig.Terms.FindIndex(t =>
+            string.Equals(t, termName, StringComparison.OrdinalIgnoreCase)
+        );
+        if (idx < 0)
+            return;
+
+        BasinConfig.Terms.RemoveAt(idx);
+        if (string.Equals(ActiveTermFilter, termName, StringComparison.OrdinalIgnoreCase))
+            ActiveTermFilter = null;
+
+        await _basinService.SaveBasinConfigAsync(BasinRoot, BasinConfig);
+        StatusText = $"Removed term '{termName}' from {BasinConfig.Name}";
+        NotifyStateChanged(UiChangeKind.FullLayout);
+    }
+
+    public async Task MoveBasinTermAsync(string termName, int delta)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot))
+            return;
+
+        int idx = BasinConfig.Terms.FindIndex(t =>
+            string.Equals(t, termName, StringComparison.OrdinalIgnoreCase)
+        );
+        int target = idx + delta;
+        if (idx < 0 || target < 0 || target >= BasinConfig.Terms.Count)
+            return;
+
+        (BasinConfig.Terms[idx], BasinConfig.Terms[target]) = (
+            BasinConfig.Terms[target],
+            BasinConfig.Terms[idx]
+        );
+        await _basinService.SaveBasinConfigAsync(BasinRoot, BasinConfig);
+        NotifyStateChanged(UiChangeKind.FullLayout);
+    }
+
+    public async Task ResetBasinTermsToProviderDefaultAsync()
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot))
+            return;
+
+        BasinConfig.Terms = [.. ActiveCapabilities.DefaultTerms];
+        ActiveTermFilter = null;
+        await _basinService.SaveBasinConfigAsync(BasinRoot, BasinConfig);
+        StatusText = $"Reset terms to {ActiveProviderName} defaults";
+        NotifyStateChanged(UiChangeKind.FullLayout);
+    }
+
+    public void OpenPacketOrganizerModal(BasinCourseEntry course)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot))
+            return;
+
+        var courseDir = Path.Combine(BasinRoot, course.FolderName);
+        bool isSti = string.Equals(
+            BasinConfig.ProviderId,
+            SyncProviderIds.StiElms,
+            StringComparison.OrdinalIgnoreCase
+        );
+        PacketOrganizerCourse = course;
+        ActivePacketPlan = CoursePacketPlan.LoadOrBuildPlan(
+            courseDir,
+            BasinConfig.Terms,
+            useStiSyllabusFallback: isSti
+        );
+        IsPacketOrganizerModalOpen = true;
+        IsSettingsModalOpen = false;
+        IsAddCourseModalOpen = false;
+        IsSearchModalOpen = false;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void ClosePacketOrganizerModal()
+    {
+        IsPacketOrganizerModalOpen = false;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void AddPacketSection(string title)
+    {
+        if (ActivePacketPlan is null || string.IsNullOrWhiteSpace(title))
+            return;
+
+        ActivePacketPlan.Sections.Add(new PacketSectionPlan { Title = title.Trim() });
+        ActivePacketPlan.IsCustomized = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void RenamePacketSection(PacketSectionPlan section, string title)
+    {
+        if (ActivePacketPlan is null || string.IsNullOrWhiteSpace(title))
+            return;
+
+        section.Title = title.Trim();
+        ActivePacketPlan.IsCustomized = true;
+    }
+
+    public void MovePacketSection(PacketSectionPlan section, int delta)
+    {
+        if (ActivePacketPlan is null)
+            return;
+
+        int idx = ActivePacketPlan.Sections.IndexOf(section);
+        int target = idx + delta;
+        if (idx < 0 || target < 0 || target >= ActivePacketPlan.Sections.Count)
+            return;
+
+        (ActivePacketPlan.Sections[idx], ActivePacketPlan.Sections[target]) = (
+            ActivePacketPlan.Sections[target],
+            ActivePacketPlan.Sections[idx]
+        );
+        ActivePacketPlan.IsCustomized = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void RemovePacketSection(PacketSectionPlan section)
+    {
+        if (ActivePacketPlan is null || ActivePacketPlan.Sections.Count <= 1)
+            return;
+
+        int idx = ActivePacketPlan.Sections.IndexOf(section);
+        if (idx < 0)
+            return;
+
+        var fallback = ActivePacketPlan.Sections[idx == 0 ? 1 : idx - 1];
+        fallback.Items.AddRange(section.Items);
+        ActivePacketPlan.Sections.RemoveAt(idx);
+        ActivePacketPlan.IsCustomized = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void MovePacketItem(PacketSectionPlan section, PacketItemPlan item, int delta)
+    {
+        if (ActivePacketPlan is null)
+            return;
+
+        int idx = section.Items.IndexOf(item);
+        int target = idx + delta;
+        if (idx < 0 || target < 0 || target >= section.Items.Count)
+            return;
+
+        (section.Items[idx], section.Items[target]) = (section.Items[target], section.Items[idx]);
+        ActivePacketPlan.IsCustomized = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void MovePacketItemToSection(
+        PacketSectionPlan fromSection,
+        PacketItemPlan item,
+        PacketSectionPlan toSection
+    )
+    {
+        if (ActivePacketPlan is null || ReferenceEquals(fromSection, toSection))
+            return;
+
+        if (fromSection.Items.Remove(item))
+        {
+            toSection.Items.Add(item);
+            ActivePacketPlan.IsCustomized = true;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+        }
+    }
+
+    public void TogglePacketItemExcluded(PacketItemPlan item)
+    {
+        if (ActivePacketPlan is null)
+            return;
+
+        item.IsExcluded = !item.IsExcluded;
+        ActivePacketPlan.IsCustomized = true;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+    }
+
+    public void SetPacketItemPageRanges(PacketItemPlan item, string? pageRanges)
+    {
+        if (ActivePacketPlan is null)
+            return;
+
+        item.PageRanges = string.IsNullOrWhiteSpace(pageRanges) ? null : pageRanges.Trim();
+        ActivePacketPlan.IsCustomized = true;
+    }
+
+    public void SetPacketItemDisplayTitle(PacketItemPlan item, string? displayTitle)
+    {
+        if (ActivePacketPlan is null || string.IsNullOrWhiteSpace(displayTitle))
+            return;
+
+        item.DisplayTitle = displayTitle.Trim();
+        ActivePacketPlan.IsCustomized = true;
+    }
+
+    public async Task SaveAndCompilePacketPlanAsync()
+    {
+        if (
+            string.IsNullOrWhiteSpace(BasinRoot)
+            || PacketOrganizerCourse is null
+            || ActivePacketPlan is null
+        )
+        {
+            return;
+        }
+
+        var course = PacketOrganizerCourse;
+        var courseDir = Path.Combine(BasinRoot, course.FolderName);
+        CoursePacketPlan.SavePlan(courseDir, ActivePacketPlan);
+        IsPacketOrganizerModalOpen = false;
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+
+        await CompileCourseMasterPdfAsync(course, force: true);
+        await ReloadBasinDataAsync();
+    }
+
+    public async Task ResetPacketPlanToAutoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || PacketOrganizerCourse is null)
+            return;
+
+        var course = PacketOrganizerCourse;
+        var courseDir = Path.Combine(BasinRoot, course.FolderName);
+        CoursePacketPlan.DeleteSavedPlan(courseDir);
+        bool isSti = string.Equals(
+            BasinConfig.ProviderId,
+            SyncProviderIds.StiElms,
+            StringComparison.OrdinalIgnoreCase
+        );
+        ActivePacketPlan = CoursePacketPlan.LoadOrBuildPlan(
+            courseDir,
+            BasinConfig.Terms,
+            useStiSyllabusFallback: isSti
+        );
+        NotifyStateChanged(UiChangeKind.OverlayOnly);
+
+        await CompileCourseMasterPdfAsync(course, force: true);
     }
 
     public void ToggleAddCourseModal()

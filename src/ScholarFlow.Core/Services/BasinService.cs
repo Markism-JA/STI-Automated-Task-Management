@@ -108,7 +108,23 @@ public sealed partial class BasinService
     public async Task<List<BasinCourseEntry>> LoadCoursesAsync(
         string basinRoot,
         CancellationToken ct = default
-    ) => await LoadJsonAsync<List<BasinCourseEntry>>(GetCoursesPath(basinRoot), ct) ?? [];
+    )
+    {
+        var courses =
+            await LoadJsonAsync<List<BasinCourseEntry>>(GetCoursesPath(basinRoot), ct) ?? [];
+        foreach (var c in courses)
+        {
+            if (
+                c.Origin == CourseOrigin.LocalSubject
+                && !string.IsNullOrWhiteSpace(c.CourseId)
+                && !c.CourseId.StartsWith("local-", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                c.Origin = CourseOrigin.Synced;
+            }
+        }
+        return courses;
+    }
 
     [SuppressMessage(
         "Performance",
@@ -230,6 +246,14 @@ public sealed partial class BasinService
             // Keep existingMatch's original FolderName & Alias, merge eLMS metadata from entry
             var dupFolder = entry.FolderName;
             existingMatch.CourseId ??= entry.CourseId;
+            if (
+                existingMatch.Origin == CourseOrigin.LocalSubject
+                && !string.IsNullOrWhiteSpace(existingMatch.CourseId)
+                && !existingMatch.CourseId.StartsWith("local-", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                existingMatch.Origin = CourseOrigin.Synced;
+            }
             existingMatch.CourseCode ??= entry.CourseCode;
             existingMatch.SectionCode ??= entry.SectionCode;
             existingMatch.TermSuffix ??= entry.TermSuffix;
@@ -443,6 +467,7 @@ public sealed partial class BasinService
         var entry = new BasinCourseEntry
         {
             CourseId = $"local-{Guid.NewGuid():N}"[..14],
+            Origin = CourseOrigin.LocalSubject,
             Title = title.Trim(),
             FolderName = uniqueFolder,
             Alias = alias,
@@ -474,11 +499,43 @@ public sealed partial class BasinService
 
     public static Dictionary<string, List<string>> LoadCourseTermMap(
         string basinRoot,
-        string courseFolder
+        string courseFolder,
+        IReadOnlyList<string>? configuredTerms = null,
+        bool useStiSyllabusFallback = true
     )
     {
         var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var courseDir = Path.Combine(basinRoot, courseFolder);
+        var packetPath = Pdf.CoursePacketPlan.GetPacketPlanPath(courseDir);
+        if (File.Exists(packetPath))
+        {
+            var packet = Pdf.CoursePacketPlan.TryLoadSavedPlan(courseDir);
+            if (packet is not null)
+            {
+                foreach (var sec in packet.Sections)
+                {
+                    if (!result.TryGetValue(sec.Title, out var list))
+                    {
+                        list = [];
+                        result[sec.Title] = list;
+                    }
+                    foreach (var item in sec.Items.Where(i => !i.IsExcluded))
+                    {
+                        var prefix = ExtractTwoDigitModulePrefix(item.RelativePath);
+                        if (
+                            prefix is not null
+                            && !list.Contains(prefix, StringComparer.OrdinalIgnoreCase)
+                        )
+                        {
+                            list.Add(prefix);
+                        }
+                    }
+                }
+                if (result.Values.Any(v => v.Count > 0))
+                    return result;
+            }
+        }
+
         var path = Path.Combine(courseDir, "term.json");
         if (File.Exists(path))
         {
@@ -498,7 +555,10 @@ public sealed partial class BasinService
             }
         }
 
-        if (Directory.Exists(courseDir))
+        if (configuredTerms is { Count: 0 })
+            return result;
+
+        if (useStiSyllabusFallback && Directory.Exists(courseDir))
         {
             var assigned = result
                 .Values.SelectMany(x => x)
@@ -565,13 +625,18 @@ public sealed partial class BasinService
         Dictionary<string, List<string>>? courseTermMap,
         string? explicitTerm,
         string? title,
-        string? parentModuleOrSection = null
+        string? parentModuleOrSection = null,
+        IReadOnlyList<string>? configuredTerms = null,
+        bool useStiNumericFallback = true
     )
     {
+        if (configuredTerms is { Count: 0 })
+            return null;
+
         var norm =
-            TaskItem.NormalizeTerm(explicitTerm)
-            ?? TaskItem.NormalizeTerm(title)
-            ?? TaskItem.NormalizeTerm(parentModuleOrSection);
+            MatchConfiguredOrStandardTerm(explicitTerm, configuredTerms)
+            ?? MatchConfiguredOrStandardTerm(title, configuredTerms)
+            ?? MatchConfiguredOrStandardTerm(parentModuleOrSection, configuredTerms);
         if (norm is not null)
             return norm;
 
@@ -591,7 +656,7 @@ public sealed partial class BasinService
             }
         }
 
-        if (int.TryParse(prefix, out int num))
+        if (useStiNumericFallback && int.TryParse(prefix, out int num))
         {
             return num switch
             {
@@ -600,6 +665,43 @@ public sealed partial class BasinService
                 <= 6 => "Prefinals",
                 _ => "Finals",
             };
+        }
+
+        return null;
+    }
+
+    private static string? MatchConfiguredOrStandardTerm(
+        string? raw,
+        IReadOnlyList<string>? configuredTerms
+    )
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        if (configuredTerms is { Count: > 0 })
+        {
+            foreach (var term in configuredTerms)
+            {
+                if (
+                    string.Equals(raw.Trim(), term, StringComparison.OrdinalIgnoreCase)
+                    || raw.Contains(term, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    return term;
+                }
+            }
+        }
+
+        var std = TaskItem.NormalizeTerm(raw);
+        if (
+            std is not null
+            && (
+                configuredTerms is null
+                || configuredTerms.Contains(std, StringComparer.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return std;
         }
 
         return null;

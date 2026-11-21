@@ -341,6 +341,7 @@ public sealed partial class MainWindow : Window
     {
         string targetKind =
             _vm.IsOnboardingOpen ? "Onboarding"
+            : _vm.IsPacketOrganizerModalOpen ? "PacketOrganizer"
             : _vm.IsAddCourseModalOpen ? "AddCourse"
             : _vm.IsSettingsModalOpen ? "Settings"
             : _vm.IsQuickAddModalOpen ? "QuickAdd"
@@ -398,6 +399,14 @@ public sealed partial class MainWindow : Window
                 this,
                 _vm
             );
+            _modalOverlayContainer.Child = backdrop;
+            _modalOverlayContainer.IsVisible = true;
+            return;
+        }
+
+        if (_vm.IsPacketOrganizerModalOpen)
+        {
+            backdrop.Child = Shell.OnboardingAndSettingsModalBuilder.BuildPacketOrganizerModal(_vm);
             _modalOverlayContainer.Child = backdrop;
             _modalOverlayContainer.IsVisible = true;
             return;

@@ -72,7 +72,9 @@ public sealed partial class MasterPdfService
         string courseFolder,
         string? displayTitle = null,
         bool force = false,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        IReadOnlyList<string>? configuredTerms = null,
+        bool? useStiSyllabusFallback = null
     )
     {
         EnsureFontResolver();
@@ -80,6 +82,12 @@ public sealed partial class MasterPdfService
         var coursePath = Path.Combine(basinRoot, courseFolder);
         var title = displayTitle ?? courseFolder.Replace('_', ' ').Trim();
         var outPath = Path.Combine(coursePath, $"{courseFolder}_Master.pdf");
+
+        var (resolvedTerms, resolvedStiFallback) = ResolveBasinCompilationRules(
+            basinRoot,
+            configuredTerms,
+            useStiSyllabusFallback
+        );
 
         var fingerprint = ComputeCourseFingerprint(coursePath);
         var statePath = GetPdfStatePath(basinRoot);
@@ -100,7 +108,18 @@ public sealed partial class MasterPdfService
             );
         }
 
-        int pageCount = await Task.Run(() => CompileCourseSync(coursePath, title, outPath, ct), ct);
+        int pageCount = await Task.Run(
+            () =>
+                CompileCourseSync(
+                    coursePath,
+                    title,
+                    outPath,
+                    ct,
+                    resolvedTerms,
+                    resolvedStiFallback
+                ),
+            ct
+        );
 
         state[courseFolder] = ComputeCourseFingerprint(coursePath);
         await SaveStateAsync(statePath, state, ct);
@@ -113,13 +132,77 @@ public sealed partial class MasterPdfService
         );
     }
 
+    private static (IReadOnlyList<string>? Terms, bool UseStiFallback) ResolveBasinCompilationRules(
+        string basinRoot,
+        IReadOnlyList<string>? explicitTerms,
+        bool? explicitStiFallback
+    )
+    {
+        if (explicitTerms is not null && explicitStiFallback.HasValue)
+            return (explicitTerms, explicitStiFallback.Value);
+
+        var configPath = Services.BasinService.GetBasinConfigPath(basinRoot);
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                var json = File.ReadAllText(configPath);
+                var cfg = JsonSerializer.Deserialize<Models.BasinConfig>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+                if (cfg is not null)
+                {
+                    var isSti = string.Equals(
+                        cfg.ProviderId,
+                        Models.SyncProviderIds.StiElms,
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                    return (
+                        explicitTerms ?? cfg.Terms,
+                        explicitStiFallback ?? isSti
+                    );
+                }
+            }
+            catch
+            {
+                // Fall back to default rules
+            }
+        }
+
+        return (explicitTerms, explicitStiFallback ?? true);
+    }
+
     private static int CompileCourseSync(
         string subjectPath,
         string subjectName,
         string outPath,
-        CancellationToken ct
+        CancellationToken ct,
+        IReadOnlyList<string>? configuredTerms = null,
+        bool useStiSyllabusFallback = true
     )
     {
+        bool hasCustomPacketPlan = File.Exists(CoursePacketPlan.GetPacketPlanPath(subjectPath));
+        bool hasDirectRootPdfs =
+            Directory.Exists(subjectPath)
+            && Directory
+                .GetFiles(subjectPath, "*.pdf", SearchOption.TopDirectoryOnly)
+                .Any(f => !f.EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase));
+
+        if (
+            hasCustomPacketPlan
+            || hasDirectRootPdfs
+            || !useStiSyllabusFallback
+            || configuredTerms is { Count: 0 }
+        )
+        {
+            var plan = CoursePacketPlan.LoadOrBuildPlan(
+                subjectPath,
+                configuredTerms,
+                useStiSyllabusFallback
+            );
+            return CompileCourseFromPacketPlanSync(subjectPath, subjectName, outPath, plan, ct);
+        }
         using var destDoc = new PdfSharpDocument();
         destDoc.Info.Title = $"{subjectName} - Master Study Packet";
 
@@ -315,6 +398,143 @@ public sealed partial class MasterPdfService
         return destDoc.PageCount;
     }
 
+    private static int CompileCourseFromPacketPlanSync(
+        string subjectPath,
+        string subjectName,
+        string outPath,
+        CoursePacketPlan plan,
+        CancellationToken ct
+    )
+    {
+        using var destDoc = new PdfSharpDocument();
+        destDoc.Info.Title = $"{subjectName} - Master Study Packet";
+
+        var visualToc = new List<(int Level, string Text, int LogicalPage)>();
+        var sidebarToc = new List<(int Level, string Title, int PhysicalPageOneBased)>();
+
+        if (plan.IncludeCoverPage)
+        {
+            AddCenteredTitlePage(destDoc, subjectName, isMainCover: true);
+            sidebarToc.Add((1, "Cover Page", 1));
+        }
+
+        if (plan.IncludeSyllabusSection)
+        {
+            var syllabusDir = Directory.Exists(subjectPath)
+                ? Directory
+                    .GetDirectories(subjectPath)
+                    .Select(Path.GetFileName)
+                    .FirstOrDefault(d =>
+                        d is not null
+                        && !d.StartsWith('.')
+                        && d.Contains("syllabus", StringComparison.OrdinalIgnoreCase)
+                    )
+                : null;
+            if (syllabusDir is not null)
+            {
+                var startLogical = destDoc.PageCount;
+                var files = GetUniquePdfFiles(Path.Combine(subjectPath, syllabusDir));
+                if (files.Count > 0)
+                {
+                    foreach (var f in files)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        AppendScaledOrSplit(destDoc, f, forceRotate: true);
+                    }
+                    visualToc.Add((1, "Course Syllabus", startLogical));
+                    sidebarToc.Add((1, "Syllabus", startLogical + 1));
+                }
+            }
+        }
+
+        bool emitSectionCovers = plan.Sections.Count > 1 || plan.IsCustomized;
+        foreach (var sec in plan.Sections)
+        {
+            var activeItems = sec
+                .Items.Where(i =>
+                    !i.IsExcluded
+                    && File.Exists(
+                        Path.Combine(
+                            subjectPath,
+                            i.RelativePath.Replace('/', Path.DirectorySeparatorChar)
+                        )
+                    )
+                )
+                .ToList();
+            if (activeItems.Count == 0)
+                continue;
+
+            int itemTocLevel = 1;
+            if (emitSectionCovers && !string.IsNullOrWhiteSpace(sec.Title))
+            {
+                var secLogical = destDoc.PageCount;
+                AddCenteredTitlePage(destDoc, sec.Title, isMainCover: false);
+                visualToc.Add((1, sec.Title, secLogical));
+                sidebarToc.Add((1, sec.Title, secLogical + 1));
+                itemTocLevel = 2;
+            }
+
+            foreach (var item in activeItems)
+            {
+                ct.ThrowIfCancellationRequested();
+                var fullPath = Path.Combine(
+                    subjectPath,
+                    item.RelativePath.Replace('/', Path.DirectorySeparatorChar)
+                );
+                var startP = destDoc.PageCount;
+                var label = string.IsNullOrWhiteSpace(item.DisplayTitle)
+                    ? Path.GetFileNameWithoutExtension(item.RelativePath).Replace('_', ' ').Trim()
+                    : item.DisplayTitle.Trim();
+
+                AppendScaledOrSplit(
+                    destDoc,
+                    fullPath,
+                    forceRotate: item.ForceRotateLandscape,
+                    pageRangesExpr: item.PageRanges
+                );
+
+                if (destDoc.PageCount > startP)
+                {
+                    visualToc.Add((itemTocLevel, label, startP));
+                    sidebarToc.Add((itemTocLevel, label, startP + 1));
+                }
+            }
+        }
+
+        if (destDoc.PageCount == 0)
+            AddCenteredTitlePage(destDoc, subjectName, isMainCover: true);
+
+        int tocPagesAdded = 0;
+        int tocInsertIdx = plan.IncludeCoverPage && destDoc.PageCount >= 1 ? 1 : 0;
+        if (plan.IncludeTableOfContents && visualToc.Count > 0)
+        {
+            tocPagesAdded = InsertTocPages(destDoc, visualToc, insertionIndex: tocInsertIdx);
+        }
+
+        var footerFont = new XFont("Sans", 10, XFontStyle.Regular);
+        int contentStartIndex = (plan.IncludeCoverPage ? 1 : 0) + tocPagesAdded;
+        for (int i = contentStartIndex; i < destDoc.PageCount; i++)
+        {
+            using var gfx = XGraphics.FromPdfPage(destDoc.Pages[i]);
+            var pageNumText = (i - tocPagesAdded + (plan.IncludeCoverPage ? 0 : 1)).ToString();
+            gfx.DrawString(
+                pageNumText,
+                footerFont,
+                XBrushes.Black,
+                new XRect(0, TargetHeight - 36, TargetWidth, 20),
+                XStringFormats.TopCenter
+            );
+        }
+
+        BuildOutlines(destDoc, sidebarToc, tocPagesAdded);
+
+        var tempOut = $"{outPath}.tmp.{Guid.NewGuid():N}";
+        destDoc.Save(tempOut);
+        File.Move(tempOut, outPath, overwrite: true);
+
+        return destDoc.PageCount;
+    }
+
     private readonly record struct ContentBox(
         double X0,
         double Y0,
@@ -327,7 +547,8 @@ public sealed partial class MasterPdfService
     private static void AppendScaledOrSplit(
         PdfSharpDocument destDoc,
         string srcPath,
-        bool forceRotate
+        bool forceRotate,
+        string? pageRangesExpr = null
     )
     {
         List<ContentBox>? pigBoxes = null;
@@ -348,8 +569,15 @@ public sealed partial class MasterPdfService
         using var form = OpenPdfFormSafe(srcPath, out var tempNormPath);
         try
         {
+            var allowedPages = CoursePacketPlan.ParsePageRangeFilter(
+                pageRangesExpr,
+                form.PageCount
+            );
             for (int idx = 0; idx < form.PageCount; idx++)
             {
+                if (allowedPages is not null && !allowedPages.Contains(idx + 1))
+                    continue;
+
                 form.PageNumber = idx + 1;
                 double w = form.PointWidth;
                 double h = form.PointHeight;
@@ -480,7 +708,7 @@ public sealed partial class MasterPdfService
         return modified;
     }
 
-    private static List<string> GetUniquePdfFiles(string dirPath)
+    internal static List<string> GetUniquePdfFiles(string dirPath)
     {
         if (!Directory.Exists(dirPath))
             return [];
@@ -791,18 +1019,21 @@ public sealed partial class MasterPdfService
         return lines;
     }
 
-    private static Dictionary<string, List<string>> LoadOrInferTermConfig(
+    internal static Dictionary<string, List<string>> LoadOrInferTermConfig(
         string termJsonPath,
-        List<string> allDirs
+        List<string> allDirs,
+        IReadOnlyList<string>? configuredTerms = null,
+        bool useStiSyllabusFallback = true
     )
     {
-        var config = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Prelims"] = [],
-            ["Midterms"] = [],
-            ["Prefinals"] = [],
-            ["Finals"] = [],
-        };
+        var effectiveTerms =
+            configuredTerms is not null
+                ? configuredTerms.Where(t => !string.IsNullOrWhiteSpace(t)).ToList()
+                : ["Prelims", "Midterms", "Prefinals", "Finals"];
+
+        var config = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in effectiveTerms)
+            config[t] = [];
 
         if (File.Exists(termJsonPath))
         {
@@ -821,6 +1052,9 @@ public sealed partial class MasterPdfService
                 // Fall back to inference
             }
         }
+
+        if (!useStiSyllabusFallback)
+            return config;
 
         var assignedPrefixes = config
             .Values.SelectMany(x => x)
@@ -917,11 +1151,33 @@ public sealed partial class MasterPdfService
             return string.Empty;
 
         var entries = new List<string>();
+        var packetJson = Path.Combine(coursePath, "packet.json");
+        if (File.Exists(packetJson))
+        {
+            var packetHash = Convert.ToHexStringLower(
+                SHA256.HashData(File.ReadAllBytes(packetJson))
+            );
+            entries.Add($"packet.json|{packetHash}");
+        }
+
         var termJson = Path.Combine(coursePath, "term.json");
         if (File.Exists(termJson))
         {
             var termHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(termJson)));
             entries.Add($"term.json|{termHash}");
+        }
+
+        foreach (
+            var rootPdf in Directory
+                .GetFiles(coursePath, "*.pdf", SearchOption.TopDirectoryOnly)
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+        )
+        {
+            var rootName = Path.GetFileName(rootPdf);
+            if (rootName.EndsWith("_Master.pdf", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var rootInfo = new FileInfo(rootPdf);
+            entries.Add($"./{rootInfo.Name}|{rootInfo.Length}|{rootInfo.LastWriteTimeUtc.Ticks}");
         }
 
         foreach (

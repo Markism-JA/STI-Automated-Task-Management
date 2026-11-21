@@ -326,6 +326,12 @@ public sealed partial class MainWindowViewModel
 
     public bool CloseTopOverlayOrDrawer()
     {
+        if (IsPacketOrganizerModalOpen)
+        {
+            IsPacketOrganizerModalOpen = false;
+            NotifyStateChanged(UiChangeKind.OverlayOnly);
+            return true;
+        }
         if (IsAddCourseModalOpen)
         {
             IsAddCourseModalOpen = false;

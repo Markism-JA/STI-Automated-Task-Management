@@ -71,7 +71,7 @@ public sealed class BasinCourseEntry
 
     public bool IsSyncableCourse =>
         !IsArchived
-        && Origin == CourseOrigin.Synced
+        && Origin != CourseOrigin.KnowledgeCollection
         && !string.IsNullOrWhiteSpace(CourseId)
         && !CourseId.StartsWith("local-", StringComparison.OrdinalIgnoreCase);
 }

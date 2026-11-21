@@ -124,6 +124,9 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public bool IsSettingsModalOpen { get; private set; }
     public bool IsOnboardingOpen { get; private set; }
     public bool IsAddCourseModalOpen { get; private set; }
+    public bool IsPacketOrganizerModalOpen { get; private set; }
+    public BasinCourseEntry? PacketOrganizerCourse { get; private set; }
+    public CoursePacketPlan? ActivePacketPlan { get; private set; }
     public string OnboardingVaultPath { get; set; } =
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),

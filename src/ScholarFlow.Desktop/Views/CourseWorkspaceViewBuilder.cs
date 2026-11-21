@@ -181,6 +181,18 @@ public static class CourseWorkspaceViewBuilder
         compileBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(compileBtn);
 
+        var organizeBtn = UiBuilder.GhostButton(
+            "Organize Packet",
+            MaterialIconKind.FileDocumentEditOutline,
+            () => vm.OpenPacketOrganizerModal(course)
+        );
+        ToolTip.SetTip(
+            organizeBtn,
+            "Organize Master PDF sections, terms, file order, exclusions, and page ranges"
+        );
+        organizeBtn.Margin = new Thickness(0, 0, 6, 6);
+        actionWrap.Children.Add(organizeBtn);
+
         if (!string.IsNullOrWhiteSpace(course.CourseUrl))
         {
             var elmsBtn = UiBuilder.GhostButton(
