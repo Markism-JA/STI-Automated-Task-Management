@@ -146,7 +146,6 @@ public static partial class QuizStudioViewBuilder
                 isActive: isSelected
             );
             btn.Margin = new Thickness(0, 0, 5, 4);
-            ToolTip.SetTip(btn, c.Title);
             subjectWrap.Children.Add(btn);
         }
         navBarGrid.Children.Add(subjectWrap);

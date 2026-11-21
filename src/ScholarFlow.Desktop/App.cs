@@ -41,15 +41,15 @@ public sealed class App : Application
             {
                 new Setter(
                     TemplatedControl.BackgroundProperty,
-                    new SolidColorBrush(Color.Parse("#22252B"))
+                    ThemeService.Brush(ThemeService.BgSurface)
                 ),
                 new Setter(
                     TemplatedControl.ForegroundProperty,
-                    new SolidColorBrush(Color.Parse("#ECEFF4"))
+                    ThemeService.Brush(ThemeService.TextPrimary)
                 ),
                 new Setter(
                     TemplatedControl.BorderBrushProperty,
-                    new SolidColorBrush(Color.Parse("#5E81F4"))
+                    ThemeService.Brush(ThemeService.BorderStrong)
                 ),
                 new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1)),
                 new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)),

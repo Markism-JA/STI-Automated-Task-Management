@@ -93,8 +93,8 @@ public static class ThemeService
             SetBrush(res, BgElevated, "#F2F1EE");
             SetBrush(res, BgHover, "#EAE8E4");
             SetBrush(res, BgBackdrop, "#66111318");
-            SetBrush(res, BorderSubtle, "#EBEAE6");
-            SetBrush(res, BorderStrong, "#D6D4CE");
+            SetBrush(res, BorderSubtle, "#E2E0DA");
+            SetBrush(res, BorderStrong, "#CBC8C0");
             SetBrush(res, TextPrimary, "#1E2024");
             SetBrush(res, TextSecondary, "#626770");
             SetBrush(res, TextMuted, "#8E939D");
@@ -154,6 +154,15 @@ public static class ThemeService
 
     public static IBrush PriorityBrush(TaskPriority priority) => GetPriorityBrushes(priority).Fg;
 
-    private static void SetBrush(IResourceDictionary dict, string key, string hex) =>
-        dict[key] = new SolidColorBrush(Color.Parse(hex));
+    private static void SetBrush(IResourceDictionary dict, string key, string hex)
+    {
+        var color = Color.Parse(hex);
+        if (dict.TryGetValue(key, out var existing) && existing is SolidColorBrush scb)
+        {
+            scb.Color = color;
+            return;
+        }
+
+        dict[key] = new SolidColorBrush(color);
+    }
 }

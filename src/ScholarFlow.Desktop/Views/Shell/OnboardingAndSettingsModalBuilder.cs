@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -759,46 +760,88 @@ public static class OnboardingAndSettingsModalBuilder
         if (course is null || plan is null)
             return new Border();
 
+        int totalItems = plan.Sections.Sum(s => s.Items.Count);
+        int includedItems = plan.Sections.Sum(s => s.Items.Count(i => !i.IsExcluded));
+
         var root = new Grid
         {
-            RowDefinitions = RowDefinitions.Parse("Auto,Auto,*,Auto"),
+            RowDefinitions = RowDefinitions.Parse("Auto,Auto,Auto,*,Auto,Auto"),
             RowSpacing = 10,
         };
 
-        // 1. Header
-        var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
-        header.Children.Add(
-            new StackPanel
+        // 1. Unified Floating Modal Header (matches QuickAdd / Search / Fix with AI)
+        var header = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto"),
+            ColumnSpacing = 8,
+        };
+        var headerIcon = UiBuilder.Icon(
+            MaterialIconKind.FileDocumentEditOutline,
+            18,
+            ThemeService.Brush(ThemeService.AccentPrimary)
+        );
+        headerIcon.VerticalAlignment = VerticalAlignment.Center;
+        header.Children.Add(headerIcon);
+
+        var titleStack = new StackPanel
+        {
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
             {
-                Spacing = 2,
-                Children =
+                new StackPanel
                 {
-                    new TextBlock
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Children =
                     {
-                        Text = $"Organize Master PDF Packet — {course.Title}",
-                        FontSize = 16,
-                        FontWeight = FontWeight.Bold,
-                        Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                    },
-                    new TextBlock
-                    {
-                        Text =
-                            "Arrange sections/terms, reorder or exclude PDFs, and specify optional page ranges (e.g. 1-12, 18-24) before compiling.",
-                        FontSize = 11.5,
-                        Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-                        TextWrapping = TextWrapping.Wrap,
+                        new TextBlock
+                        {
+                            Text = "Organize Master PDF Packet",
+                            FontSize = 14.5,
+                            FontWeight = FontWeight.Bold,
+                            Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                            VerticalAlignment = VerticalAlignment.Center,
+                        },
+                        UiBuilder.Pill(
+                            course.Title,
+                            ThemeService.Brush(ThemeService.AccentPrimary),
+                            ThemeService.Brush(ThemeService.AccentSoftBg),
+                            fontSize: 10.5
+                        ),
                     },
                 },
-            }
-        );
+                new TextBlock
+                {
+                    Text =
+                        $"{includedItems} of {totalItems} PDF{(totalItems == 1 ? "" : "s")} included · {plan.Sections.Count} section{(plan.Sections.Count == 1 ? "" : "s")} · reorder, exclude, or set optional page ranges",
+                    FontSize = 11.5,
+                    Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            },
+        };
+        Grid.SetColumn(titleStack, 1);
+        header.Children.Add(titleStack);
+
+        var escChip = UiBuilder.KbdChip("Esc");
+        escChip.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(escChip, 2);
+        header.Children.Add(escChip);
+
         var closeBtn = UiBuilder.IconButton(
             MaterialIconKind.Close,
             vm.ClosePacketOrganizerModal,
             16
         );
-        Grid.SetColumn(closeBtn, 1);
+        closeBtn.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(closeBtn, 3);
         header.Children.Add(closeBtn);
         root.Children.Add(header);
+
+        var topDivider = UiBuilder.HairlineDivider();
+        Grid.SetRow(topDivider, 1);
+        root.Children.Add(topDivider);
 
         // 2. Add Section Strip
         var addSectionGrid = new Grid
@@ -808,27 +851,35 @@ public static class OnboardingAndSettingsModalBuilder
         };
         var newSecBox = new TextBox
         {
-            Watermark = "New section or term header (e.g. Prelims, Chapter 1-3, Lab Worksheets)...",
+            Watermark = "Add section or term (e.g. Prelims, Chapters 1-3, Lab Worksheets)...",
             FontSize = 12,
         };
+        void SubmitNewSection()
+        {
+            if (!string.IsNullOrWhiteSpace(newSecBox.Text))
+                vm.AddPacketSection(newSecBox.Text);
+        }
+        newSecBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                SubmitNewSection();
+            }
+        };
         addSectionGrid.Children.Add(newSecBox);
+
         var addSecBtn = UiBuilder.GhostButton(
             "Add Section",
             MaterialIconKind.FolderPlusOutline,
-            () =>
-            {
-                if (!string.IsNullOrWhiteSpace(newSecBox.Text))
-                {
-                    vm.AddPacketSection(newSecBox.Text);
-                }
-            }
+            SubmitNewSection
         );
         Grid.SetColumn(addSecBtn, 1);
         addSectionGrid.Children.Add(addSecBtn);
-        Grid.SetRow(addSectionGrid, 1);
+        Grid.SetRow(addSectionGrid, 2);
         root.Children.Add(addSectionGrid);
 
-        // 3. Scrollable Sections & Items List
+        // 3. Scrollable Sections & Items List (scroll-persistent, zero tooltips)
         var sectionsStack = new StackPanel { Spacing = 10 };
         for (int sIdx = 0; sIdx < plan.Sections.Count; sIdx++)
         {
@@ -838,19 +889,40 @@ public static class OnboardingAndSettingsModalBuilder
             // Section Header Row
             var secHeader = new Grid
             {
-                ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto,Auto"),
-                ColumnSpacing = 4,
+                ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto,Auto,Auto"),
+                ColumnSpacing = 6,
+                VerticalAlignment = VerticalAlignment.Center,
             };
+            var secIcon = UiBuilder.Icon(
+                MaterialIconKind.FolderOutline,
+                15,
+                ThemeService.Brush(ThemeService.AccentPrimary)
+            );
+            secIcon.VerticalAlignment = VerticalAlignment.Center;
+            secHeader.Children.Add(secIcon);
+
             var secTitleBox = new TextBox
             {
                 Text = capturedSec.Title,
                 Watermark = "Section Title",
-                FontSize = 13,
+                FontSize = 12.5,
                 FontWeight = FontWeight.SemiBold,
             };
             secTitleBox.LostFocus += (_, _) =>
                 vm.RenamePacketSection(capturedSec, secTitleBox.Text ?? capturedSec.Title);
+            Grid.SetColumn(secTitleBox, 1);
             secHeader.Children.Add(secTitleBox);
+
+            int secIncluded = capturedSec.Items.Count(i => !i.IsExcluded);
+            var countPill = UiBuilder.Pill(
+                $"{secIncluded}/{capturedSec.Items.Count}",
+                ThemeService.Brush(ThemeService.TextSecondary),
+                ThemeService.Brush(ThemeService.BgSurface),
+                fontSize: 10
+            );
+            countPill.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(countPill, 2);
+            secHeader.Children.Add(countPill);
 
             var upSecBtn = UiBuilder.IconButton(
                 MaterialIconKind.ArrowUp,
@@ -858,8 +930,7 @@ public static class OnboardingAndSettingsModalBuilder
                 14
             );
             upSecBtn.IsEnabled = sIdx > 0;
-            ToolTip.SetTip(upSecBtn, "Move section up");
-            Grid.SetColumn(upSecBtn, 1);
+            Grid.SetColumn(upSecBtn, 3);
             secHeader.Children.Add(upSecBtn);
 
             var downSecBtn = UiBuilder.IconButton(
@@ -868,8 +939,7 @@ public static class OnboardingAndSettingsModalBuilder
                 14
             );
             downSecBtn.IsEnabled = sIdx < plan.Sections.Count - 1;
-            ToolTip.SetTip(downSecBtn, "Move section down");
-            Grid.SetColumn(downSecBtn, 2);
+            Grid.SetColumn(downSecBtn, 4);
             secHeader.Children.Add(downSecBtn);
 
             var delSecBtn = UiBuilder.IconButton(
@@ -878,8 +948,7 @@ public static class OnboardingAndSettingsModalBuilder
                 14
             );
             delSecBtn.IsEnabled = plan.Sections.Count > 1;
-            ToolTip.SetTip(delSecBtn, "Remove section (moves items to adjacent section)");
-            Grid.SetColumn(delSecBtn, 3);
+            Grid.SetColumn(delSecBtn, 5);
             secHeader.Children.Add(delSecBtn);
 
             secStack.Children.Add(secHeader);
@@ -898,12 +967,41 @@ public static class OnboardingAndSettingsModalBuilder
             }
             else
             {
+                // Subtle column labels so controls are self-explanatory without hover tooltips
+                var colLabels = new Grid
+                {
+                    ColumnDefinitions = ColumnDefinitions.Parse("28,*,128,Auto"),
+                    ColumnSpacing = 6,
+                    Margin = new Thickness(0, 2, 0, 0),
+                };
+                colLabels.Children.Add(
+                    new TextBlock
+                    {
+                        Text = "Document Title & Source",
+                        FontSize = 10.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        [Grid.ColumnProperty] = 1,
+                    }
+                );
+                colLabels.Children.Add(
+                    new TextBlock
+                    {
+                        Text = "Page Range",
+                        FontSize = 10.5,
+                        FontWeight = FontWeight.SemiBold,
+                        Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                        [Grid.ColumnProperty] = 2,
+                    }
+                );
+                secStack.Children.Add(colLabels);
+
                 for (int iIdx = 0; iIdx < capturedSec.Items.Count; iIdx++)
                 {
                     var capturedItem = capturedSec.Items[iIdx];
                     var itemGrid = new Grid
                     {
-                        ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,135,Auto,Auto,Auto"),
+                        ColumnDefinitions = ColumnDefinitions.Parse("28,*,128,Auto,Auto,Auto"),
                         ColumnSpacing = 6,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
@@ -918,12 +1016,8 @@ public static class OnboardingAndSettingsModalBuilder
                             ? ThemeService.Brush(ThemeService.TextMuted)
                             : ThemeService.Brush(ThemeService.SuccessFg)
                     );
-                    ToolTip.SetTip(
-                        includeBtn,
-                        capturedItem.IsExcluded
-                            ? "Excluded from Master PDF — click to include"
-                            : "Included in Master PDF — click to exclude"
-                    );
+                    includeBtn.VerticalAlignment = VerticalAlignment.Top;
+                    includeBtn.Margin = new Thickness(0, 4, 0, 0);
                     itemGrid.Children.Add(includeBtn);
 
                     var titleBox = new TextBox
@@ -933,23 +1027,39 @@ public static class OnboardingAndSettingsModalBuilder
                         FontSize = 12,
                         Opacity = capturedItem.IsExcluded ? 0.55 : 1.0,
                     };
-                    ToolTip.SetTip(titleBox, $"Source: {capturedItem.RelativePath}");
                     titleBox.LostFocus += (_, _) =>
                         vm.SetPacketItemDisplayTitle(capturedItem, titleBox.Text);
-                    Grid.SetColumn(titleBox, 1);
-                    itemGrid.Children.Add(titleBox);
+
+                    var titleCol = new StackPanel
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            titleBox,
+                            new TextBlock
+                            {
+                                Text = capturedItem.IsExcluded
+                                    ? $"Excluded · {capturedItem.RelativePath}"
+                                    : capturedItem.RelativePath,
+                                FontSize = 10,
+                                Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                                TextTrimming = TextTrimming.CharacterEllipsis,
+                                MaxLines = 1,
+                                Margin = new Thickness(2, 0, 0, 0),
+                            },
+                        },
+                    };
+                    Grid.SetColumn(titleCol, 1);
+                    itemGrid.Children.Add(titleCol);
 
                     var pagesBox = new TextBox
                     {
                         Text = capturedItem.PageRanges ?? string.Empty,
-                        Watermark = "All pages (e.g. 1-10)",
+                        Watermark = "All (e.g. 1-12)",
                         FontSize = 11.5,
                         Opacity = capturedItem.IsExcluded ? 0.55 : 1.0,
+                        VerticalAlignment = VerticalAlignment.Top,
                     };
-                    ToolTip.SetTip(
-                        pagesBox,
-                        "Optional 1-based page ranges (e.g. 1-12, 15, 18-20). Leave empty for all pages."
-                    );
                     pagesBox.LostFocus += (_, _) =>
                         vm.SetPacketItemPageRanges(capturedItem, pagesBox.Text);
                     Grid.SetColumn(pagesBox, 2);
@@ -961,6 +1071,8 @@ public static class OnboardingAndSettingsModalBuilder
                         14
                     );
                     upItemBtn.IsEnabled = iIdx > 0;
+                    upItemBtn.VerticalAlignment = VerticalAlignment.Top;
+                    upItemBtn.Margin = new Thickness(0, 3, 0, 0);
                     Grid.SetColumn(upItemBtn, 3);
                     itemGrid.Children.Add(upItemBtn);
 
@@ -970,35 +1082,47 @@ public static class OnboardingAndSettingsModalBuilder
                         14
                     );
                     downItemBtn.IsEnabled = iIdx < capturedSec.Items.Count - 1;
+                    downItemBtn.VerticalAlignment = VerticalAlignment.Top;
+                    downItemBtn.Margin = new Thickness(0, 3, 0, 0);
                     Grid.SetColumn(downItemBtn, 4);
                     itemGrid.Children.Add(downItemBtn);
 
                     if (plan.Sections.Count > 1)
                     {
-                        var moveBtn = UiBuilder.IconButton(
+                        Button? moveBtn = null;
+                        moveBtn = UiBuilder.IconButton(
                             MaterialIconKind.FolderMoveOutline,
-                            () => { },
+                            () =>
+                            {
+                                if (moveBtn is null)
+                                    return;
+
+                                var moveFlyout = new MenuFlyout();
+                                foreach (
+                                    var targetSec in plan.Sections.Where(s =>
+                                        !ReferenceEquals(s, capturedSec)
+                                    )
+                                )
+                                {
+                                    var capturedTarget = targetSec;
+                                    var mi = new MenuItem
+                                    {
+                                        Header = $"Move to {capturedTarget.Title}",
+                                    };
+                                    mi.Click += (_, _) =>
+                                        vm.MovePacketItemToSection(
+                                            capturedSec,
+                                            capturedItem,
+                                            capturedTarget
+                                        );
+                                    moveFlyout.Items.Add(mi);
+                                }
+                                moveFlyout.ShowAt(moveBtn);
+                            },
                             14
                         );
-                        var moveFlyout = new MenuFlyout();
-                        foreach (
-                            var targetSec in plan.Sections.Where(s =>
-                                !ReferenceEquals(s, capturedSec)
-                            )
-                        )
-                        {
-                            var capturedTarget = targetSec;
-                            var mi = new MenuItem { Header = $"Move to {capturedTarget.Title}" };
-                            mi.Click += (_, _) =>
-                                vm.MovePacketItemToSection(
-                                    capturedSec,
-                                    capturedItem,
-                                    capturedTarget
-                                );
-                            moveFlyout.Items.Add(mi);
-                        }
-                        moveBtn.Flyout = moveFlyout;
-                        ToolTip.SetTip(moveBtn, "Move file to another section");
+                        moveBtn.VerticalAlignment = VerticalAlignment.Top;
+                        moveBtn.Margin = new Thickness(0, 3, 0, 0);
                         Grid.SetColumn(moveBtn, 5);
                         itemGrid.Children.Add(moveBtn);
                     }
@@ -1007,16 +1131,30 @@ public static class OnboardingAndSettingsModalBuilder
                 }
             }
 
-            sectionsStack.Children.Add(UiBuilder.Card(secStack, padding: new Thickness(12, 10)));
+            sectionsStack.Children.Add(
+                new Border
+                {
+                    Background = ThemeService.Brush(ThemeService.BgElevated),
+                    BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12, 10),
+                    Child = secStack,
+                }
+            );
         }
 
-        var scroll = new ScrollViewer
-        {
-            Content = sectionsStack,
-            MaxHeight = 460,
-        };
-        Grid.SetRow(scroll, 2);
+        var scroll = UiBuilder.PersistentScrollViewer(
+            $"packet-organizer:{course.FolderName}",
+            sectionsStack
+        );
+        scroll.MaxHeight = 480;
+        Grid.SetRow(scroll, 3);
         root.Children.Add(scroll);
+
+        var bottomDivider = UiBuilder.HairlineDivider();
+        Grid.SetRow(bottomDivider, 4);
+        root.Children.Add(bottomDivider);
 
         // 4. Footer Actions
         var footer = new Grid
@@ -1029,10 +1167,6 @@ public static class OnboardingAndSettingsModalBuilder
             MaterialIconKind.Restore,
             async () => await vm.ResetPacketPlanToAutoAsync()
         );
-        ToolTip.SetTip(
-            resetBtn,
-            "Delete custom packet.json and revert to automatic provider/syllabus structure"
-        );
         footer.Children.Add(resetBtn);
 
         var cancelBtn = UiBuilder.GhostButton("Cancel", null, vm.ClosePacketOrganizerModal);
@@ -1040,25 +1174,28 @@ public static class OnboardingAndSettingsModalBuilder
         footer.Children.Add(cancelBtn);
 
         var saveCompileBtn = UiBuilder.PrimaryButton(
-            "Save & Recompile Master PDF",
+            "Save & Recompile",
             MaterialIconKind.HammerWrench,
             async () => await vm.SaveAndCompilePacketPlanAsync()
         );
         Grid.SetColumn(saveCompileBtn, 3);
         footer.Children.Add(saveCompileBtn);
 
-        Grid.SetRow(footer, 3);
+        Grid.SetRow(footer, 5);
         root.Children.Add(footer);
 
         return new Border
         {
-            Width = 720,
-            Background = ThemeService.Brush(ThemeService.BgElevated),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            MinWidth = 480,
+            MaxWidth = 780,
+            Background = ThemeService.Brush(ThemeService.BgSurface),
+            BorderBrush = ThemeService.Brush(ThemeService.BorderStrong),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(20, 18),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            BoxShadow = BoxShadows.Parse("0 16 40 0 #66000000"),
+            Padding = new Thickness(18, 16),
+            Margin = new Thickness(24, 32),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Child = root,
         };

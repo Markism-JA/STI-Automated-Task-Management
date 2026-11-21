@@ -929,7 +929,6 @@ public static partial class QuizStudioViewBuilder
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     MinWidth = 0,
                 };
-                ToolTip.SetTip(statusText, fullStatusText);
                 Grid.SetColumn(statusText, 1);
                 statusGrid.Children.Add(statusText);
 
@@ -940,7 +939,6 @@ public static partial class QuizStudioViewBuilder
                     isActive: !aiStatus.IsConfigured
                 );
                 cfgBtn.VerticalAlignment = VerticalAlignment.Center;
-                ToolTip.SetTip(cfgBtn, "Open AI Engine settings");
                 Grid.SetColumn(cfgBtn, 2);
                 statusGrid.Children.Add(cfgBtn);
 
@@ -978,8 +976,6 @@ public static partial class QuizStudioViewBuilder
                 async () => await studio.GenerateQuizNowAsync(forceOffline: isOfflineMode)
             );
             genPrimaryBtn.IsEnabled = !studio.IsGenerating && canSubmit;
-            if (!canSubmit)
-                ToolTip.SetTip(genPrimaryBtn, $"Configure AI Engine settings first: {aiStatus.MissingReason}");
             genPrimaryBtn.Margin = new Thickness(0, 0, 8, 4);
             generateActions.Children.Add(genPrimaryBtn);
 

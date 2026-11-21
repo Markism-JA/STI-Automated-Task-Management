@@ -369,10 +369,6 @@ public static partial class QuizStudioViewBuilder
                 async () => await studio.RegroundQuizAsync(quiz),
                 isActive: true
             );
-            ToolTip.SetTip(
-                regroundBtn,
-                "Source Master PDF was recompiled after this quiz was generated. Click to update page numbers & highlight boxes in place."
-            );
             actions.Children.Add(regroundBtn);
         }
 
@@ -436,20 +432,12 @@ public static partial class QuizStudioViewBuilder
                     shuffleOptionsOverride: true
                 )
         );
-        ToolTip.SetTip(
-            shuffleStartBtn,
-            "Start this quiz in isolation with both question order and MCQ options shuffled"
-        );
         actions.Children.Add(shuffleStartBtn);
 
         var organizeBtn = UiBuilder.GhostButton(
             "Organize",
             MaterialIconKind.TuneVariant,
             () => studio.OpenQuizInOrganizer(quiz)
-        );
-        ToolTip.SetTip(
-            organizeBtn,
-            "Inspect, filter by question kind, reorder, edit, or append questions"
         );
         actions.Children.Add(organizeBtn);
 
@@ -461,7 +449,6 @@ public static partial class QuizStudioViewBuilder
                 14.5,
                 ThemeService.Brush(ThemeService.TextSecondary)
             );
-            ToolTip.SetTip(pdfBtn, "Open source PDF in Reader");
             actions.Children.Add(pdfBtn);
         }
 
@@ -492,7 +479,6 @@ public static partial class QuizStudioViewBuilder
                 14.5,
                 ThemeService.Brush(ThemeService.TextSecondary)
             );
-            ToolTip.SetTip(exportPdfBtn, "Export printable Quiz PDF");
             actions.Children.Add(exportPdfBtn);
 
             var exportJsonBtn = UiBuilder.IconButton(
@@ -520,7 +506,6 @@ public static partial class QuizStudioViewBuilder
                 14.5,
                 ThemeService.Brush(ThemeService.TextSecondary)
             );
-            ToolTip.SetTip(exportJsonBtn, "Export Quiz Deck JSON");
             actions.Children.Add(exportJsonBtn);
 
             actions.Children.Add(

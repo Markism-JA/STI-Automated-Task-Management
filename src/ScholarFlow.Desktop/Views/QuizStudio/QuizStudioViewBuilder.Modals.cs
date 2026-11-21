@@ -257,10 +257,6 @@ public static partial class QuizStudioViewBuilder
                 await studio.ExportScopedPdfForUploadAsync(top?.Clipboard);
             }
         );
-        ToolTip.SetTip(
-            exportPdfBtn,
-            "Exports only the selected pages as a lightweight PDF for Web AI upload and copies the page-mapped instruction prompt"
-        );
         leftActions.Children.Add(exportPdfBtn);
 
         Grid.SetRow(leftActions, 1);
