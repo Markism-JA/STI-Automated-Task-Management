@@ -43,6 +43,7 @@ public enum SearchResultKind
     Course,
     Task,
     PdfDocument,
+    CourseFile,
     Quiz,
 }
 
@@ -310,6 +311,8 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
         QuickAddChips = [];
         IsSearchModalOpen = false;
         SearchQuery = string.Empty;
+        SearchCategoryFilter = "All";
+        ExcludeFilesInQuickSearch = false;
         SearchResults = [];
         SelectedSearchResultIndex = 0;
 
@@ -319,6 +322,7 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
 
         PdfReader.Reset();
         QuizStudio.ResetForBasinSwitch();
+        ResetCourseMaterialsUiState();
     }
 
     public async Task ReloadBasinDataAsync()

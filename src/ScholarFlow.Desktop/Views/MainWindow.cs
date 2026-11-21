@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     };
     private readonly TextBox _searchBox;
     private StackPanel _searchResultsStack = new() { Spacing = 2 };
+    private WrapPanel _searchFilterBar = new() { Orientation = Orientation.Horizontal };
 
     private readonly Dictionary<
         string,

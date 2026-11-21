@@ -1,7 +1,9 @@
 using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
+using ScholarFlow.Core.Services;
 using ScholarFlow.Core.Tasks;
+using ScholarFlow.Desktop.Services;
 
 namespace ScholarFlow.Desktop.ViewModels;
 
@@ -64,9 +66,38 @@ public sealed partial class MainWindowViewModel
         SelectTask(VisibleTasks.FirstOrDefault(t => t.Title == created.Title));
     }
 
+    public string SearchCategoryFilter { get; private set; } = "All";
+    public bool ExcludeFilesInQuickSearch { get; private set; }
+
     public void UpdateSearchQuery(string query)
     {
         SearchQuery = query;
+        RecomputeSearchResults();
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public void SetSearchCategoryFilter(string category)
+    {
+        if (string.Equals(SearchCategoryFilter, category, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        SearchCategoryFilter = category;
+        if (string.Equals(category, "Files", StringComparison.OrdinalIgnoreCase))
+            ExcludeFilesInQuickSearch = false;
+        RecomputeSearchResults();
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public void ToggleExcludeFilesInQuickSearch()
+    {
+        ExcludeFilesInQuickSearch = !ExcludeFilesInQuickSearch;
+        if (
+            ExcludeFilesInQuickSearch
+            && string.Equals(SearchCategoryFilter, "Files", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            SearchCategoryFilter = "All";
+        }
         RecomputeSearchResults();
         NotifyStateChanged(UiChangeKind.SearchOrTaskList);
     }
@@ -105,6 +136,13 @@ public sealed partial class MainWindowViewModel
 
             case SearchResultKind.PdfDocument when !string.IsNullOrWhiteSpace(item.PdfPath):
                 OpenPdfInReader(item.PdfPath);
+                break;
+
+            case SearchResultKind.CourseFile when !string.IsNullOrWhiteSpace(item.PdfPath):
+                if (item.PdfPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                    OpenPdfInReader(item.PdfPath);
+                else
+                    ExternalFileLauncher.OpenLocalFile(item.PdfPath);
                 break;
 
             case SearchResultKind.Quiz when item.Quiz is not null:
@@ -153,171 +191,253 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    private static readonly HashSet<string> QuickSearchIgnoredManifests = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "packet.json",
+        "term.json",
+        "course.json",
+        "syllabus.json",
+    };
+
     private void RecomputeSearchResults()
     {
         var q = SearchQuery?.Trim() ?? string.Empty;
         var results = new List<SearchResultItem>();
 
+        bool wantCourses = SearchCategoryFilter is "All" or "Courses";
+        bool wantTasks = SearchCategoryFilter is "All" or "Tasks";
+        bool wantQuizzes = SearchCategoryFilter is "All" or "Quizzes";
+        bool wantFiles =
+            (SearchCategoryFilter is "All" or "Files") && !ExcludeFilesInQuickSearch;
+
         // 1. Matching Courses
-        foreach (var c in Courses.Where(c => !c.IsArchived))
-        {
-            if (
-                string.IsNullOrEmpty(q)
-                || c.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase)
-                || (c.CourseCode?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
-            )
-            {
-                results.Add(
-                    new SearchResultItem(
-                        SearchResultKind.Course,
-                        c.Title,
-                        c.CourseCode ?? "Course Workspace",
-                        $"#{c.Alias}",
-                        Course: c
-                    )
-                );
-            }
-        }
-
-        // 2. Matching Tasks (via SQLite FTS5 index across titles, subtasks, tags, terms, and note bodies, with in-memory fallback)
-        var allNodes = EnumerateAllTaskNodes(AllTasks).ToList();
-        var byId = allNodes.ToDictionary(t => t.Id, StringComparer.OrdinalIgnoreCase);
-        var matchedTasks = new List<TaskItem>();
-
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            var ftsIds = ScholarFlowDatabase.SearchTaskIdsFts(BasinRoot, q, limit: 18);
-            foreach (var ftsId in ftsIds)
-            {
-                if (byId.TryGetValue(ftsId, out var matched))
-                    matchedTasks.Add(matched);
-            }
-        }
-
-        if (matchedTasks.Count < 16)
-        {
-            var seenIds = new HashSet<string>(
-                matchedTasks.Select(t => t.Id),
-                StringComparer.OrdinalIgnoreCase
-            );
-            var candidateTasks = allNodes
-                .OrderBy(t => t.IsCompleted ? 1 : 0)
-                .ThenByDescending(t => UrgencyCalculator.Explain(t).Score)
-                .ToList();
-
-            foreach (var t in candidateTasks)
-            {
-                if (seenIds.Contains(t.Id))
-                    continue;
-
-                if (
-                    string.IsNullOrEmpty(q)
-                    || t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
-                    || (
-                        t.CourseAlias?.Contains(
-                            q.TrimStart('#'),
-                            StringComparison.OrdinalIgnoreCase
-                        ) == true
-                    )
-                    || (t.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
-                    || t.Labels.Any(l =>
-                        l.Contains(q.TrimStart('@'), StringComparison.OrdinalIgnoreCase)
-                    )
-                )
-                {
-                    matchedTasks.Add(t);
-                    if (matchedTasks.Count >= 18)
-                        break;
-                }
-            }
-        }
-
-        foreach (var t in matchedTasks)
-        {
-            var sub = t.DueDate.HasValue
-                ? $"Due {t.DueDate.Value:MMM d}"
-                : (t.IsCompleted ? "Completed" : "No due date");
-            if (!string.IsNullOrWhiteSpace(t.ParentTaskId))
-                sub = $"Subtask · {sub}";
-            var badge = !string.IsNullOrWhiteSpace(t.CourseAlias)
-                ? $"#{t.CourseAlias}"
-                : $"P{(int)t.Priority}";
-            results.Add(new SearchResultItem(SearchResultKind.Task, t.Title, sub, badge, Task: t));
-
-            if (results.Count >= 18)
-                break;
-        }
-
-        // 3. Matching Master PDFs & Handouts
-        if (!string.IsNullOrWhiteSpace(BasinRoot) && Directory.Exists(BasinRoot))
+        if (wantCourses)
         {
             foreach (var c in Courses.Where(c => !c.IsArchived))
             {
-                var masterPdf = MasterPdfService.FindExistingMasterPdfPath(BasinRoot, c.FolderName);
-                if (
-                    masterPdf is not null
-                    && (
-                        string.IsNullOrEmpty(q)
-                        || q.Contains("pdf", StringComparison.OrdinalIgnoreCase)
-                        || q.Contains("master", StringComparison.OrdinalIgnoreCase)
-                        || c.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
-                        || c.Alias.Contains(q.TrimStart('#'), StringComparison.OrdinalIgnoreCase)
-                    )
-                )
+                if (QuickSearchMatcher.Matches(q, c.Title, c.Alias, c.CourseCode))
                 {
                     results.Add(
                         new SearchResultItem(
-                            SearchResultKind.PdfDocument,
-                            $"{c.Title} — Master Study Packet",
-                            Path.GetFileName(masterPdf),
-                            "Master PDF",
-                            Course: c,
-                            PdfPath: masterPdf
+                            SearchResultKind.Course,
+                            c.Title,
+                            c.CourseCode ?? "Course Workspace",
+                            $"#{c.Alias}",
+                            Course: c
                         )
                     );
                 }
             }
         }
 
-        // 4. Matching Test & Recall Quizzes (by title, term, course, or question prompt/tag)
-        foreach (var qz in QuizStudio.SavedQuizzes)
+        // 2. Matching Tasks (SQLite FTS5 + QuickSearchMatcher fallback)
+        if (wantTasks)
         {
-            bool matchesQuiz =
-                string.IsNullOrEmpty(q)
-                || qz.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || qz.CourseTitle.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || (qz.Term?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
-                || q.Contains("quiz", StringComparison.OrdinalIgnoreCase)
-                || q.Contains("test", StringComparison.OrdinalIgnoreCase)
-                || q.Contains("recall", StringComparison.OrdinalIgnoreCase)
-                || qz.Questions.Any(qq =>
-                    qq.Prompt.Contains(q, StringComparison.OrdinalIgnoreCase)
-                    || qq.TopicTag.Contains(q, StringComparison.OrdinalIgnoreCase)
-                );
+            var allNodes = EnumerateAllTaskNodes(AllTasks).ToList();
+            var byId = allNodes.ToDictionary(t => t.Id, StringComparer.OrdinalIgnoreCase);
+            var matchedTasks = new List<TaskItem>();
 
-            if (matchesQuiz)
+            if (!string.IsNullOrWhiteSpace(q))
             {
-                var sub =
-                    $"{qz.CourseTitle} · {qz.Questions.Count} items"
-                    + (
-                        qz.HasInProgressAttempt
-                            ? $" · In progress (Q{(qz.InProgressQuestionIndex ?? 0) + 1})"
-                            : ""
-                    );
-                results.Add(
-                    new SearchResultItem(
-                        SearchResultKind.Quiz,
-                        qz.Title,
-                        sub,
-                        qz.Term ?? "Quiz",
-                        Quiz: qz
-                    )
+                var ftsIds = ScholarFlowDatabase.SearchTaskIdsFts(BasinRoot, q, limit: 18);
+                foreach (var ftsId in ftsIds)
+                {
+                    if (byId.TryGetValue(ftsId, out var matched))
+                        matchedTasks.Add(matched);
+                }
+            }
+
+            if (matchedTasks.Count < 16)
+            {
+                var seenIds = new HashSet<string>(
+                    matchedTasks.Select(t => t.Id),
+                    StringComparer.OrdinalIgnoreCase
                 );
+                var candidateTasks = allNodes
+                    .OrderBy(t => t.IsCompleted ? 1 : 0)
+                    .ThenByDescending(t => UrgencyCalculator.Explain(t).Score)
+                    .ToList();
+
+                foreach (var t in candidateTasks)
+                {
+                    if (seenIds.Contains(t.Id))
+                        continue;
+
+                    if (
+                        QuickSearchMatcher.Matches(
+                            q,
+                            t.Title,
+                            t.CourseAlias,
+                            t.Term,
+                            t.Labels.Count > 0 ? string.Join(' ', t.Labels) : null
+                        )
+                    )
+                    {
+                        matchedTasks.Add(t);
+                        if (matchedTasks.Count >= 18)
+                            break;
+                    }
+                }
+            }
+
+            foreach (var t in matchedTasks)
+            {
+                var sub = t.DueDate.HasValue
+                    ? $"Due {t.DueDate.Value:MMM d}"
+                    : (t.IsCompleted ? "Completed" : "No due date");
+                if (!string.IsNullOrWhiteSpace(t.ParentTaskId))
+                    sub = $"Subtask · {sub}";
+                var badge = !string.IsNullOrWhiteSpace(t.CourseAlias)
+                    ? $"#{t.CourseAlias}"
+                    : $"P{(int)t.Priority}";
+                results.Add(new SearchResultItem(SearchResultKind.Task, t.Title, sub, badge, Task: t));
+
+                if (SearchCategoryFilter == "All" && results.Count >= 18)
+                    break;
             }
         }
 
-        SearchResults = [.. results.Take(16)];
-        SelectedSearchResultIndex = 0;
+        // 3. Matching Master PDFs & Course Files
+        if (wantFiles && !string.IsNullOrWhiteSpace(BasinRoot) && Directory.Exists(BasinRoot))
+        {
+            var scoredFiles = new List<(int Score, SearchResultItem Item)>();
+            foreach (var c in Courses.Where(c => !c.IsArchived))
+            {
+                var masterPdf = MasterPdfService.FindExistingMasterPdfPath(BasinRoot, c.FolderName);
+                if (masterPdf is not null)
+                {
+                    int score = QuickSearchMatcher.Score(
+                        q,
+                        $"{c.Title} Master Study Packet",
+                        Path.GetFileName(masterPdf),
+                        c.Alias,
+                        "pdf master file"
+                    );
+                    if (score > 0)
+                    {
+                        scoredFiles.Add(
+                            (
+                                score + 10,
+                                new SearchResultItem(
+                                    SearchResultKind.PdfDocument,
+                                    $"{c.Title} — Master Study Packet",
+                                    Path.GetFileName(masterPdf),
+                                    "Master PDF",
+                                    Course: c,
+                                    PdfPath: masterPdf
+                                )
+                            )
+                        );
+                    }
+                }
+
+                var courseDir = Path.Combine(BasinRoot, c.FolderName);
+                if (!Directory.Exists(courseDir))
+                    continue;
+
+                try
+                {
+                    foreach (
+                        var file in Directory.EnumerateFiles(
+                            courseDir,
+                            "*",
+                            SearchOption.AllDirectories
+                        )
+                    )
+                    {
+                        var fileName = Path.GetFileName(file);
+                        if (
+                            fileName.StartsWith('.')
+                            || QuickSearchIgnoredManifests.Contains(fileName)
+                        )
+                            continue;
+
+                        var rel = Path.GetRelativePath(courseDir, file).Replace('\\', '/');
+                        if (
+                            rel.StartsWith('.')
+                            || rel.Contains("/.", StringComparison.Ordinal)
+                            || rel.StartsWith("Master_PDF/", StringComparison.OrdinalIgnoreCase)
+                        )
+                            continue;
+
+                        int score = QuickSearchMatcher.Score(
+                            q,
+                            fileName,
+                            rel.Replace('_', ' '),
+                            c.Title,
+                            c.Alias,
+                            "file"
+                        );
+                        if (score > 0)
+                        {
+                            var folderPart = Path.GetDirectoryName(rel)?.Replace('_', ' ');
+                            var sub = string.IsNullOrWhiteSpace(folderPart)
+                                ? c.Title
+                                : $"{c.Title} · {folderPart}";
+                            var ext = Path.GetExtension(fileName).TrimStart('.').ToUpperInvariant();
+                            scoredFiles.Add(
+                                (
+                                    score,
+                                    new SearchResultItem(
+                                        SearchResultKind.CourseFile,
+                                        fileName,
+                                        sub,
+                                        string.IsNullOrWhiteSpace(ext) ? "FILE" : ext,
+                                        Course: c,
+                                        PdfPath: file
+                                    )
+                                )
+                            );
+                        }
+                    }
+                }
+                catch
+                {
+                    // Skip unreadable course directories
+                }
+            }
+
+            int maxFiles = SearchCategoryFilter == "Files" ? 30 : 10;
+            foreach (var (_, item) in scoredFiles.OrderByDescending(x => x.Score).Take(maxFiles))
+                results.Add(item);
+        }
+
+        // 4. Matching Test & Recall Quizzes (by title, term, course, or question prompt/tag)
+        if (wantQuizzes)
+        {
+            foreach (var qz in QuizStudio.SavedQuizzes)
+            {
+                bool matchesQuiz =
+                    QuickSearchMatcher.Matches(q, qz.Title, qz.CourseTitle, qz.Term, "quiz test recall")
+                    || qz.Questions.Any(qq =>
+                        QuickSearchMatcher.Matches(q, qq.Prompt, qq.TopicTag)
+                    );
+
+                if (matchesQuiz)
+                {
+                    var sub =
+                        $"{qz.CourseTitle} · {qz.Questions.Count} items"
+                        + (
+                            qz.HasInProgressAttempt
+                                ? $" · In progress (Q{(qz.InProgressQuestionIndex ?? 0) + 1})"
+                                : ""
+                        );
+                    results.Add(
+                        new SearchResultItem(
+                            SearchResultKind.Quiz,
+                            qz.Title,
+                            sub,
+                            qz.Term ?? "Quiz",
+                            Quiz: qz
+                        )
+                    );
+                }
+            }
+        }
+
+        SearchResults = [.. results.Take(24)];
+        SelectedSearchResultIndex = SearchResults.Count > 0 ? 0 : -1;
     }
 }

@@ -176,6 +176,7 @@ public sealed partial class MainWindow
     {
         DetachFromParent(_searchBox);
         _searchResultsStack = new StackPanel { Spacing = 2 };
+        _searchFilterBar = new WrapPanel { Orientation = Orientation.Horizontal };
 
         var stack = new StackPanel { Spacing = 8 };
 
@@ -197,6 +198,8 @@ public sealed partial class MainWindow
         searchHeader.Children.Add(escChip);
 
         stack.Children.Add(searchHeader);
+        RefreshSearchFilterBar();
+        stack.Children.Add(_searchFilterBar);
         stack.Children.Add(UiBuilder.HairlineDivider());
 
         var scroll = new ScrollViewer { MaxHeight = 360, Content = _searchResultsStack };
@@ -228,15 +231,60 @@ public sealed partial class MainWindow
         };
     }
 
+    private void RefreshSearchFilterBar()
+    {
+        _searchFilterBar.Children.Clear();
+        foreach (var cat in new[] { "All", "Tasks", "Courses", "Quizzes", "Files" })
+        {
+            var captured = cat;
+            bool isActive = string.Equals(
+                _vm.SearchCategoryFilter,
+                captured,
+                StringComparison.OrdinalIgnoreCase
+            );
+            var btn = UiBuilder.GhostButton(
+                captured,
+                null,
+                () =>
+                {
+                    _vm.SetSearchCategoryFilter(captured);
+                    _searchBox.Focus();
+                },
+                isActive: isActive
+            );
+            btn.Margin = new Thickness(0, 0, 4, 2);
+            _searchFilterBar.Children.Add(btn);
+        }
+
+        if (_vm.SearchCategoryFilter == "All")
+        {
+            var hideFilesBtn = UiBuilder.GhostButton(
+                _vm.ExcludeFilesInQuickSearch ? "Files Hidden" : "Hide Files",
+                _vm.ExcludeFilesInQuickSearch
+                    ? MaterialIconKind.EyeOffOutline
+                    : MaterialIconKind.FilterRemoveOutline,
+                () =>
+                {
+                    _vm.ToggleExcludeFilesInQuickSearch();
+                    _searchBox.Focus();
+                },
+                isActive: _vm.ExcludeFilesInQuickSearch
+            );
+            hideFilesBtn.Margin = new Thickness(6, 0, 0, 2);
+            _searchFilterBar.Children.Add(hideFilesBtn);
+        }
+    }
+
     private void RefreshSearchResultsList()
     {
+        RefreshSearchFilterBar();
         _searchResultsStack.Children.Clear();
         if (_vm.SearchResults.Count == 0)
         {
             _searchResultsStack.Children.Add(
                 new TextBlock
                 {
-                    Text = "No matching tasks, courses, or PDFs found.",
+                    Text = "No matching tasks, courses, quizzes, or files found.",
                     FontSize = 12.5,
                     Foreground = ThemeService.Brush(ThemeService.TextMuted),
                     Margin = new Thickness(8, 16),
@@ -255,6 +303,10 @@ public sealed partial class MainWindow
             {
                 SearchResultKind.Course => MaterialIconKind.Pound,
                 SearchResultKind.PdfDocument => MaterialIconKind.FilePdfBox,
+                SearchResultKind.CourseFile =>
+                    item.PdfPath?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true
+                        ? MaterialIconKind.FilePdfBox
+                        : MaterialIconKind.FileDocumentOutline,
                 SearchResultKind.Quiz => MaterialIconKind.HeadLightbulbOutline,
                 _ => MaterialIconKind.CheckboxBlankCircleOutline,
             };
@@ -262,6 +314,10 @@ public sealed partial class MainWindow
             var iconFg = item.Kind switch
             {
                 SearchResultKind.PdfDocument => ThemeService.Brush(ThemeService.AccentPrimary),
+                SearchResultKind.CourseFile =>
+                    item.PdfPath?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true
+                        ? ThemeService.Brush(ThemeService.AccentPrimary)
+                        : ThemeService.Brush(ThemeService.TextSecondary),
                 SearchResultKind.Course => ThemeService.Brush(ThemeService.PriorityP3Fg),
                 SearchResultKind.Quiz => ThemeService.Brush(ThemeService.PriorityP2Fg),
                 _ => ThemeService.Brush(ThemeService.TextSecondary),
