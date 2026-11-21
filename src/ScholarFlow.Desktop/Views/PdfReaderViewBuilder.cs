@@ -102,20 +102,33 @@ public static class PdfReaderViewBuilder
         navRow.Children.Add(
             UiBuilder.IconButton(MaterialIconKind.ChevronLeft, reader.PreviousPage)
         );
-        navRow.Children.Add(
-            new Border
+        var pageInput = new TextBox
+        {
+            Text = reader.CurrentPage.ToString(),
+            Width = 52,
+            FontSize = 12,
+            FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(6, 3),
+        };
+        pageInput.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && int.TryParse(pageInput.Text?.Trim(), out int target))
             {
-                Background = ThemeService.Brush(ThemeService.BgElevated),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(8, 3.5),
+                e.Handled = true;
+                reader.JumpToPage(target);
+            }
+        };
+        navRow.Children.Add(pageInput);
+        navRow.Children.Add(
+            new TextBlock
+            {
+                Text = $"/ {Math.Max(1, reader.PageCount)}",
+                FontSize = 12,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
                 VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = $"{reader.CurrentPage} / {Math.Max(1, reader.PageCount)}",
-                    FontSize = 12,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                },
+                Margin = new Thickness(2, 0, 2, 0),
             }
         );
         navRow.Children.Add(UiBuilder.IconButton(MaterialIconKind.ChevronRight, reader.NextPage));
@@ -361,7 +374,7 @@ public static class PdfReaderViewBuilder
                 Child = pageLayerGrid,
             };
 
-            canvasContent = new ScrollViewer
+            var readerScroll = new ScrollViewer
             {
                 HorizontalScrollBarVisibility = reader.FitToWidth
                     ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
@@ -369,6 +382,17 @@ public static class PdfReaderViewBuilder
                 VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
                 Content = pageSheet,
             };
+            UiBuilder.AttachPdfWheelAndPan(
+                readerScroll,
+                delta =>
+                {
+                    if (delta > 0)
+                        reader.ZoomIn(Math.Abs(delta));
+                    else
+                        reader.ZoomOut(Math.Abs(delta));
+                }
+            );
+            canvasContent = readerScroll;
         }
         else if (reader.IsLoadingDocument || reader.IsRenderingPage)
         {

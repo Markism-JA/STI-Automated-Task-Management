@@ -765,24 +765,40 @@ public sealed partial class QuizStudioViewModel
         return best;
     }
 
+    private readonly Dictionary<(string Path, int Page, int Dpi), Avalonia.Media.Imaging.Bitmap> _snipBitmapCache = [];
+
+    public void ZoomPreview(int delta)
+    {
+        PreviewZoomPercent = Math.Clamp(PreviewZoomPercent + delta, 60, 225);
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ResetPreviewZoom()
+    {
+        PreviewZoomPercent = 100;
+        _mainVm.RequestUiRefresh();
+    }
+
     public async Task ToggleSnipFitToWidthAsync()
     {
         SnipFitToWidth = !SnipFitToWidth;
         if (SnipFitToWidth)
             SnipZoomPercent = 100;
-        if (EditingSnipPageNumber > 0)
-            await LoadEditorSnipPageAsync(EditingSnipPageNumber);
+        _mainVm.RequestUiRefresh();
+        if (EditingSnipPageNumber > 0 && !SnipFitToWidth && SnipZoomPercent > 150)
+            await LoadEditorSnipPageAsync(EditingSnipPageNumber, showLoading: false);
     }
 
     public async Task ZoomSnipAsync(int delta)
     {
         SnipFitToWidth = false;
-        SnipZoomPercent = Math.Clamp(SnipZoomPercent + delta, 60, 225);
-        if (EditingSnipPageNumber > 0)
-            await LoadEditorSnipPageAsync(EditingSnipPageNumber);
+        SnipZoomPercent = Math.Clamp(SnipZoomPercent + delta, 50, 250);
+        _mainVm.RequestUiRefresh();
+        if (EditingSnipPageNumber > 0 && SnipZoomPercent > 150)
+            await LoadEditorSnipPageAsync(EditingSnipPageNumber, showLoading: false);
     }
 
-    public async Task LoadEditorSnipPageAsync(int oneBasedPage)
+    public async Task LoadEditorSnipPageAsync(int oneBasedPage, bool showLoading = true)
     {
         var draft = EditingQuestionDraft;
         var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
@@ -795,10 +811,29 @@ public sealed partial class QuizStudioViewModel
             return;
         }
 
-        IsLoadingSnipPage = true;
-        _mainVm.RequestUiRefresh();
+        int targetDpi = (!SnipFitToWidth && SnipZoomPercent > 150) ? 280 : 180;
+        int clampedReq = Math.Max(1, oneBasedPage);
+        if (
+            EditingSnipTotalPages > 0
+            && _snipBitmapCache.TryGetValue(
+                (pdfPath, Math.Clamp(clampedReq, 1, EditingSnipTotalPages), targetDpi),
+                out var cachedBmp
+            )
+            && string.Equals(_snipOutlinePdfPath, pdfPath, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            EditingSnipPageNumber = Math.Clamp(clampedReq, 1, EditingSnipTotalPages);
+            EditingSnipPageBitmap = cachedBmp;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
 
-        int dpi = SnipFitToWidth ? 180 : Math.Clamp((int)(160 * (SnipZoomPercent / 100.0)), 96, 280);
+        if (showLoading)
+        {
+            IsLoadingSnipPage = true;
+            _mainVm.RequestUiRefresh();
+        }
+
         bool needOutline = !string.Equals(_snipOutlinePdfPath, pdfPath, StringComparison.OrdinalIgnoreCase);
 
         try
@@ -831,7 +866,7 @@ public sealed partial class QuizStudioViewModel
                 var rendered = Services.PdfBitmapRenderer.RenderPagePixels(
                     pdfBytes,
                     clamped - 1,
-                    dpi: dpi
+                    dpi: targetDpi
                 );
                 return (rendered, total, clamped, roots);
             });
@@ -842,9 +877,13 @@ public sealed partial class QuizStudioViewModel
                 SnipOutlineRoots = outlineRoots;
                 _snipOutlinePdfPath = pdfPath;
             }
+            var bmp = Services.PdfBitmapRenderer.CreateWriteableBitmap(pixels);
+            if (_snipBitmapCache.Count >= 16)
+                _snipBitmapCache.Clear();
+            _snipBitmapCache[(pdfPath, resolvedPage, targetDpi)] = bmp;
             EditingSnipPageNumber = resolvedPage;
             EditingSnipTotalPages = totalPages;
-            EditingSnipPageBitmap = Services.PdfBitmapRenderer.CreateWriteableBitmap(pixels);
+            EditingSnipPageBitmap = bmp;
         }
         catch (Exception ex)
         {

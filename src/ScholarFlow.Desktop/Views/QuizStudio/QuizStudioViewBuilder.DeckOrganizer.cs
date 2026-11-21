@@ -2174,7 +2174,7 @@ public static partial class QuizStudioViewBuilder
                 Child = pageLayer,
             };
 
-            canvasContent = new ScrollViewer
+            var snipScroll = new ScrollViewer
             {
                 HorizontalScrollBarVisibility = studio.SnipFitToWidth
                     ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
@@ -2182,6 +2182,8 @@ public static partial class QuizStudioViewBuilder
                 VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
                 Content = sheet,
             };
+            UiBuilder.AttachPdfWheelAndPan(snipScroll, delta => _ = studio.ZoomSnipAsync(delta));
+            canvasContent = snipScroll;
         }
         else
         {

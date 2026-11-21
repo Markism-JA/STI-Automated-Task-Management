@@ -363,6 +363,53 @@ public static class UiBuilder
         return scroll;
     }
 
+    /// <summary>
+    /// Enables Ctrl+ScrollWheel zooming and middle-mouse-button drag panning on any PDF ScrollViewer.
+    /// </summary>
+    public static void AttachPdfWheelAndPan(ScrollViewer scroll, Action<int> onZoomDelta)
+    {
+        scroll.PointerWheelChanged += (_, e) =>
+        {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && Math.Abs(e.Delta.Y) > 0.01)
+            {
+                e.Handled = true;
+                onZoomDelta(e.Delta.Y > 0 ? 15 : -15);
+            }
+        };
+
+        Point? panLast = null;
+        scroll.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(scroll).Properties.IsMiddleButtonPressed)
+            {
+                panLast = e.GetPosition(scroll);
+                e.Pointer.Capture(scroll);
+                e.Handled = true;
+            }
+        };
+        scroll.PointerMoved += (_, e) =>
+        {
+            if (!panLast.HasValue)
+                return;
+            var cur = e.GetPosition(scroll);
+            var delta = cur - panLast.Value;
+            panLast = cur;
+            scroll.Offset = new Vector(
+                Math.Max(0, scroll.Offset.X - delta.X),
+                Math.Max(0, scroll.Offset.Y - delta.Y)
+            );
+        };
+        scroll.PointerReleased += (_, e) =>
+        {
+            if (panLast.HasValue)
+            {
+                panLast = null;
+                e.Pointer.Capture(null);
+                e.Handled = true;
+            }
+        };
+    }
+
     public static Border Card(Control child, Thickness? padding = null) =>
         new()
         {

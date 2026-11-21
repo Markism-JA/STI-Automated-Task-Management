@@ -23,6 +23,39 @@ public static class ShortcutDispatcher
         // Global Escape always untoggles/closes the top-most floating modal or inspector drawer
         if (e.Key == Key.Escape)
         {
+            if (vm.ActiveMode == WorkspaceTabMode.QuizStudio)
+            {
+                if (vm.QuizStudio.ZoomedImagePath is not null)
+                {
+                    e.Handled = true;
+                    vm.QuizStudio.CloseImageZoom();
+                    return;
+                }
+                if (vm.QuizStudio.IsDedicatedSnipperOpen)
+                {
+                    e.Handled = true;
+                    vm.QuizStudio.CloseDedicatedSnipper();
+                    return;
+                }
+                if (vm.QuizStudio.EditingQuestionDraft is not null)
+                {
+                    e.Handled = true;
+                    vm.QuizStudio.CancelEditingQuestionDraft();
+                    return;
+                }
+                if (vm.QuizStudio.IsDeckAiFixModalOpen)
+                {
+                    e.Handled = true;
+                    vm.QuizStudio.CloseDeckAiFixModal();
+                    return;
+                }
+            }
+            if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+            {
+                e.Handled = true;
+                vm.ReturnFromPdfReader();
+                return;
+            }
             if (vm.CloseTopOverlayOrDrawer())
             {
                 e.Handled = true;
@@ -31,9 +64,54 @@ public static class ShortcutDispatcher
             }
         }
 
-        // Global Ctrl+K / Ctrl+F / Ctrl+B / Ctrl+S shortcuts
+        // Global Ctrl+K / Ctrl+F / Ctrl+B / Ctrl+S + PDF Zoom shortcuts
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
+            if (e.Key is Key.OemPlus or Key.Add)
+            {
+                if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                {
+                    e.Handled = true;
+                    vm.PdfReader.ZoomIn();
+                    return;
+                }
+                if (vm.ActiveMode == WorkspaceTabMode.QuizStudio && vm.QuizStudio.IsDedicatedSnipperOpen)
+                {
+                    e.Handled = true;
+                    _ = vm.QuizStudio.ZoomSnipAsync(+25);
+                    return;
+                }
+            }
+            if (e.Key is Key.OemMinus or Key.Subtract)
+            {
+                if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                {
+                    e.Handled = true;
+                    vm.PdfReader.ZoomOut();
+                    return;
+                }
+                if (vm.ActiveMode == WorkspaceTabMode.QuizStudio && vm.QuizStudio.IsDedicatedSnipperOpen)
+                {
+                    e.Handled = true;
+                    _ = vm.QuizStudio.ZoomSnipAsync(-25);
+                    return;
+                }
+            }
+            if (e.Key is Key.D0 or Key.NumPad0)
+            {
+                if (vm.ActiveMode == WorkspaceTabMode.PdfReader)
+                {
+                    e.Handled = true;
+                    vm.PdfReader.ToggleFitToWidth();
+                    return;
+                }
+                if (vm.ActiveMode == WorkspaceTabMode.QuizStudio && vm.QuizStudio.IsDedicatedSnipperOpen)
+                {
+                    e.Handled = true;
+                    _ = vm.QuizStudio.ToggleSnipFitToWidthAsync();
+                    return;
+                }
+            }
             if (e.Key is Key.K or Key.F)
             {
                 e.Handled = true;
@@ -143,14 +221,36 @@ public static class ShortcutDispatcher
                     vm.MoveSelection(-1);
                 break;
 
-            case Key.PageDown when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+            case Key.PageDown or Key.Right when vm.ActiveMode == WorkspaceTabMode.PdfReader:
                 e.Handled = true;
                 vm.PdfReader.NextPage();
                 break;
 
-            case Key.PageUp when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+            case Key.PageUp or Key.Left when vm.ActiveMode == WorkspaceTabMode.PdfReader:
                 e.Handled = true;
                 vm.PdfReader.PreviousPage();
+                break;
+
+            case Key.PageDown or Key.Right when vm.ActiveMode == WorkspaceTabMode.QuizStudio && vm.QuizStudio.IsDedicatedSnipperOpen:
+                e.Handled = true;
+                _ = vm.QuizStudio.LoadEditorSnipPageAsync(
+                    Math.Min(Math.Max(1, vm.QuizStudio.EditingSnipTotalPages), vm.QuizStudio.EditingSnipPageNumber + 1)
+                );
+                break;
+
+            case Key.PageUp or Key.Left when vm.ActiveMode == WorkspaceTabMode.QuizStudio && vm.QuizStudio.IsDedicatedSnipperOpen:
+                e.Handled = true;
+                _ = vm.QuizStudio.LoadEditorSnipPageAsync(Math.Max(1, vm.QuizStudio.EditingSnipPageNumber - 1));
+                break;
+
+            case Key.Home when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                vm.PdfReader.JumpToPage(1);
+                break;
+
+            case Key.End when vm.ActiveMode == WorkspaceTabMode.PdfReader:
+                e.Handled = true;
+                vm.PdfReader.JumpToPage(vm.PdfReader.PageCount);
                 break;
 
             case Key.G:

@@ -71,6 +71,16 @@ public static partial class QuizStudioViewBuilder
         Control pageVisual;
         if (bmp is not null)
         {
+            var previewImg = new Image
+            {
+                Source = bmp,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            if (studio.PreviewZoomPercent != 100)
+                previewImg.Width = 480 * (studio.PreviewZoomPercent / 100.0);
+
             var pageSheet = new Border
             {
                 Background = Brushes.White,
@@ -79,21 +89,22 @@ public static partial class QuizStudioViewBuilder
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(4),
                 Margin = new Thickness(6),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalAlignment = studio.PreviewZoomPercent == 100
+                    ? HorizontalAlignment.Stretch
+                    : HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Top,
-                Child = new Image
-                {
-                    Source = bmp,
-                    Stretch = Stretch.Uniform,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Top,
-                },
+                Child = previewImg,
             };
 
-            pageVisual = UiBuilder.PersistentScrollViewer(
+            var previewScroll = UiBuilder.PersistentScrollViewer(
                 $"quiz-preview:{studio.SelectedPdfPath}:{studio.CurrentPreviewPdfPage}",
-                pageSheet
+                pageSheet,
+                horizontalVisibility: studio.PreviewZoomPercent > 100
+                    ? Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+                    : Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
             );
+            UiBuilder.AttachPdfWheelAndPan(previewScroll, delta => studio.ZoomPreview(delta));
+            pageVisual = previewScroll;
         }
         else if (studio.IsLoadingPreviewPage || studio.IsInspectingPdf)
         {

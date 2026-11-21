@@ -148,13 +148,28 @@ public sealed class PdfReaderViewModel : IDisposable
             return null;
 
         int zeroBased = Math.Clamp(CurrentPage - 1, 0, PageCount - 1);
-        int dpi = FitToWidth ? 180 : Math.Clamp((int)(160 * (ZoomPercent / 100.0)), 96, 300);
+        int targetDpi = (!FitToWidth && ZoomPercent > 150) ? 280 : 180;
 
-        if (_pageCache.TryGetValue((zeroBased, dpi), out var cached))
+        if (_pageCache.TryGetValue((zeroBased, targetDpi), out var cached))
             return cached;
 
-        _ = RenderPageInBackgroundAsync(_pdfBytes, zeroBased, dpi, CurrentFilePath, notifyOnComplete: true);
-        return null;
+        // Zero-flash zoom fallback: display any cached DPI tier for this page immediately
+        // while the target DPI tier renders silently in the background.
+        var fallback = _pageCache
+            .Where(kv => kv.Key.Page == zeroBased)
+            .OrderByDescending(kv => kv.Key.Dpi)
+            .Select(kv => kv.Value)
+            .FirstOrDefault();
+
+        _ = RenderPageInBackgroundAsync(
+            _pdfBytes,
+            zeroBased,
+            targetDpi,
+            CurrentFilePath,
+            notifyOnComplete: true,
+            showLoadingIndicator: fallback is null
+        );
+        return fallback;
     }
 
     private async Task RenderPageInBackgroundAsync(
@@ -162,13 +177,14 @@ public sealed class PdfReaderViewModel : IDisposable
         int zeroBased,
         int dpi,
         string? filePath,
-        bool notifyOnComplete)
+        bool notifyOnComplete,
+        bool showLoadingIndicator = true)
     {
         var key = (zeroBased, dpi);
         if (!_pendingPageRenders.Add(key))
             return;
 
-        if (notifyOnComplete)
+        if (notifyOnComplete && showLoadingIndicator)
             IsRenderingPage = true;
 
         try
@@ -289,17 +305,21 @@ public sealed class PdfReaderViewModel : IDisposable
             Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public void ZoomIn()
+    public void ZoomIn() => ZoomIn(25);
+
+    public void ZoomIn(int step)
     {
         FitToWidth = false;
-        ZoomPercent = Math.Min(250, ZoomPercent + 25);
+        ZoomPercent = Math.Min(250, ZoomPercent + step);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public void ZoomOut()
+    public void ZoomOut() => ZoomOut(25);
+
+    public void ZoomOut(int step)
     {
         FitToWidth = false;
-        ZoomPercent = Math.Max(50, ZoomPercent - 25);
+        ZoomPercent = Math.Max(50, ZoomPercent - step);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
