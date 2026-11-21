@@ -29,6 +29,15 @@ public static partial class QuizStudioViewBuilder
                 : BuildActiveQuestionRunnerView(vm, studio);
         }
 
+        if (
+            studio.ActiveSubTab == QuizStudioSubTab.Organizer
+            && studio.IsDedicatedSnipperOpen
+            && studio.EditingQuestionDraft is not null
+        )
+        {
+            return BuildDedicatedPdfSnipperView(vm, studio);
+        }
+
         return BuildStudioWorkspaceView(vm, studio);
     }
 
@@ -169,15 +178,46 @@ public static partial class QuizStudioViewBuilder
         subTabRow.Children.Add(
             UiBuilder.GhostButton(
                 studio.OrganizerQuiz is not null
+                && (
+                    studio.SelectedCourse is null
+                    || string.Equals(
+                        studio.OrganizerQuiz.CourseFolder,
+                        studio.SelectedCourse.FolderName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                     ? $"Deck Organizer ({studio.OrganizerQuiz.Questions.Count})"
                     : "Deck Organizer",
                 MaterialIconKind.TuneVariant,
                 () =>
                 {
-                    if (studio.OrganizerQuiz is null && studio.SavedQuizzes.Count > 0)
-                        studio.OpenQuizInOrganizer(studio.SavedQuizzes[0]);
-                    else
-                        studio.SetSubTab(QuizStudioSubTab.Organizer);
+                    bool matchesCourse =
+                        studio.OrganizerQuiz is not null
+                        && (
+                            studio.SelectedCourse is null
+                            || string.Equals(
+                                studio.OrganizerQuiz.CourseFolder,
+                                studio.SelectedCourse.FolderName,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        );
+                    if (!matchesCourse)
+                    {
+                        var courseQuiz = studio.SavedQuizzes.FirstOrDefault(q =>
+                            studio.SelectedCourse is null
+                            || string.Equals(
+                                q.CourseFolder,
+                                studio.SelectedCourse.FolderName,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        );
+                        if (courseQuiz is not null)
+                        {
+                            studio.OpenQuizInOrganizer(courseQuiz);
+                            return;
+                        }
+                    }
+                    studio.SetSubTab(QuizStudioSubTab.Organizer);
                 },
                 isActive: studio.ActiveSubTab == QuizStudioSubTab.Organizer
             )
@@ -263,16 +303,35 @@ public static partial class QuizStudioViewBuilder
         topStack.Children.Add(UiBuilder.HairlineDivider());
         root.Children.Add(topStack);
 
-        // Body Content (2-Column Builder + Live PDF Page Preview, Hairline Catalog, or Deck Organizer)
+        // Body Content (2-Column Builder + Live PDF Page Preview, Hairline Catalog, Deck Organizer, or Dedicated PDF Snipper)
         Control bodyContent = studio.ActiveSubTab switch
         {
             QuizStudioSubTab.Catalog => BuildCatalogView(vm, studio),
+            QuizStudioSubTab.Organizer
+                when studio.IsDedicatedSnipperOpen && studio.EditingQuestionDraft is not null =>
+                BuildDedicatedPdfSnipperView(vm, studio),
             QuizStudioSubTab.Organizer => BuildDeckOrganizerView(vm, studio),
             _ => BuildSplitBuilderAndPreviewView(vm, studio),
         };
 
         Grid.SetRow(bodyContent, 1);
         root.Children.Add(bodyContent);
+
+        if (
+            studio.ActiveSubTab == QuizStudioSubTab.Organizer
+            && !studio.IsDedicatedSnipperOpen
+            && (studio.EditingQuestionDraft is not null || studio.IsDeckAiFixModalOpen)
+        )
+        {
+            var host = new Grid();
+            host.Children.Add(root);
+            if (studio.EditingQuestionDraft is not null)
+                host.Children.Add(BuildFloatingQuestionEditorOverlay(vm, studio));
+            else if (studio.IsDeckAiFixModalOpen)
+                host.Children.Add(BuildDeckComprehensiveAiFixOverlay(vm, studio));
+            return host;
+        }
+
         return root;
     }
 }

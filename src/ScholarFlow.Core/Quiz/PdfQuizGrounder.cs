@@ -737,6 +737,50 @@ public static class PdfQuizGrounder
         return session.Questions.Count(q => q.HighlightRects.Count > 0);
     }
 
+    /// <summary>
+    /// Extracts words inside a normalized [0..1] top-left bounding box on the given 1-based PDF page
+    /// and resolves the page's section breadcrumb for visual drag-to-highlight grounding.
+    /// </summary>
+    public static (string Quote, string SectionTitle, int TotalPages) ExtractQuoteFromNormalizedRegion(
+        string pdfPath,
+        int oneBasedPage,
+        NormalizedHighlightRect region
+    )
+    {
+        if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            return (string.Empty, string.Empty, 0);
+
+        using var doc = PdfDocument.Open(pdfPath);
+        int totalPages = doc.NumberOfPages;
+        if (totalPages <= 0)
+            return (string.Empty, string.Empty, 0);
+
+        int p = Math.Clamp(oneBasedPage, 1, totalPages);
+        var sectionMap = BuildPageSectionMap(doc);
+        var sectionTitle = sectionMap[p].SectionBreadcrumb;
+
+        var page = doc.GetPage(p);
+        double pw = Math.Max(1.0, page.Width);
+        double ph = Math.Max(1.0, page.Height);
+
+        double rx1 = Math.Clamp(region.X, 0.0, 1.0);
+        double ry1 = Math.Clamp(region.Y, 0.0, 1.0);
+        double rx2 = Math.Clamp(region.X + region.Width, 0.0, 1.0);
+        double ry2 = Math.Clamp(region.Y + region.Height, 0.0, 1.0);
+
+        var matchingWords = GetVisibleWordsInReadingOrder(page)
+            .Where(w =>
+            {
+                double cx = ((w.BoundingBox.Left + w.BoundingBox.Right) * 0.5) / pw;
+                double cy = 1.0 - (((w.BoundingBox.Bottom + w.BoundingBox.Top) * 0.5) / ph);
+                return cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2;
+            })
+            .ToList();
+
+        var quote = string.Join(" ", matchingWords.Select(w => w.Text.Trim()).Where(t => t.Length > 0));
+        return (quote, sectionTitle, totalPages);
+    }
+
     public static List<NormalizedHighlightRect> ComputeHighlightRects(
         PdfDocument doc,
         int hintPage,

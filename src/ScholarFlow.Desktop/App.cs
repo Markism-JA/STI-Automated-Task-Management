@@ -75,6 +75,50 @@ public sealed class App : Application
             Setters = { new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)) },
         };
         Styles.Add(datePickerStyle);
+
+        var menuFlyoutStyle = new Style(x => x.OfType<MenuFlyoutPresenter>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, ThemeService.Brush(ThemeService.BgSurface)),
+                new Setter(TemplatedControl.BorderBrushProperty, ThemeService.Brush(ThemeService.BorderSubtle)),
+                new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1)),
+                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(8)),
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(4)),
+            },
+        };
+        Styles.Add(menuFlyoutStyle);
+
+        var menuItemStyle = new Style(x => x.OfType<MenuItem>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.ForegroundProperty, ThemeService.Brush(ThemeService.TextPrimary)),
+                new Setter(TemplatedControl.FontSizeProperty, 12.5),
+                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(5)),
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 6)),
+            },
+        };
+        Styles.Add(menuItemStyle);
+
+        var menuItemHoverStyle = new Style(x => x.OfType<MenuItem>().Class(":pointerover"))
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, ThemeService.Brush(ThemeService.BgHover)),
+            },
+        };
+        Styles.Add(menuItemHoverStyle);
+
+        var menuItemSelectedStyle = new Style(x => x.OfType<MenuItem>().Class(":selected"))
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, ThemeService.Brush(ThemeService.AccentSoftBg)),
+                new Setter(TemplatedControl.ForegroundProperty, ThemeService.Brush(ThemeService.AccentPrimary)),
+            },
+        };
+        Styles.Add(menuItemSelectedStyle);
     }
 
     public override void OnFrameworkInitializationCompleted()

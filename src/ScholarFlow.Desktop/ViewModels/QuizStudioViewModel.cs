@@ -25,6 +25,14 @@ public enum QuizBuilderOutputMode
 /// Offline Smart PDF Analysis, SM-2/FSRS Spaced Repetition, live visual PDF scope previewing,
 /// and one-click jump to highlighted statements in the PDF Reader.
 /// </summary>
+public enum OrganizerHealthFilter
+{
+    All,
+    MissingEvidence,
+    HasRichMedia,
+    FlaggedForAi,
+}
+
 public enum OutlineSelectionState
 {
     Unchecked,
@@ -138,8 +146,35 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     // Deck Organizer State (Single & Multi-Quiz Reorganization)
     public QuizSessionRecord? OrganizerQuiz { get; private set; }
     public QuizQuestionKind? OrganizerKindFilter { get; private set; }
+    public string? OrganizerTopicFilter { get; private set; }
+    public OrganizerHealthFilter OrganizerHealthFilter { get; private set; } = OrganizerHealthFilter.All;
+    public string OrganizerSearchQuery { get; private set; } = string.Empty;
+    public string? SelectedOrganizerQuestionId { get; private set; }
+    public bool IsOrganizerDirty { get; private set; }
+    public bool IsOrganizerTocOpen { get; private set; } = true;
+    public bool IsOrganizerFiltersOpen { get; private set; }
     public string? EditingQuestionId { get; private set; }
+    public QuizQuestionRecord? EditingQuestionDraft { get; private set; }
+    public bool IsEditingAdvancedOpen { get; private set; }
+    public string? EditingPageTextPreview { get; private set; }
+    public string? EditingGroundStatus { get; private set; }
+    public bool IsDedicatedSnipperOpen { get; private set; }
+    public bool IsLoadingSnipPage { get; private set; }
+    public Avalonia.Media.Imaging.Bitmap? EditingSnipPageBitmap { get; private set; }
+    public int EditingSnipPageNumber { get; private set; }
+    public int EditingSnipTotalPages { get; private set; }
+    public bool SnipFitToWidth { get; private set; } = true;
+    public int SnipZoomPercent { get; private set; } = 100;
+    public bool IsSnipOutlineOpen { get; private set; } = true;
+    public IReadOnlyList<PdfBookmarkNode> SnipOutlineRoots { get; private set; } = [];
+    private string? _snipOutlinePdfPath;
     public string? FlaggingQuestionId { get; private set; }
+    public bool IsDeckAiFixModalOpen { get; private set; }
+    public HashSet<string> DeckAiFixSelectedIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public string DeckAiFixInstructions { get; set; } = string.Empty;
+    public string DeckAiFixPromptPreview { get; private set; } = string.Empty;
+    public string DeckAiFixJsonInput { get; set; } = string.Empty;
+    public QuizBuilderOutputMode DeckAiFixOutputMode { get; set; } = QuizBuilderOutputMode.AiApi;
     public string FlagProblemDescription { get; set; } = string.Empty;
     public string FlagFixPromptPreview { get; private set; } = string.Empty;
     public string FlagFixJsonInput { get; set; } = string.Empty;

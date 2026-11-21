@@ -197,7 +197,18 @@ public sealed partial class QuizStudioViewModel
             Questions = [.. quiz.Questions.Select(CloneQuestionForEdit)],
         };
         OrganizerKindFilter = null;
+        OrganizerTopicFilter = null;
+        OrganizerHealthFilter = OrganizerHealthFilter.All;
+        OrganizerSearchQuery = string.Empty;
+        SelectedOrganizerQuestionId = OrganizerQuiz.Questions.FirstOrDefault()?.Id;
+        IsOrganizerDirty = false;
         EditingQuestionId = null;
+        EditingQuestionDraft = null;
+        EditingPageTextPreview = null;
+        EditingGroundStatus = null;
+        IsEditingAdvancedOpen = false;
+        IsDeckAiFixModalOpen = false;
+        DeckAiFixSelectedIds.Clear();
         ActiveSubTab = QuizStudioSubTab.Organizer;
         StatusMessage =
             $"Organizing '{quiz.Title}' ({quiz.Questions.Count} items). Reorder, filter by kind, edit, or shuffle.";
@@ -260,7 +271,18 @@ public sealed partial class QuizStudioViewModel
             Questions = mergedQuestions,
         };
         OrganizerKindFilter = null;
+        OrganizerTopicFilter = null;
+        OrganizerHealthFilter = OrganizerHealthFilter.All;
+        OrganizerSearchQuery = string.Empty;
+        SelectedOrganizerQuestionId = OrganizerQuiz.Questions.FirstOrDefault()?.Id;
+        IsOrganizerDirty = false;
         EditingQuestionId = null;
+        EditingQuestionDraft = null;
+        EditingPageTextPreview = null;
+        EditingGroundStatus = null;
+        IsEditingAdvancedOpen = false;
+        IsDeckAiFixModalOpen = false;
+        DeckAiFixSelectedIds.Clear();
         ActiveSubTab = QuizStudioSubTab.Organizer;
         StatusMessage =
             $"Curating combined deck from {selected.Count} quizzes ({mergedQuestions.Count} items). Customize and click Save Deck.";
@@ -292,6 +314,12 @@ public sealed partial class QuizStudioViewModel
             SectionTitle = orig.SectionTitle,
             VerbatimQuote = orig.VerbatimQuote,
             HighlightRects = [.. orig.HighlightRects],
+            EvidenceAnchors =
+            [
+                .. orig.EvidenceAnchors.Select(a =>
+                    a with { HighlightRects = [.. a.HighlightRects] }
+                ),
+            ],
             SrsIntervalDays = orig.SrsIntervalDays,
             SrsEaseFactor = orig.SrsEaseFactor,
             SrsDueDate = orig.SrsDueDate,
@@ -300,22 +328,490 @@ public sealed partial class QuizStudioViewModel
             LastAnsweredCorrect = orig.LastAnsweredCorrect,
         };
 
+    public void MarkOrganizerDirty()
+    {
+        IsOrganizerDirty = true;
+    }
+
+    public void SetOrganizerSearchQuery(string query)
+    {
+        OrganizerSearchQuery = query ?? string.Empty;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SelectOrganizerQuestion(string questionId, bool notify = true)
+    {
+        SelectedOrganizerQuestionId = questionId;
+        if (notify)
+            _mainVm.RequestUiRefresh();
+    }
+
     public void SetOrganizerKindFilter(QuizQuestionKind? kind)
     {
         OrganizerKindFilter = OrganizerKindFilter == kind ? null : kind;
         _mainVm.RequestUiRefresh();
     }
 
-    public void ToggleEditQuestion(string questionId)
+    public void SetOrganizerTopicFilter(string? topic)
     {
-        EditingQuestionId = string.Equals(
-            EditingQuestionId,
-            questionId,
+        OrganizerTopicFilter = string.Equals(
+            OrganizerTopicFilter,
+            topic,
             StringComparison.OrdinalIgnoreCase
         )
             ? null
-            : questionId;
+            : topic;
         _mainVm.RequestUiRefresh();
+    }
+
+    public void SetOrganizerHealthFilter(OrganizerHealthFilter health)
+    {
+        OrganizerHealthFilter = OrganizerHealthFilter == health ? OrganizerHealthFilter.All : health;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleOrganizerToc()
+    {
+        IsOrganizerTocOpen = !IsOrganizerTocOpen;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleOrganizerFilters()
+    {
+        IsOrganizerFiltersOpen = !IsOrganizerFiltersOpen;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleEditingAdvancedOpen()
+    {
+        IsEditingAdvancedOpen = !IsEditingAdvancedOpen;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleEditQuestion(string questionId)
+    {
+        if (
+            string.Equals(EditingQuestionId, questionId, StringComparison.OrdinalIgnoreCase)
+            && EditingQuestionDraft is not null
+        )
+        {
+            CancelEditingQuestionDraft();
+            return;
+        }
+
+        var target = OrganizerQuiz?.Questions.FirstOrDefault(q =>
+            string.Equals(q.Id, questionId, StringComparison.OrdinalIgnoreCase)
+        );
+        if (target is null)
+            return;
+
+        EditingQuestionId = target.Id;
+        SelectedOrganizerQuestionId = target.Id;
+        EditingQuestionDraft = CloneQuestionForEdit(target);
+        if (
+            EditingQuestionDraft.EvidenceAnchors.Count == 0
+            && (
+                EditingQuestionDraft.HighlightRects.Count > 0
+                || !string.IsNullOrWhiteSpace(EditingQuestionDraft.VerbatimQuote)
+            )
+        )
+        {
+            EditingQuestionDraft.EvidenceAnchors.Add(
+                new GroundedEvidenceAnchor(
+                    EditingQuestionDraft.SourcePage,
+                    EditingQuestionDraft.SectionTitle,
+                    EditingQuestionDraft.VerbatimQuote,
+                    [.. EditingQuestionDraft.HighlightRects]
+                )
+            );
+        }
+        EditingPageTextPreview = null;
+        EditingSnipPageBitmap = null;
+        EditingSnipPageNumber = 0;
+        IsDedicatedSnipperOpen = false;
+        EditingGroundStatus = target.HighlightRects.Count > 0
+            ? $"✓ Highlighted ({target.HighlightRects.Count} box(es) on p.{target.SourcePage})"
+            : null;
+        IsEditingAdvancedOpen =
+            !string.IsNullOrWhiteSpace(target.CodeSnippet)
+            || !string.IsNullOrWhiteSpace(target.MathLatex)
+            || !string.IsNullOrWhiteSpace(target.Diagram);
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task LoadEditingPageTextAsync()
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+        {
+            EditingPageTextPreview = "Source PDF not found for this deck.";
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        int page = Math.Max(1, draft.SourcePage);
+        EditingPageTextPreview = $"Loading page {page} text...";
+        _mainVm.RequestUiRefresh();
+
+        var extracted = await Task.Run(() =>
+            PdfQuizGrounder.ExtractGroundedPages(pdfPath, startPage: page, endPage: page, maxPages: 1)
+        );
+        if (extracted.Count > 0)
+        {
+            if (string.IsNullOrWhiteSpace(draft.SectionTitle))
+                draft.SectionTitle = extracted[0].SectionBreadcrumb;
+            EditingPageTextPreview = extracted[0].Text;
+        }
+        else
+        {
+            EditingPageTextPreview = $"No extractable text found on page {page}.";
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void GroundEditingDraftToPdf()
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+        {
+            EditingGroundStatus = "⚠ No source PDF available for grounding.";
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        draft.SourcePdfPath = pdfPath;
+        PdfQuizGrounder.GroundQuestionsToPdf(pdfPath, [draft], forceUpdateSection: true);
+        EditingGroundStatus = draft.HighlightRects.Count > 0
+            ? $"✓ Grounded ({draft.HighlightRects.Count} highlight box(es) on p.{draft.SourcePage})"
+            : $"⚠ Quote not matched on p.{draft.SourcePage} — check spelling or load page text.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void CommitEditingQuestionDraft(int moveDelta = 0)
+    {
+        if (OrganizerQuiz is null || EditingQuestionDraft is null)
+            return;
+
+        int idx = OrganizerQuiz.Questions.FindIndex(q =>
+            string.Equals(q.Id, EditingQuestionDraft.Id, StringComparison.OrdinalIgnoreCase)
+        );
+        if (idx >= 0)
+        {
+            if (EditingQuestionDraft.Kind == QuizQuestionKind.TrueFalse)
+            {
+                EditingQuestionDraft.Options = ["True", "False"];
+                if (
+                    !string.Equals(
+                        EditingQuestionDraft.CorrectAnswer,
+                        "False",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                    EditingQuestionDraft.CorrectAnswer = "True";
+            }
+            else if (
+                EditingQuestionDraft.Kind == QuizQuestionKind.Ordering
+                && EditingQuestionDraft.Options.Count >= 2
+            )
+            {
+                EditingQuestionDraft.CorrectAnswer = string.Join(
+                    " -> ",
+                    EditingQuestionDraft.Options
+                );
+            }
+            else if (
+                EditingQuestionDraft.Kind
+                    is QuizQuestionKind.MultipleChoice
+                        or QuizQuestionKind.Situational
+                && EditingQuestionDraft.Options.Count > 0
+                && !EditingQuestionDraft.Options.Any(o =>
+                    string.Equals(
+                        o.Trim(),
+                        EditingQuestionDraft.CorrectAnswer.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            )
+            {
+                EditingQuestionDraft.CorrectAnswer = EditingQuestionDraft.Options[0];
+            }
+
+            OrganizerQuiz.Questions[idx] = CloneQuestionForEdit(EditingQuestionDraft);
+            IsOrganizerDirty = true;
+        }
+
+        if (moveDelta != 0 && idx >= 0)
+        {
+            int nextIdx = Math.Clamp(idx + moveDelta, 0, OrganizerQuiz.Questions.Count - 1);
+            if (nextIdx != idx)
+            {
+                var nextQ = OrganizerQuiz.Questions[nextIdx];
+                EditingQuestionId = nextQ.Id;
+                SelectedOrganizerQuestionId = nextQ.Id;
+                EditingQuestionDraft = CloneQuestionForEdit(nextQ);
+                IsEditingAdvancedOpen =
+                    !string.IsNullOrWhiteSpace(nextQ.CodeSnippet)
+                    || !string.IsNullOrWhiteSpace(nextQ.MathLatex)
+                    || !string.IsNullOrWhiteSpace(nextQ.Diagram);
+                _mainVm.RequestUiRefresh();
+                return;
+            }
+        }
+
+        EditingQuestionId = null;
+        EditingQuestionDraft = null;
+        EditingPageTextPreview = null;
+        EditingGroundStatus = null;
+        EditingSnipPageBitmap = null;
+        IsDedicatedSnipperOpen = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void CancelEditingQuestionDraft()
+    {
+        EditingQuestionId = null;
+        EditingQuestionDraft = null;
+        EditingPageTextPreview = null;
+        EditingGroundStatus = null;
+        EditingSnipPageBitmap = null;
+        IsDedicatedSnipperOpen = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task OpenDedicatedSnipperAsync()
+    {
+        if (EditingQuestionDraft is null)
+            return;
+        IsDedicatedSnipperOpen = true;
+        int startPage = EditingSnipPageNumber > 0
+            ? EditingSnipPageNumber
+            : Math.Max(1, EditingQuestionDraft.SourcePage);
+        await LoadEditorSnipPageAsync(startPage);
+    }
+
+    public void CloseDedicatedSnipper()
+    {
+        IsDedicatedSnipperOpen = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleSnipOutline()
+    {
+        IsSnipOutlineOpen = !IsSnipOutlineOpen;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleSnipOutlineNodeExpanded(PdfBookmarkNode node)
+    {
+        node.IsExpanded = !node.IsExpanded;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public PdfBookmarkNode? FindActiveSnipBookmarkNode(int currentPage)
+    {
+        PdfBookmarkNode? best = null;
+        void Walk(IEnumerable<PdfBookmarkNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.PageNumber <= currentPage && (best is null || n.PageNumber >= best.PageNumber))
+                    best = n;
+                if (n.Children.Count > 0)
+                    Walk(n.Children);
+            }
+        }
+        Walk(SnipOutlineRoots);
+        return best;
+    }
+
+    public async Task ToggleSnipFitToWidthAsync()
+    {
+        SnipFitToWidth = !SnipFitToWidth;
+        if (SnipFitToWidth)
+            SnipZoomPercent = 100;
+        if (EditingSnipPageNumber > 0)
+            await LoadEditorSnipPageAsync(EditingSnipPageNumber);
+    }
+
+    public async Task ZoomSnipAsync(int delta)
+    {
+        SnipFitToWidth = false;
+        SnipZoomPercent = Math.Clamp(SnipZoomPercent + delta, 60, 225);
+        if (EditingSnipPageNumber > 0)
+            await LoadEditorSnipPageAsync(EditingSnipPageNumber);
+    }
+
+    public async Task LoadEditorSnipPageAsync(int oneBasedPage)
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+        {
+            EditingGroundStatus = "⚠ Source PDF not found for visual snipping.";
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        IsLoadingSnipPage = true;
+        _mainVm.RequestUiRefresh();
+
+        int dpi = SnipFitToWidth ? 180 : Math.Clamp((int)(160 * (SnipZoomPercent / 100.0)), 96, 280);
+        bool needOutline = !string.Equals(_snipOutlinePdfPath, pdfPath, StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var (pixels, totalPages, resolvedPage, outlineRoots) = await Task.Run(() =>
+            {
+                using var doc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+                int total = doc.NumberOfPages;
+                int clamped = total > 0 ? Math.Clamp(oneBasedPage, 1, total) : 1;
+                IReadOnlyList<PdfBookmarkNode>? roots = needOutline
+                    ? PdfReaderViewModel.ExtractBookmarkRoots(doc)
+                    : null;
+
+                byte[] pdfBytes;
+                lock (_pendingPreviewRenders)
+                {
+                    if (
+                        !string.Equals(
+                            _cachedBytesPath,
+                            pdfPath,
+                            StringComparison.OrdinalIgnoreCase
+                        ) || _cachedPdfBytes is null
+                    )
+                    {
+                        _cachedPdfBytes = File.ReadAllBytes(pdfPath);
+                        _cachedBytesPath = pdfPath;
+                    }
+                    pdfBytes = _cachedPdfBytes;
+                }
+                var rendered = Services.PdfBitmapRenderer.RenderPagePixels(
+                    pdfBytes,
+                    clamped - 1,
+                    dpi: dpi
+                );
+                return (rendered, total, clamped, roots);
+            });
+
+            draft.SourcePdfPath = pdfPath;
+            if (outlineRoots is not null)
+            {
+                SnipOutlineRoots = outlineRoots;
+                _snipOutlinePdfPath = pdfPath;
+            }
+            EditingSnipPageNumber = resolvedPage;
+            EditingSnipTotalPages = totalPages;
+            EditingSnipPageBitmap = Services.PdfBitmapRenderer.CreateWriteableBitmap(pixels);
+        }
+        catch (Exception ex)
+        {
+            EditingGroundStatus = $"⚠ Failed to render page: {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingSnipPage = false;
+            _mainVm.RequestUiRefresh();
+        }
+    }
+
+    public async Task ApplyVisualSnipRegionAsync(NormalizedHighlightRect region, bool additive)
+    {
+        var draft = EditingQuestionDraft;
+        var pdfPath = !string.IsNullOrWhiteSpace(draft?.SourcePdfPath)
+            ? draft!.SourcePdfPath
+            : OrganizerQuiz?.SourcePdfPath;
+        if (draft is null || string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            return;
+
+        int page = EditingSnipPageNumber > 0 ? EditingSnipPageNumber : Math.Max(1, draft.SourcePage);
+        draft.SourcePdfPath = pdfPath;
+
+        var (quote, sectionTitle, _) = await Task.Run(() =>
+            PdfQuizGrounder.ExtractQuoteFromNormalizedRegion(pdfPath, page, region)
+        );
+
+        var existingOnPageIdx = draft.EvidenceAnchors.FindIndex(a => a.PageNumber == page);
+        if (additive && existingOnPageIdx >= 0)
+        {
+            var prev = draft.EvidenceAnchors[existingOnPageIdx];
+            var updatedRects = new List<NormalizedHighlightRect>(prev.HighlightRects) { region };
+            var mergedQuote = string.IsNullOrWhiteSpace(quote)
+                ? prev.VerbatimQuote
+                : string.IsNullOrWhiteSpace(prev.VerbatimQuote)
+                    ? quote
+                    : $"{prev.VerbatimQuote} ... {quote}";
+            draft.EvidenceAnchors[existingOnPageIdx] = new GroundedEvidenceAnchor(
+                page,
+                !string.IsNullOrWhiteSpace(sectionTitle) ? sectionTitle : prev.SectionTitle,
+                mergedQuote,
+                updatedRects
+            );
+        }
+        else
+        {
+            draft.EvidenceAnchors.Add(
+                new GroundedEvidenceAnchor(
+                    page,
+                    sectionTitle,
+                    quote,
+                    [region]
+                )
+            );
+        }
+
+        SyncPrimaryEvidenceFromAnchors(draft);
+        EditingGroundStatus = $"✓ {draft.EvidenceAnchors.Count} evidence anchor(s) pinned (latest on p.{page})";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void RemoveEvidenceAnchor(int index)
+    {
+        var draft = EditingQuestionDraft;
+        if (draft is null || index < 0 || index >= draft.EvidenceAnchors.Count)
+            return;
+
+        draft.EvidenceAnchors.RemoveAt(index);
+        SyncPrimaryEvidenceFromAnchors(draft);
+        EditingGroundStatus = draft.EvidenceAnchors.Count > 0
+            ? $"✓ {draft.EvidenceAnchors.Count} evidence anchor(s) remaining"
+            : "Cleared all evidence anchors.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ClearVisualSnipHighlights()
+    {
+        var draft = EditingQuestionDraft;
+        if (draft is null)
+            return;
+        draft.EvidenceAnchors.Clear();
+        draft.HighlightRects.Clear();
+        EditingGroundStatus = "Cleared all visual highlights.";
+        _mainVm.RequestUiRefresh();
+    }
+
+    private static void SyncPrimaryEvidenceFromAnchors(QuizQuestionRecord draft)
+    {
+        if (draft.EvidenceAnchors.Count == 0)
+        {
+            draft.HighlightRects.Clear();
+            return;
+        }
+
+        var primary = draft.EvidenceAnchors[0];
+        draft.SourcePage = primary.PageNumber;
+        if (!string.IsNullOrWhiteSpace(primary.SectionTitle))
+            draft.SectionTitle = primary.SectionTitle;
+        if (!string.IsNullOrWhiteSpace(primary.VerbatimQuote))
+            draft.VerbatimQuote = primary.VerbatimQuote;
+        draft.HighlightRects = [.. primary.HighlightRects];
     }
 
     public void MoveOrganizerQuestion(QuizQuestionRecord q, int delta)
@@ -443,7 +939,11 @@ public sealed partial class QuizStudioViewModel
             SrsDueDate = DateOnly.FromDateTime(DateTime.Today),
         };
         OrganizerQuiz.Questions.Add(q);
+        IsOrganizerDirty = true;
+        SelectedOrganizerQuestionId = q.Id;
         EditingQuestionId = q.Id;
+        EditingQuestionDraft = CloneQuestionForEdit(q);
+        IsEditingAdvancedOpen = false;
         _mainVm.RequestUiRefresh();
     }
 
@@ -453,6 +953,7 @@ public sealed partial class QuizStudioViewModel
             return;
         ReindexOrganizerQuestions();
         await ScholarFlowDatabase.SaveQuizSessionAsync(_mainVm.BasinRoot, OrganizerQuiz);
+        IsOrganizerDirty = false;
         SelectedQuizIdsForMerge.Clear();
         SavedQuizzes = await ScholarFlowDatabase.LoadQuizSessionsAsync(_mainVm.BasinRoot);
         StatusMessage =
@@ -465,6 +966,7 @@ public sealed partial class QuizStudioViewModel
     {
         if (OrganizerQuiz is null)
             return;
+        IsOrganizerDirty = true;
         for (int i = 0; i < OrganizerQuiz.Questions.Count; i++)
         {
             OrganizerQuiz.Questions[i].QuizId = OrganizerQuiz.Id;
@@ -567,6 +1069,184 @@ public sealed partial class QuizStudioViewModel
         catch (Exception ex)
         {
             StatusMessage = $"Fix JSON error: {ex.Message}";
+            IsStatusError = true;
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
+    public async Task RunSingleQuestionAiFixWithApiAsync(
+        QuizQuestionRecord question,
+        string problemDescription)
+    {
+        if (IsGenerating)
+            return;
+
+        var aiStatus = GetActiveAiEngineStatus();
+        if (!aiStatus.IsConfigured)
+        {
+            StatusMessage = $"AI Engine not configured: {aiStatus.MissingReason}. Configure it in AI Engine settings or use Web AI JSON.";
+            IsStatusError = true;
+            IsAiSettingsOpen = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        IsGenerating = true;
+        IsStatusError = false;
+        StatusMessage = $"Repairing question via {aiStatus.DisplayLabel}...";
+        _mainVm.RequestUiRefresh();
+
+        try
+        {
+            var prompt = BuildQuestionAiFixPrompt(question, problemDescription);
+            var req = BuildCurrentRequest();
+            var rawJson = await _llmService.ExecuteRawJsonPromptAsync(
+                req.ProviderBaseUrl,
+                req.ApiKey,
+                req.ModelName,
+                "You are an expert academic quiz editor. Return ONLY a single valid JSON object matching the requested question schema.",
+                prompt
+            );
+            await ApplyQuestionAiFixAsync(question, rawJson);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"AI fix failed: {ex.Message}";
+            IsStatusError = true;
+        }
+        finally
+        {
+            IsGenerating = false;
+            _mainVm.RequestUiRefresh();
+        }
+    }
+
+    public void OpenDeckAiFixModal()
+    {
+        if (OrganizerQuiz is null)
+            return;
+
+        IsDeckAiFixModalOpen = true;
+        if (DeckAiFixSelectedIds.Count == 0)
+        {
+            foreach (
+                var q in OrganizerQuiz.Questions.Where(x =>
+                    x.HighlightRects.Count == 0 || string.IsNullOrWhiteSpace(x.VerbatimQuote)
+                )
+            )
+            {
+                DeckAiFixSelectedIds.Add(q.Id);
+            }
+        }
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void CloseDeckAiFixModal()
+    {
+        IsDeckAiFixModalOpen = false;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void ToggleDeckAiFixTarget(string questionId)
+    {
+        if (!DeckAiFixSelectedIds.Add(questionId))
+            DeckAiFixSelectedIds.Remove(questionId);
+        _mainVm.RequestUiRefresh();
+    }
+
+    public void SetDeckAiFixOutputMode(QuizBuilderOutputMode mode)
+    {
+        DeckAiFixOutputMode = mode;
+        _mainVm.RequestUiRefresh();
+    }
+
+    public string BuildDeckAiFixPrompt()
+    {
+        if (OrganizerQuiz is null)
+            return string.Empty;
+
+        var targets = OrganizerQuiz
+            .Questions.Where(q => DeckAiFixSelectedIds.Contains(q.Id))
+            .ToList();
+        if (targets.Count == 0)
+            targets = [.. OrganizerQuiz.Questions.Take(15)];
+
+        DeckAiFixPromptPreview = QuizExportService.BuildDeckComprehensiveFixPrompt(
+            OrganizerQuiz,
+            targets,
+            DeckAiFixInstructions
+        );
+        _mainVm.RequestUiRefresh();
+        return DeckAiFixPromptPreview;
+    }
+
+    public async Task RunDeckComprehensiveAiFixWithApiAsync()
+    {
+        if (OrganizerQuiz is null || IsGenerating)
+            return;
+
+        var aiStatus = GetActiveAiEngineStatus();
+        if (!aiStatus.IsConfigured)
+        {
+            StatusMessage = $"AI Engine not configured: {aiStatus.MissingReason}. Configure it in AI Engine settings or use Web AI JSON.";
+            IsStatusError = true;
+            IsAiSettingsOpen = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        IsGenerating = true;
+        IsStatusError = false;
+        StatusMessage = $"Running comprehensive deck fix via {aiStatus.DisplayLabel}...";
+        _mainVm.RequestUiRefresh();
+
+        try
+        {
+            var prompt = BuildDeckAiFixPrompt();
+            var req = BuildCurrentRequest();
+            var rawJson = await _llmService.ExecuteRawJsonPromptAsync(
+                req.ProviderBaseUrl,
+                req.ApiKey,
+                req.ModelName,
+                "You are an expert academic quiz editor. Return ONLY a valid JSON object with updatedQuestions and newQuestions arrays.",
+                prompt
+            );
+            await ApplyDeckComprehensiveAiFixJsonAsync(rawJson);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Comprehensive AI fix failed: {ex.Message}";
+            IsStatusError = true;
+        }
+        finally
+        {
+            IsGenerating = false;
+            _mainVm.RequestUiRefresh();
+        }
+    }
+
+    public async Task ApplyDeckComprehensiveAiFixJsonAsync(string rawJson)
+    {
+        if (OrganizerQuiz is null)
+            return;
+
+        try
+        {
+            var (updated, added) = await Task.Run(() =>
+                QuizExportService.ApplyDeckComprehensiveFixJson(OrganizerQuiz, rawJson)
+            );
+            await SaveOrganizerDeckAsync();
+            IsDeckAiFixModalOpen = false;
+            DeckAiFixPromptPreview = string.Empty;
+            DeckAiFixJsonInput = string.Empty;
+            DeckAiFixSelectedIds.Clear();
+            StatusMessage =
+                $"Comprehensive AI fix applied: {updated} question(s) updated, {added} question(s) added & grounded.";
+            IsStatusError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Comprehensive Fix JSON error: {ex.Message}";
             IsStatusError = true;
         }
         _mainVm.RequestUiRefresh();

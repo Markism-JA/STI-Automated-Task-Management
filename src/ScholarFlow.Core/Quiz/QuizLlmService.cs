@@ -78,6 +78,27 @@ public sealed partial class QuizLlmService
         return sb.ToString();
     }
 
+    public Task<string> ExecuteRawJsonPromptAsync(
+        string providerBaseUrl,
+        string? apiKey,
+        string modelName,
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken ct = default)
+    {
+        var effectiveKey = !string.IsNullOrWhiteSpace(apiKey)
+            ? apiKey.Trim()
+            : Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+              ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        return CallOpenAiCompatibleChatAsync(
+            providerBaseUrl,
+            effectiveKey,
+            modelName,
+            systemPrompt,
+            userPrompt,
+            ct);
+    }
+
     public async Task<QuizSessionRecord> GenerateQuizAsync(
         QuizGenerationRequest request,
         CancellationToken ct = default)
