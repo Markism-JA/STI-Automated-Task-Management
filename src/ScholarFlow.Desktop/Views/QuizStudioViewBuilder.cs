@@ -70,18 +70,28 @@ public static partial class QuizStudioViewBuilder
         var pdfFileName = string.IsNullOrWhiteSpace(studio.SelectedPdfPath)
             ? "No PDF found"
             : Path.GetFileName(studio.SelectedPdfPath);
+        int courseQuizCount = studio.SelectedCourse is null
+            ? studio.SavedQuizzes.Count
+            : studio.SavedQuizzes.Count(q =>
+                string.Equals(
+                    q.CourseFolder,
+                    studio.SelectedCourse.FolderName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            );
         titleLeft.Children.Add(
             new TextBlock
             {
-                Text =
-                    $"Source: {pdfFileName} ({studio.PdfTotalPages} pages)  ·  {studio.ScopePreviewPageCount} content page(s) in active scope",
+                Text = studio.ActiveSubTab == QuizStudioSubTab.Builder
+                    ? $"Source: {pdfFileName} ({studio.PdfTotalPages} pages)  ·  {studio.ScopePreviewPageCount} content page(s) in active scope"
+                    : $"{courseQuizCount} saved quiz(zes) in subject  ·  {studio.AllDueReviewQuestions.Count} due card(s) across basin",
                 FontSize = 12,
                 Foreground = ThemeService.Brush(ThemeService.TextSecondary),
             }
         );
         titleRow.Children.Add(titleLeft);
 
-        // Right Utility Actions (Due Deck, Gemini Web Bridge, AI Settings)
+        // Right Utility Actions (Due Deck, AI Settings)
         var utilityRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -96,15 +106,6 @@ public static partial class QuizStudioViewBuilder
                 MaterialIconKind.CardsOutline,
                 () => studio.StartDueSpacedRepetitionDeck(studio.SelectedCourse?.FolderName),
                 isActive: dueCount > 0
-            )
-        );
-
-        utilityRow.Children.Add(
-            UiBuilder.GhostButton(
-                "Web AI JSON",
-                MaterialIconKind.CodeJson,
-                studio.OpenManualJsonBridge,
-                isActive: studio.IsManualJsonModalOpen
             )
         );
 

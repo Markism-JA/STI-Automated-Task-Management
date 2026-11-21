@@ -51,7 +51,27 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     private string? _cachedBytesPath;
     private byte[]? _cachedPdfBytes;
 
-    public QuizStudioSubTab ActiveSubTab { get; private set; } = QuizStudioSubTab.Builder;
+    private sealed class CourseStudioState
+    {
+        public QuizStudioSubTab ActiveSubTab { get; set; } = QuizStudioSubTab.Catalog;
+        public string? SelectedPdfPath { get; set; }
+        public bool ShowIndividualHandouts { get; set; }
+        public string? SelectedTerm { get; set; }
+        public int? StartPage { get; set; }
+        public int? EndPage { get; set; }
+        public HashSet<string> SelectedSectionKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int PreviewScopeIndex { get; set; }
+        public QuizBuilderOutputMode BuilderOutputMode { get; set; } = QuizBuilderOutputMode.AiApi;
+        public int QuestionCount { get; set; } = 10;
+        public QuizPresetMode SelectedPreset { get; set; } = QuizPresetMode.ExamSimulator;
+        public QuizSessionRecord? OrganizerQuiz { get; set; }
+        public bool IsManualJsonModalOpen { get; set; }
+    }
+
+    private readonly Dictionary<string, CourseStudioState> _courseStates =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public QuizStudioSubTab ActiveSubTab { get; private set; } = QuizStudioSubTab.Catalog;
     public BasinCourseEntry? SelectedCourse { get; private set; }
     public IReadOnlyList<(string Label, string FullPath, bool IsMaster)> AvailablePdfs
     {
@@ -173,26 +193,54 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
     )
     {
         var activeCourses = _mainVm.Courses.Where(c => !c.IsArchived).ToList();
+        var previousCourse = SelectedCourse;
+        BasinCourseEntry? targetCourse = SelectedCourse;
+
         if (preferredCourse is not null)
         {
-            SelectedCourse = preferredCourse;
+            targetCourse = preferredCourse;
         }
         else if (
-            SelectedCourse is null
-            || !activeCourses.Any(c => c.FolderName == SelectedCourse.FolderName)
+            targetCourse is null
+            || !activeCourses.Any(c => c.FolderName == targetCourse.FolderName)
         )
         {
-            SelectedCourse = _mainVm.ActiveCourse ?? activeCourses.FirstOrDefault();
+            targetCourse = _mainVm.ActiveCourse ?? activeCourses.FirstOrDefault();
         }
 
-        RebuildAvailablePdfsForCourse(preferredPdfPath);
-
-        if (focusPage.HasValue && focusPage.Value > 0)
+        if (
+            previousCourse is not null
+            && targetCourse is not null
+            && !string.Equals(
+                previousCourse.FolderName,
+                targetCourse.FolderName,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
         {
-            StartPage = focusPage.Value;
-            EndPage = Math.Min(Math.Max(focusPage.Value, PdfTotalPages), focusPage.Value + 4);
-            SelectedSectionKeys.Clear();
-            RecomputeScopePreview();
+            SaveActiveCourseState();
+            SelectedCourse = targetCourse;
+            RestoreCourseState(targetCourse);
+        }
+        else
+        {
+            SelectedCourse = targetCourse;
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredPdfPath) || focusPage.HasValue)
+            ActiveSubTab = QuizStudioSubTab.Builder;
+
+        if (ActiveSubTab == QuizStudioSubTab.Builder)
+        {
+            RebuildAvailablePdfsForCourse(preferredPdfPath ?? SelectedPdfPath);
+
+            if (focusPage.HasValue && focusPage.Value > 0)
+            {
+                StartPage = focusPage.Value;
+                EndPage = Math.Min(Math.Max(focusPage.Value, PdfTotalPages), focusPage.Value + 4);
+                SelectedSectionKeys.Clear();
+                RecomputeScopePreview();
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
@@ -212,9 +260,77 @@ public sealed partial class QuizStudioViewModel(MainWindowViewModel mainVm)
         }
     }
 
+    private void SaveActiveCourseState()
+    {
+        if (SelectedCourse is null)
+            return;
+
+        if (!_courseStates.TryGetValue(SelectedCourse.FolderName, out var state))
+        {
+            state = new CourseStudioState();
+            _courseStates[SelectedCourse.FolderName] = state;
+        }
+
+        state.ActiveSubTab = ActiveSubTab;
+        state.SelectedPdfPath = SelectedPdfPath;
+        state.ShowIndividualHandouts = ShowIndividualHandouts;
+        state.SelectedTerm = SelectedTerm;
+        state.StartPage = StartPage;
+        state.EndPage = EndPage;
+        state.SelectedSectionKeys.Clear();
+        foreach (var k in SelectedSectionKeys)
+            state.SelectedSectionKeys.Add(k);
+        state.PreviewScopeIndex = PreviewScopeIndex;
+        state.BuilderOutputMode = BuilderOutputMode;
+        state.QuestionCount = QuestionCount;
+        state.SelectedPreset = SelectedPreset;
+        state.OrganizerQuiz = OrganizerQuiz;
+        state.IsManualJsonModalOpen = IsManualJsonModalOpen;
+    }
+
+    private void RestoreCourseState(BasinCourseEntry course)
+    {
+        if (_courseStates.TryGetValue(course.FolderName, out var state))
+        {
+            ActiveSubTab = state.ActiveSubTab;
+            SelectedPdfPath = state.SelectedPdfPath;
+            ShowIndividualHandouts = state.ShowIndividualHandouts;
+            SelectedTerm = state.SelectedTerm;
+            StartPage = state.StartPage;
+            EndPage = state.EndPage;
+            SelectedSectionKeys.Clear();
+            foreach (var k in state.SelectedSectionKeys)
+                SelectedSectionKeys.Add(k);
+            PreviewScopeIndex = state.PreviewScopeIndex;
+            BuilderOutputMode = state.BuilderOutputMode;
+            QuestionCount = state.QuestionCount;
+            SelectedPreset = state.SelectedPreset;
+            OrganizerQuiz = state.OrganizerQuiz;
+            IsManualJsonModalOpen = state.IsManualJsonModalOpen;
+        }
+        else
+        {
+            ActiveSubTab = QuizStudioSubTab.Catalog;
+            SelectedPdfPath = null;
+            ShowIndividualHandouts = false;
+            SelectedTerm = null;
+            StartPage = null;
+            EndPage = null;
+            SelectedSectionKeys.Clear();
+            PreviewScopeIndex = 0;
+            BuilderOutputMode = QuizBuilderOutputMode.AiApi;
+            QuestionCount = 10;
+            SelectedPreset = QuizPresetMode.ExamSimulator;
+            OrganizerQuiz = null;
+            IsManualJsonModalOpen = false;
+        }
+    }
+
     public void SetSubTab(QuizStudioSubTab tab)
     {
         ActiveSubTab = tab;
+        if (tab == QuizStudioSubTab.Builder)
+            RebuildAvailablePdfsForCourse(SelectedPdfPath);
         _mainVm.RequestUiRefresh();
     }
 }

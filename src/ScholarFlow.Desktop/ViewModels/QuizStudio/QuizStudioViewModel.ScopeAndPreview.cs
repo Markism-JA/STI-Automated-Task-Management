@@ -7,15 +7,40 @@ namespace ScholarFlow.Desktop.ViewModels;
 
 public sealed partial class QuizStudioViewModel
 {
+    private readonly Dictionary<
+        string,
+        IReadOnlyList<(string Label, string FullPath, bool IsMaster)>
+    > _availablePdfsCache = new(StringComparer.OrdinalIgnoreCase);
+
     public void SelectCourseScope(BasinCourseEntry course)
     {
+        if (
+            SelectedCourse is not null
+            && string.Equals(
+                SelectedCourse.FolderName,
+                course.FolderName,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+            return;
+
+        SaveActiveCourseState();
         SelectedCourse = course;
-        SelectedPdfPath = null;
-        StartPage = null;
-        EndPage = null;
-        SelectedSectionKeys.Clear();
-        PreviewScopeIndex = 0;
-        RebuildAvailablePdfsForCourse(null);
+        RestoreCourseState(course);
+
+        if (ActiveSubTab == QuizStudioSubTab.Builder)
+        {
+            RebuildAvailablePdfsForCourse(SelectedPdfPath);
+        }
+        else
+        {
+            // Keep Catalog/Organizer course switches instant: defer PDF scanning & outline inspection until Builder is opened
+            PdfTotalPages = 0;
+            OutlineSections = [];
+            OutlineSectionRoots = [];
+            MatchedScopePages = [];
+        }
+
         _mainVm.RequestUiRefresh();
     }
 
@@ -481,49 +506,62 @@ public sealed partial class QuizStudioViewModel
 
     private void RebuildAvailablePdfsForCourse(string? preferredPdfPath)
     {
-        var list = new List<(string Label, string FullPath, bool IsMaster)>();
-        if (SelectedCourse is not null && !string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
+        List<(string Label, string FullPath, bool IsMaster)> list;
+        if (
+            SelectedCourse is not null
+            && _availablePdfsCache.TryGetValue(SelectedCourse.FolderName, out var cachedList)
+        )
         {
-            var courseDir = Path.Combine(_mainVm.BasinRoot, SelectedCourse.FolderName);
-            var masterPdf = MasterPdfService.FindExistingMasterPdfPath(
-                _mainVm.BasinRoot,
-                SelectedCourse.FolderName
-            );
-            if (masterPdf is not null && File.Exists(masterPdf))
+            list = [.. cachedList];
+        }
+        else
+        {
+            list = [];
+            if (SelectedCourse is not null && !string.IsNullOrWhiteSpace(_mainVm.BasinRoot))
             {
-                list.Add(($"Master Study Packet ({Path.GetFileName(masterPdf)})", masterPdf, true));
-            }
-
-            if (Directory.Exists(courseDir))
-            {
-                foreach (
-                    var dir in Directory
-                        .GetDirectories(courseDir)
-                        .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
-                )
+                var courseDir = Path.Combine(_mainVm.BasinRoot, SelectedCourse.FolderName);
+                var masterPdf = MasterPdfService.FindExistingMasterPdfPath(
+                    _mainVm.BasinRoot,
+                    SelectedCourse.FolderName
+                );
+                if (masterPdf is not null && File.Exists(masterPdf))
                 {
-                    var dirName = Path.GetFileName(dir);
-                    if (
-                        dirName.StartsWith('.')
-                        || dirName.Equals("completed", StringComparison.OrdinalIgnoreCase)
-                        || dirName.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
-                    )
-                    {
-                        continue;
-                    }
+                    list.Add(($"Master Study Packet ({Path.GetFileName(masterPdf)})", masterPdf, true));
+                }
 
+                if (Directory.Exists(courseDir))
+                {
                     foreach (
-                        var pdf in Directory
-                            .GetFiles(dir, "*.pdf")
-                            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                        var dir in Directory
+                            .GetDirectories(courseDir)
+                            .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
                     )
                     {
-                        var fileName = Path.GetFileName(pdf);
-                        if (fileName.EndsWith("_.pdf", StringComparison.OrdinalIgnoreCase))
+                        var dirName = Path.GetFileName(dir);
+                        if (
+                            dirName.StartsWith('.')
+                            || dirName.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                            || dirName.Equals("ongoing", StringComparison.OrdinalIgnoreCase)
+                        )
+                        {
                             continue;
-                        list.Add((dirName.Replace('_', ' '), pdf, false));
+                        }
+
+                        foreach (
+                            var pdf in Directory
+                                .GetFiles(dir, "*.pdf")
+                                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                        )
+                        {
+                            var fileName = Path.GetFileName(pdf);
+                            if (fileName.EndsWith("_.pdf", StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            list.Add((dirName.Replace('_', ' '), pdf, false));
+                        }
                     }
                 }
+
+                _availablePdfsCache[SelectedCourse.FolderName] = [.. list];
             }
         }
 
@@ -553,7 +591,8 @@ public sealed partial class QuizStudioViewModel
                 ?? (AvailablePdfs.Count > 0 ? AvailablePdfs[0].FullPath : null);
         }
 
-        InspectSelectedPdfOutlineAndPreview();
+        if (ActiveSubTab == QuizStudioSubTab.Builder)
+            InspectSelectedPdfOutlineAndPreview();
     }
 
     private void InspectSelectedPdfOutlineAndPreview()
