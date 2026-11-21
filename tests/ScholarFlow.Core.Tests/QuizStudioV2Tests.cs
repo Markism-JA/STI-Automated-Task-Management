@@ -1,6 +1,7 @@
 using ScholarFlow.Core.Database;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Quiz;
+using ScholarFlow.Core.Services;
 using ScholarFlow.Core.Tasks;
 
 namespace ScholarFlow.Core.Tests;
@@ -541,5 +542,108 @@ public class QuizStudioV2Tests
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task RemapQuizSourcePdfPaths_UpdatesFileAndFolderPrefixMoves()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"sf-remap-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var oldFolder = Path.Combine(tempDir, "Algorithms", "01_Sorting");
+            var oldFile = Path.Combine(oldFolder, "MergeSort.pdf");
+            var renamedFile = Path.Combine(oldFolder, "DivideAndConquer.pdf");
+            var reorderedFolder = Path.Combine(tempDir, "Algorithms", "02_Sorting");
+            var expectedFinalFile = Path.Combine(reorderedFolder, "DivideAndConquer.pdf");
+
+            var quiz = new QuizSessionRecord
+            {
+                Id = "remap-quiz-1",
+                CourseFolder = "Algorithms",
+                CourseTitle = "Algorithms",
+                Title = "Sorting Quiz",
+                SourcePdfPath = oldFile,
+                Questions =
+                [
+                    new QuizQuestionRecord
+                    {
+                        Id = "remap-q-1",
+                        QuizId = "remap-quiz-1",
+                        Kind = QuizQuestionKind.MultipleChoice,
+                        Prompt = "What is the time complexity of Merge Sort?",
+                        Options = ["O(n)", "O(n log n)", "O(n^2)", "O(1)"],
+                        CorrectAnswer = "O(n log n)",
+                        SourcePdfPath = oldFile,
+                        SourcePage = 3,
+                    },
+                ],
+            };
+
+            await ScholarFlowDatabase.SaveQuizSessionAsync(tempDir, quiz);
+
+            // 1. File rename
+            int updated1 = ScholarFlowDatabase.RemapQuizSourcePdfPaths(
+                tempDir,
+                oldFile,
+                renamedFile,
+                isPrefix: false
+            );
+            Assert.Equal(2, updated1);
+
+            // 2. Folder prefix reorder
+            int updated2 = ScholarFlowDatabase.RemapQuizSourcePdfPaths(
+                tempDir,
+                oldFolder,
+                reorderedFolder,
+                isPrefix: true
+            );
+            Assert.Equal(2, updated2);
+
+            var loaded = await ScholarFlowDatabase.LoadQuizSessionsAsync(tempDir);
+            Assert.Single(loaded);
+            Assert.Equal(expectedFinalFile, loaded[0].SourcePdfPath);
+            Assert.Equal(expectedFinalFile, loaded[0].Questions[0].SourcePdfPath);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveScopePagesFast_SupportsCustomPacketSectionsAndTerms()
+    {
+        var sections = new List<PdfOutlineSectionInfo>
+        {
+            new("Unit 1: Foundations", "Unit 1: Foundations", 1, 2, 6),
+            new("Lecture 1", "Unit 1: Foundations", 2, 3, 6),
+            new("Unit 2: Graphs", "Unit 2: Graphs", 1, 7, 12),
+            new("BFS & DFS", "Unit 2: Graphs", 2, 8, 12),
+        };
+
+        var unit2Pages = PdfQuizGrounder.ResolveScopePagesFast(
+            totalPages: 12,
+            outlineSections: sections,
+            termFilter: "Unit 2: Graphs"
+        );
+
+        Assert.Equal([8, 9, 10, 11, 12], unit2Pages.Select(p => p.PageNumber).ToArray());
+        Assert.All(unit2Pages, p => Assert.Equal("Unit 2: Graphs", p.Term));
+    }
+
+    [Fact]
+    public void QuickSearchMatcher_SupportsMultiTokenFuzzyAndPrefixRanking()
+    {
+        Assert.True(QuickSearchMatcher.Matches("os mem", "Operating Systems", "Virtual Memory"));
+        Assert.True(QuickSearchMatcher.Matches("@hard #alg", "Algorithms", "hard"));
+        Assert.True(QuickSearchMatcher.Matches("mrg", "MergeSort.pdf"));
+        Assert.False(QuickSearchMatcher.Matches("os graphs", "Operating Systems", "Virtual Memory"));
+
+        int exactScore = QuickSearchMatcher.Score("Merge", "Merge");
+        int prefixScore = QuickSearchMatcher.Score("Merge", "MergeSort.pdf");
+        int fuzzyScore = QuickSearchMatcher.Score("mrg", "MergeSort.pdf");
+        Assert.True(exactScore > prefixScore && prefixScore > fuzzyScore && fuzzyScore > 0);
     }
 }

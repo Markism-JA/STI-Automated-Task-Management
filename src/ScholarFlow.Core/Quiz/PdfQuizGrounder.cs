@@ -60,7 +60,7 @@ public static class PdfQuizGrounder
                 foreach (var node in nodes)
                 {
                     var title = (node.Title ?? string.Empty).Trim();
-                    var term = TaskItem.NormalizeTerm(title) ?? inheritedTerm;
+                    var term = ResolveOutlineTermOrSection(title, level, inheritedTerm);
                     if (
                         node is DocumentBookmarkNode docNode
                         && docNode.PageNumber >= 1
@@ -139,7 +139,9 @@ public static class PdfQuizGrounder
         if (totalPages <= 0)
             return [];
 
-        var normalizedTerm = TaskItem.NormalizeTerm(termFilter);
+        var normalizedTerm =
+            TaskItem.NormalizeTerm(termFilter)
+            ?? (string.IsNullOrWhiteSpace(termFilter) ? null : termFilter.Trim());
         bool hasExplicitRanges = explicitRanges is { Count: > 0 };
         var leafSections = outlineSections.Where(s => s.Level >= 2).ToList();
         if (leafSections.Count == 0)
@@ -176,7 +178,7 @@ public static class PdfQuizGrounder
         {
             foreach (var s in outlineSections)
             {
-                if (s.Level == 1 && TaskItem.NormalizeTerm(s.Title) is not null)
+                if (s.Level == 1 && !string.IsNullOrWhiteSpace(s.Term))
                     termDividerPages.Add(s.StartPage);
             }
         }
@@ -335,7 +337,9 @@ public static class PdfQuizGrounder
             return [];
 
         var pageSections = cached.PageSections;
-        var normalizedTerm = TaskItem.NormalizeTerm(termFilter);
+        var normalizedTerm =
+            TaskItem.NormalizeTerm(termFilter)
+            ?? (string.IsNullOrWhiteSpace(termFilter) ? null : termFilter.Trim());
         bool hasAnyTermBookmarks = pageSections.Any(ps => !string.IsNullOrWhiteSpace(ps.Term));
         bool hasNonSyllabusPages = pageSections.Any(ps =>
             !string.IsNullOrWhiteSpace(ps.SectionBreadcrumb)
@@ -1131,6 +1135,29 @@ public static class PdfQuizGrounder
         return rects;
     }
 
+    internal static string? ResolveOutlineTermOrSection(
+        string title,
+        int level,
+        string? inheritedTerm
+    )
+    {
+        var normalized = TaskItem.NormalizeTerm(title);
+        if (normalized is not null)
+            return normalized;
+
+        if (
+            level == 1
+            && !string.IsNullOrWhiteSpace(title)
+            && !title.Equals("Table of Contents", StringComparison.OrdinalIgnoreCase)
+            && !title.Contains("Syllabus", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return title.Trim();
+        }
+
+        return inheritedTerm;
+    }
+
     private static (string? Term, string SectionBreadcrumb)[] BuildPageSectionMap(PdfDocument doc)
     {
         int n = doc.NumberOfPages;
@@ -1143,12 +1170,12 @@ public static class PdfQuizGrounder
 
         var anchors = new List<(int Page, string? Term, string Breadcrumb)>();
 
-        void Walk(IEnumerable<BookmarkNode> nodes, string? inheritedTerm, string parentPath)
+        void Walk(IEnumerable<BookmarkNode> nodes, string? inheritedTerm, string parentPath, int level)
         {
             foreach (var node in nodes)
             {
                 var title = (node.Title ?? string.Empty).Trim();
-                var term = TaskItem.NormalizeTerm(title) ?? inheritedTerm;
+                var term = ResolveOutlineTermOrSection(title, level, inheritedTerm);
                 var path = string.IsNullOrEmpty(parentPath) ? title : $"{parentPath} / {title}";
 
                 if (
@@ -1161,11 +1188,11 @@ public static class PdfQuizGrounder
                 }
 
                 if (node.Children.Count > 0)
-                    Walk(node.Children, term, path);
+                    Walk(node.Children, term, path, level + 1);
             }
         }
 
-        Walk(bookmarks.Roots, null, string.Empty);
+        Walk(bookmarks.Roots, null, string.Empty, 1);
 
         if (anchors.Count == 0)
             return map;

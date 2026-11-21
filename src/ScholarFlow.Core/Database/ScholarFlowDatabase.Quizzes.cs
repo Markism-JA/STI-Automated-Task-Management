@@ -653,6 +653,113 @@ public static partial class ScholarFlowDatabase
         }
     }
 
+    /// <summary>
+    /// Updates stored <c>source_pdf_path</c> values in both <c>quizzes</c> and <c>quiz_questions</c>
+    /// after a course PDF file or module folder is renamed, moved, or reordered on disk.
+    /// </summary>
+    public static int RemapQuizSourcePdfPaths(
+        string basinRoot,
+        string oldPathOrPrefix,
+        string newPathOrPrefix,
+        bool isPrefix
+    )
+    {
+        if (
+            string.IsNullOrWhiteSpace(basinRoot)
+            || string.IsNullOrWhiteSpace(oldPathOrPrefix)
+            || string.IsNullOrWhiteSpace(newPathOrPrefix)
+            || string.Equals(oldPathOrPrefix, newPathOrPrefix, StringComparison.Ordinal)
+        )
+            return 0;
+
+        DbLock.Wait();
+        try
+        {
+            using var conn = new SqliteConnection(BuildConnectionString(basinRoot));
+            conn.Open();
+            EnsureSchemaOnConnectionAsync(conn, CancellationToken.None).GetAwaiter().GetResult();
+
+            using var tx = conn.BeginTransaction();
+            int updated = 0;
+
+            foreach (var table in new[] { "quizzes", "quiz_questions" })
+            {
+                var rows = new List<(string Id, string OldPath)>();
+                using (var sel = conn.CreateCommand())
+                {
+                    sel.Transaction = tx;
+                    sel.CommandText = $"SELECT id, source_pdf_path FROM {table} WHERE source_pdf_path != '';";
+                    using var reader = sel.ExecuteReader();
+                    while (reader.Read())
+                        rows.Add((reader.GetString(0), reader.GetString(1)));
+                }
+
+                using var upd = conn.CreateCommand();
+                upd.Transaction = tx;
+                upd.CommandText = $"UPDATE {table} SET source_pdf_path = $newPath WHERE id = $id;";
+                var pNew = upd.Parameters.Add("$newPath", SqliteType.Text);
+                var pId = upd.Parameters.Add("$id", SqliteType.Text);
+
+                foreach (var (id, currentPath) in rows)
+                {
+                    string? remapped = TryRemapPath(currentPath, oldPathOrPrefix, newPathOrPrefix, isPrefix);
+                    if (remapped is null)
+                        continue;
+
+                    pNew.Value = remapped;
+                    pId.Value = id;
+                    updated += upd.ExecuteNonQuery();
+                }
+            }
+
+            tx.Commit();
+            return updated;
+        }
+        catch
+        {
+            return 0;
+        }
+        finally
+        {
+            DbLock.Release();
+        }
+    }
+
+    public static string? TryRemapPath(
+        string currentPath,
+        string oldPathOrPrefix,
+        string newPathOrPrefix,
+        bool isPrefix
+    )
+    {
+        if (string.IsNullOrWhiteSpace(currentPath))
+            return null;
+
+        if (!isPrefix)
+        {
+            if (string.Equals(currentPath, oldPathOrPrefix, StringComparison.OrdinalIgnoreCase))
+                return newPathOrPrefix;
+            return null;
+        }
+
+        var oldNorm = oldPathOrPrefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var newNorm = newPathOrPrefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (
+            currentPath.Length > oldNorm.Length
+            && currentPath.StartsWith(oldNorm, StringComparison.OrdinalIgnoreCase)
+            && (
+                currentPath[oldNorm.Length] == Path.DirectorySeparatorChar
+                || currentPath[oldNorm.Length] == Path.AltDirectorySeparatorChar
+            )
+        )
+        {
+            return newNorm + currentPath[oldNorm.Length..];
+        }
+
+        return null;
+    }
+
     private static List<T> TryDeserializeList<T>(string json)
     {
         if (string.IsNullOrWhiteSpace(json))

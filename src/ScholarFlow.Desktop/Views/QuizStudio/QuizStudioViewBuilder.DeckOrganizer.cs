@@ -46,6 +46,7 @@ public static partial class QuizStudioViewBuilder
 
         return string.Join(
             "|",
+            ThemeService.CurrentTheme.ToString(),
             vm.BasinRoot,
             studio.SelectedCourse?.FolderName ?? "",
             deck.Id,
@@ -232,7 +233,6 @@ public static partial class QuizStudioViewBuilder
             studio.ToggleOrganizerToc,
             isActive: studio.IsOrganizerTocOpen
         );
-        ToolTip.SetTip(tocToggleBtn, "Show/hide Quick-Jump Question TOC");
         Grid.SetColumn(tocToggleBtn, col++);
         topRow.Children.Add(tocToggleBtn);
 
@@ -248,7 +248,6 @@ public static partial class QuizStudioViewBuilder
             studio.ToggleOrganizerFilters,
             isActive: studio.IsOrganizerFiltersOpen || hasActiveFilters
         );
-        ToolTip.SetTip(filterToggleBtn, "Filter by Kind, @Tag, Health, or Search");
         Grid.SetColumn(filterToggleBtn, col++);
         topRow.Children.Add(filterToggleBtn);
 
@@ -262,7 +261,6 @@ public static partial class QuizStudioViewBuilder
                     shuffleOptionsOverride: true
                 )
         );
-        ToolTip.SetTip(shufflePlayBtn, "Shuffle & Play this deck");
         Grid.SetColumn(shufflePlayBtn, col++);
         topRow.Children.Add(shufflePlayBtn);
 
@@ -366,15 +364,69 @@ public static partial class QuizStudioViewBuilder
         };
         moreFlyout.Items.Add(exportJsonItem);
 
-        if (File.Exists(deck.SourcePdfPath))
+        var hasFallbackMaster =
+            !string.IsNullOrWhiteSpace(vm.BasinRoot)
+            && !string.IsNullOrWhiteSpace(deck.CourseFolder)
+            && ScholarFlow.Core.Pdf.MasterPdfService.FindExistingMasterPdfPath(
+                vm.BasinRoot,
+                deck.CourseFolder
+            )
+                is not null;
+
+        if (File.Exists(deck.SourcePdfPath) || hasFallbackMaster)
         {
             var regroundItem = new MenuItem
             {
-                Header = deck.IsSourcePdfStale() ? "Re-ground Stale PDF" : "Re-ground PDF",
+                Header = !File.Exists(deck.SourcePdfPath)
+                    ? "Re-ground via Master PDF"
+                    : deck.IsSourcePdfStale()
+                        ? "Re-ground Stale PDF"
+                        : "Re-ground PDF",
             };
             regroundItem.Click += async (_, _) => await studio.RegroundQuizAsync(deck);
             moreFlyout.Items.Add(regroundItem);
         }
+
+        var relinkPdfItem = new MenuItem { Header = "Relink Source PDF..." };
+        relinkPdfItem.Click += async (_, _) =>
+        {
+            var top = TopLevel.GetTopLevel(moreBtn);
+            if (top?.StorageProvider is null)
+                return;
+
+            var courseDir =
+                !string.IsNullOrWhiteSpace(vm.BasinRoot)
+                && !string.IsNullOrWhiteSpace(deck.CourseFolder)
+                    ? Path.Combine(vm.BasinRoot, deck.CourseFolder)
+                    : null;
+            var startFolder =
+                courseDir is not null && Directory.Exists(courseDir)
+                    ? await top.StorageProvider.TryGetFolderFromPathAsync(new Uri(courseDir))
+                    : null;
+
+            var picked = await top.StorageProvider.OpenFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerOpenOptions
+                {
+                    Title = $"Relink Source PDF for '{deck.Title}'",
+                    AllowMultiple = false,
+                    SuggestedStartLocation = startFolder,
+                    FileTypeFilter =
+                    [
+                        new Avalonia.Platform.Storage.FilePickerFileType("PDF Documents")
+                        {
+                            Patterns = ["*.pdf"],
+                        },
+                    ],
+                }
+            );
+            var localPath =
+                picked.Count > 0
+                    ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(picked[0])
+                    : null;
+            if (!string.IsNullOrWhiteSpace(localPath))
+                await studio.RelinkAndRegroundQuizAsync(deck, localPath);
+        };
+        moreFlyout.Items.Add(relinkPdfItem);
 
         moreFlyout.Items.Add(new Separator());
 
@@ -552,7 +604,16 @@ public static partial class QuizStudioViewBuilder
                 RowDefinitions = RowDefinitions.Parse("Auto,Auto,*"),
                 RowSpacing = 6,
             };
-            tocPanel.Children.Add(UiBuilder.SectionHeader($"Questions ({visibleQuestions.Count})"));
+            var tocHeaderText = new TextBlock
+            {
+                Text = $"QUESTIONS ({visibleQuestions.Count})",
+                FontSize = 11,
+                FontWeight = FontWeight.SemiBold,
+                LetterSpacing = 0.6,
+                Foreground = ThemeService.Brush(ThemeService.TextMuted),
+                Margin = new Thickness(2, 0, 0, 2),
+            };
+            tocPanel.Children.Add(tocHeaderText);
 
             var searchBox = new TextBox
             {
@@ -560,21 +621,24 @@ public static partial class QuizStudioViewBuilder
                 Watermark = "Search prompt, answer, @tag...",
                 FontSize = 11.5,
             };
+            searchBox.TextChanged += (_, _) =>
+            {
+                studio.SetOrganizerSearchQueryQuiet(searchBox.Text ?? string.Empty);
+                var updated = studio.GetVisibleOrganizerQuestions();
+                visibleQuestions = updated;
+                tocHeaderText.Text = $"QUESTIONS ({updated.Count})";
+                cardListBox.ItemsSource = updated;
+                if (tocListBox is not null)
+                    tocListBox.ItemsSource = updated;
+                _cachedOrganizerSignature = ComputeOrganizerStructuralSignature(vm, studio);
+            };
             searchBox.KeyDown += (_, e) =>
             {
-                if (e.Key == Avalonia.Input.Key.Enter)
-                    studio.SetOrganizerSearchQuery(searchBox.Text ?? string.Empty);
-            };
-            searchBox.LostFocus += (_, _) =>
-            {
-                if (
-                    !string.Equals(
-                        searchBox.Text ?? string.Empty,
-                        studio.OrganizerSearchQuery,
-                        StringComparison.Ordinal
-                    )
-                )
-                    studio.SetOrganizerSearchQuery(searchBox.Text ?? string.Empty);
+                if (e.Key == Avalonia.Input.Key.Escape && !string.IsNullOrEmpty(searchBox.Text))
+                {
+                    e.Handled = true;
+                    searchBox.Text = string.Empty;
+                }
             };
             Grid.SetRow(searchBox, 1);
             tocPanel.Children.Add(searchBox);
@@ -838,7 +902,6 @@ public static partial class QuizStudioViewBuilder
             Child = fabBtn,
         };
         fabBtn.Margin = new Thickness(0);
-        ToolTip.SetTip(fabBtn, "Add question manually, append with AI, or run AI Deck Fix");
         Grid.SetRow(fabHost, 1);
         rootGrid.Children.Add(fabHost);
 
@@ -1170,7 +1233,6 @@ public static partial class QuizStudioViewBuilder
             16
         );
         prevBtn.IsEnabled = deckIdx > 0;
-        ToolTip.SetTip(prevBtn, "Apply & Previous Question");
         Grid.SetColumn(prevBtn, 1);
         headerGrid.Children.Add(prevBtn);
 
@@ -1180,7 +1242,6 @@ public static partial class QuizStudioViewBuilder
             16
         );
         nextBtn.IsEnabled = deckIdx >= 0 && deckIdx < deck.Questions.Count - 1;
-        ToolTip.SetTip(nextBtn, "Apply & Next Question");
         Grid.SetColumn(nextBtn, 2);
         headerGrid.Children.Add(nextBtn);
 
@@ -1873,7 +1934,7 @@ public static partial class QuizStudioViewBuilder
 
         return new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#A8000000")),
+            Background = ThemeService.Brush(ThemeService.BgBackdrop),
             Padding = new Thickness(16),
             Child = modalCard,
         };
@@ -2369,7 +2430,6 @@ public static partial class QuizStudioViewBuilder
                 isActive: isPicked
             );
             pillBtn.Margin = new Thickness(0, 0, 4, 4);
-            ToolTip.SetTip(pillBtn, q.Prompt);
             targetWrap.Children.Add(pillBtn);
         }
         modalStack.Children.Add(targetWrap);
@@ -2490,7 +2550,7 @@ public static partial class QuizStudioViewBuilder
 
         return new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#A8000000")),
+            Background = ThemeService.Brush(ThemeService.BgBackdrop),
             Padding = new Thickness(24),
             Child = modalCard,
         };
@@ -2699,7 +2759,7 @@ public static partial class QuizStudioViewBuilder
 
         var backdrop = new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#A8000000")),
+            Background = ThemeService.Brush(ThemeService.BgBackdrop),
             Padding = new Thickness(32, 24),
             Child = modalCard,
         };

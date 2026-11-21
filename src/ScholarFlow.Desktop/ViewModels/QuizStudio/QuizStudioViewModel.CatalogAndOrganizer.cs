@@ -139,14 +139,81 @@ public sealed partial class QuizStudioViewModel
         _mainVm.RequestUiRefresh();
     }
 
+    public void RemapSourcePdfPaths(
+        string oldPathOrPrefix,
+        string newPathOrPrefix,
+        bool isPrefix
+    )
+    {
+        void RemapSession(QuizSessionRecord? session)
+        {
+            if (session is null)
+                return;
+
+            var remappedSession = ScholarFlowDatabase.TryRemapPath(
+                session.SourcePdfPath,
+                oldPathOrPrefix,
+                newPathOrPrefix,
+                isPrefix
+            );
+            if (remappedSession is not null)
+                session.SourcePdfPath = remappedSession;
+
+            foreach (var q in session.Questions)
+            {
+                var remappedQ = ScholarFlowDatabase.TryRemapPath(
+                    q.SourcePdfPath,
+                    oldPathOrPrefix,
+                    newPathOrPrefix,
+                    isPrefix
+                );
+                if (remappedQ is not null)
+                    q.SourcePdfPath = remappedQ;
+            }
+        }
+
+        foreach (var q in SavedQuizzes)
+            RemapSession(q);
+        RemapSession(OrganizerQuiz);
+        RemapSession(ActiveSession);
+
+        if (!string.IsNullOrWhiteSpace(SelectedPdfPath))
+        {
+            var remappedSelected = ScholarFlowDatabase.TryRemapPath(
+                SelectedPdfPath,
+                oldPathOrPrefix,
+                newPathOrPrefix,
+                isPrefix
+            );
+            if (remappedSelected is not null)
+                SelectedPdfPath = remappedSelected;
+        }
+    }
+
     public async Task RegroundQuizAsync(QuizSessionRecord quiz)
     {
         if (string.IsNullOrWhiteSpace(quiz.SourcePdfPath) || !File.Exists(quiz.SourcePdfPath))
         {
-            StatusMessage = $"Cannot re-ground: PDF not found at {quiz.SourcePdfPath}";
-            IsStatusError = true;
-            _mainVm.RequestUiRefresh();
-            return;
+            var fallbackMaster =
+                !string.IsNullOrWhiteSpace(_mainVm.BasinRoot)
+                && !string.IsNullOrWhiteSpace(quiz.CourseFolder)
+                    ? ScholarFlow.Core.Pdf.MasterPdfService.FindExistingMasterPdfPath(
+                        _mainVm.BasinRoot,
+                        quiz.CourseFolder
+                    )
+                    : null;
+
+            if (!string.IsNullOrWhiteSpace(fallbackMaster) && File.Exists(fallbackMaster))
+            {
+                quiz.SourcePdfPath = fallbackMaster;
+            }
+            else
+            {
+                StatusMessage = $"Cannot re-ground: PDF not found at {quiz.SourcePdfPath}";
+                IsStatusError = true;
+                _mainVm.RequestUiRefresh();
+                return;
+            }
         }
 
         IsGenerating = true;
@@ -173,6 +240,30 @@ public sealed partial class QuizStudioViewModel
             IsGenerating = false;
             _mainVm.RequestUiRefresh();
         }
+    }
+
+    public async Task RelinkAndRegroundQuizAsync(QuizSessionRecord quiz, string newPdfPath)
+    {
+        if (string.IsNullOrWhiteSpace(newPdfPath) || !File.Exists(newPdfPath))
+        {
+            StatusMessage = "Selected PDF file does not exist.";
+            IsStatusError = true;
+            _mainVm.RequestUiRefresh();
+            return;
+        }
+
+        quiz.SourcePdfPath = newPdfPath;
+        foreach (var q in quiz.Questions)
+            q.SourcePdfPath = newPdfPath;
+
+        if (OrganizerQuiz?.Id == quiz.Id)
+        {
+            OrganizerQuiz.SourcePdfPath = newPdfPath;
+            foreach (var q in OrganizerQuiz.Questions)
+                q.SourcePdfPath = newPdfPath;
+        }
+
+        await RegroundQuizAsync(quiz);
     }
 
     // =========================================================================
@@ -334,6 +425,11 @@ public sealed partial class QuizStudioViewModel
         IsOrganizerDirty = true;
     }
 
+    public void SetOrganizerSearchQueryQuiet(string query)
+    {
+        OrganizerSearchQuery = query ?? string.Empty;
+    }
+
     public void SetOrganizerSearchQuery(string query)
     {
         OrganizerSearchQuery = query ?? string.Empty;
@@ -379,10 +475,16 @@ public sealed partial class QuizStudioViewModel
                 }
                 && (
                     string.IsNullOrEmpty(qSearch)
-                    || q.Prompt.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
-                    || q.CorrectAnswer.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
-                    || q.TopicTag.Contains(qSearch, StringComparison.OrdinalIgnoreCase)
-                    || q.Options.Any(o => o.Contains(qSearch, StringComparison.OrdinalIgnoreCase))
+                    || ScholarFlow.Core.Services.QuickSearchMatcher.Matches(
+                        qSearch,
+                        q.Prompt,
+                        q.CorrectAnswer,
+                        q.TopicTag,
+                        q.SectionTitle,
+                        q.VerbatimQuote,
+                        q.Kind.ToString(),
+                        q.Options.Count > 0 ? string.Join(' ', q.Options) : null
+                    )
                 )
             )
             .ToList();
