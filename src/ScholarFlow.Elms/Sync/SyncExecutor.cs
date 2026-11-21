@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Elms.Abstractions;
 using ScholarFlow.Elms.Models;
 

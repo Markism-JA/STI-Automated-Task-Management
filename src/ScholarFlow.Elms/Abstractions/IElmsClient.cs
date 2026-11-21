@@ -1,3 +1,4 @@
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Elms.Abstractions;
@@ -54,4 +55,9 @@ public interface IElmsClient : IAsyncDisposable
     /// Fetches raw HTML of an authenticated eLMS URL for selector inspection and diagnostics.
     /// </summary>
     Task<string> FetchAuthenticatedHtmlAsync(string urlOrPath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a download executor bound to this client's authenticated HTTP transport.
+    /// </summary>
+    ISyncExecutor CreateSyncExecutor();
 }

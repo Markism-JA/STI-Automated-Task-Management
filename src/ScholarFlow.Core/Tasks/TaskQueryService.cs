@@ -103,17 +103,17 @@ public static class TaskQueryService
 
     public static bool MatchesTerm(TaskItem task, string? expectedTerm)
     {
-        var normalizedExpected = TaskItem.NormalizeTerm(expectedTerm);
-        if (string.IsNullOrEmpty(normalizedExpected))
+        if (string.IsNullOrWhiteSpace(expectedTerm))
             return true;
 
-        var taskTerm = TaskItem.NormalizeTerm(task.Term);
+        var normalizedExpected = TaskItem.NormalizeTerm(expectedTerm) ?? expectedTerm.Trim();
+        var taskTerm = TaskItem.NormalizeTerm(task.Term) ?? task.Term?.Trim();
         if (string.Equals(taskTerm, normalizedExpected, StringComparison.OrdinalIgnoreCase))
             return true;
 
         return task.Labels.Any(l =>
             string.Equals(
-                TaskItem.NormalizeTerm(l),
+                TaskItem.NormalizeTerm(l) ?? l.Trim(),
                 normalizedExpected,
                 StringComparison.OrdinalIgnoreCase
             )

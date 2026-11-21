@@ -85,14 +85,6 @@ public sealed record SyncOptions
     public ResourceFilter Filter { get; init; } = ResourceFilter.AcademicDefault;
 }
 
-public sealed record SyncProgress(
-    string Stage,
-    string Message,
-    int? Completed = null,
-    int? Total = null,
-    string? CourseTitle = null
-);
-
 public sealed record SyncResult(
     ElmsCourse Course,
     int Downloaded,

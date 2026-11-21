@@ -2,10 +2,10 @@ using Avalonia.Threading;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Services;
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Services;
 using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.ViewModels;
 
@@ -311,7 +311,7 @@ public sealed partial class MainWindowViewModel
             ExternalFileLauncher.OpenLocalFile(task.SourceMarkdownPath);
     }
 
-    public async Task OpenTaskInElmsAppAsync(TaskItem? task)
+    public Task OpenTaskInElmsAppAsync(TaskItem? task)
     {
         var url = task?.LmsUrl;
         if (string.IsNullOrWhiteSpace(url))
@@ -322,42 +322,66 @@ public sealed partial class MainWindowViewModel
                 url = "/user_dashboard";
         }
 
-        bool wasManuallyPaused = _pollingService.IsPaused;
-        if (!wasManuallyPaused)
-            _pollingService.Pause(TimeSpan.FromMinutes(90));
+        return OpenUrlInProviderAppAsync(url);
+    }
 
-        StatusText = "Opening eLMS app window (background polling paused)...";
+    public async Task OpenUrlInProviderAppAsync(string urlOrPath)
+    {
+        var provider = ActiveSyncProvider;
+        if (!provider.Capabilities.SupportsInteractiveSessionBrowser)
+        {
+            var baseUrl = BasinConfig.GetProviderSetting("baseUrl", "");
+            var targetUrl =
+                urlOrPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || urlOrPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    ? urlOrPath
+                : !string.IsNullOrWhiteSpace(baseUrl)
+                    ? $"{baseUrl.TrimEnd('/')}/{urlOrPath.TrimStart('/')}"
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(targetUrl))
+                ExternalFileLauncher.OpenUrl(targetUrl);
+            return;
+        }
+
+        StatusText = provider.Capabilities.EnforcesSingleConcurrentSession
+            ? $"Opening {provider.DisplayName} window (background polling paused)..."
+            : $"Opening {provider.DisplayName} window...";
         NotifyStateChanged(UiChangeKind.FullLayout);
 
-        await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(
-            url,
+        await SyncCoordinator.OpenExternalUrlWithPauseShieldAsync(
+            BasinRoot,
+            urlOrPath,
             async () =>
             {
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
-                    if (!wasManuallyPaused)
-                        _pollingService.Resume();
-                    StatusText = "eLMS window closed — refreshing assignments...";
+                    StatusText = $"{provider.DisplayName} window closed — refreshing assignments...";
                     NotifyStateChanged(UiChangeKind.FullLayout);
                     await RunFastPollAsync();
                 });
             }
         );
+
+        NotifyStateChanged(UiChangeKind.FullLayout);
     }
 
-    public bool IsPollingPaused => _pollingService.IsPaused;
+    public bool IsPollingPaused =>
+        SyncCoordinator.IsProviderPaused(ActiveSyncProvider.GetConcurrencyKey(BasinConfig));
 
     public void TogglePollingPaused()
     {
-        if (_pollingService.IsPaused)
+        var provider = ActiveSyncProvider;
+        var concurrencyKey = provider.GetConcurrencyKey(BasinConfig);
+        if (SyncCoordinator.IsProviderPaused(concurrencyKey))
         {
-            _pollingService.Resume();
-            StatusText = "Background eLMS polling resumed.";
+            SyncCoordinator.ResumeProvider(concurrencyKey);
+            StatusText = $"Background {provider.DisplayName} polling resumed.";
         }
         else
         {
-            _pollingService.Pause();
-            StatusText = "Background eLMS polling paused (single-session protection).";
+            SyncCoordinator.PauseProvider(concurrencyKey);
+            StatusText =
+                $"Background {provider.DisplayName} polling paused (single-session protection).";
         }
         NotifyStateChanged(UiChangeKind.FullLayout);
     }
@@ -373,7 +397,7 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            var notifs = await _pollingService.TriggerFastPollAsync(BasinRoot);
+            var notifs = await SyncCoordinator.TriggerFastPollAsync(BasinRoot);
             StatusText = $"Fast poll complete ({notifs.Count} update(s))";
             await ReloadBasinDataAsync();
         }
@@ -409,9 +433,7 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            var report = await _syncService.SyncAllAsync(BasinRoot, progress: progress);
-            foreach (var n in report.Notifications)
-                AddNotification(n);
+            var report = await SyncCoordinator.TriggerFullSyncAsync(BasinRoot, progress: progress);
 
             StatusText =
                 $"Synced {report.CoursesSynced} courses (+{report.FilesDownloaded} files, {report.MasterPdfsCompiled} PDFs compiled)";
@@ -480,13 +502,11 @@ public sealed partial class MainWindowViewModel
                 });
             });
 
-            var report = await _syncService.SyncCourseAsync(
+            var report = await SyncCoordinator.TriggerCourseSyncAsync(
                 BasinRoot,
                 course.FolderName,
                 progress: progress
             );
-            foreach (var n in report.Notifications)
-                AddNotification(n);
 
             StatusText =
                 report.Errors.Count > 0
@@ -517,7 +537,7 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            var ok = await _syncService.SyncSingleAssignmentAsync(BasinRoot, task);
+            var ok = await SyncCoordinator.TriggerSingleTaskSyncAsync(BasinRoot, task);
             StatusText = ok
                 ? $"Refreshed '{task.Title}' from eLMS"
                 : $"Could not refresh '{task.Title}'";
@@ -551,12 +571,34 @@ public sealed partial class MainWindowViewModel
         NotifyStateChanged(UiChangeKind.NotificationsOnly);
     }
 
-    private void OnPollingNotification(object? sender, AppNotification notification)
+    private void OnCoordinatorNotification(object? sender, BasinNotificationEvent ev)
     {
         Dispatcher.UIThread.Post(() =>
         {
-            AddNotification(notification);
-            _ = ReloadBasinDataAsync();
+            bool isActiveBasin =
+                !string.IsNullOrWhiteSpace(BasinRoot)
+                && string.Equals(
+                    Path.GetFullPath(BasinRoot),
+                    Path.GetFullPath(ev.BasinRoot),
+                    StringComparison.OrdinalIgnoreCase
+                );
+
+            if (isActiveBasin)
+            {
+                AddNotification(ev.Notification);
+                _ = ReloadBasinDataAsync();
+            }
+            else
+            {
+                var basinState = SyncCoordinator.GetBasinState(ev.BasinRoot);
+                var prefix = basinState is not null ? $"[{basinState.Config.Name}] " : "";
+                AddNotification(
+                    ev.Notification with
+                    {
+                        Title = $"{prefix}{ev.Notification.Title}",
+                    }
+                );
+            }
         });
     }
 

@@ -97,7 +97,7 @@ public sealed partial class MainWindow
         AddTokenBtn("11:59 PM", MaterialIconKind.ClockOutline, "11:59pm", timeRegex);
 
         var termRegex = @"\b@?(prelims?|midterms?|pre-?finals?|finals?)\b";
-        foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+        foreach (var termName in _vm.ActiveTerms)
         {
             AddTokenBtn(
                 termName,
@@ -585,7 +585,7 @@ public sealed partial class MainWindow
 
     private Border BuildStatusBar()
     {
-        bool isPaused = _vm.Settings.EnableElmsIntegration && _vm.IsPollingPaused;
+        bool isPaused = _vm.EnforcesActiveSingleSession && _vm.IsPollingPaused;
         var grid = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,Auto"),
@@ -613,7 +613,7 @@ public sealed partial class MainWindow
             new TextBlock
             {
                 Text = isPaused
-                    ? "eLMS POLLING PAUSED (Browser session protected)"
+                    ? $"{_vm.ActiveProviderName.ToUpperInvariant()} POLLING PAUSED (Browser session protected)"
                     : _vm.StatusText,
                 FontSize = 11,
                 FontWeight = isPaused ? FontWeight.SemiBold : FontWeight.Normal,
@@ -646,7 +646,7 @@ public sealed partial class MainWindow
         rightHints.Children.Add(
             new TextBlock
             {
-                Text = _vm.Settings.EnableElmsIntegration
+                Text = _vm.EnforcesActiveSingleSession
                     ? "Q Add · / Search · j/k Nav · Shift+P Pause Sync · ? Help"
                     : "Q Add · / Search · j/k Nav · Enter Inspect · ? Help",
                 FontSize = 11,

@@ -122,34 +122,37 @@ public sealed partial class MainWindow
             Margin = new Thickness(0, 0, 0, 10),
         };
 
-        var termPills = new WrapPanel { Orientation = Orientation.Horizontal };
-        var allTermsBtn = UiBuilder.GhostButton(
-            "All Terms",
-            null,
-            () => vm.SelectTermView(null),
-            isActive: string.IsNullOrEmpty(vm.ActiveTermFilter)
-        );
-        allTermsBtn.Margin = new Thickness(0, 0, 4, 4);
-        termPills.Children.Add(allTermsBtn);
-
-        foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+        if (vm.ActiveTerms.Count > 0)
         {
-            var capturedTerm = termName;
-            bool isTermActive = string.Equals(
-                vm.ActiveTermFilter,
-                capturedTerm,
-                StringComparison.OrdinalIgnoreCase
-            );
-            var tBtn = UiBuilder.GhostButton(
-                capturedTerm,
+            var termPills = new WrapPanel { Orientation = Orientation.Horizontal };
+            var allTermsBtn = UiBuilder.GhostButton(
+                "All Terms",
                 null,
-                () => vm.SelectTermView(capturedTerm),
-                isActive: isTermActive
+                () => vm.SelectTermView(null),
+                isActive: string.IsNullOrEmpty(vm.ActiveTermFilter)
             );
-            tBtn.Margin = new Thickness(0, 0, 4, 4);
-            termPills.Children.Add(tBtn);
+            allTermsBtn.Margin = new Thickness(0, 0, 4, 4);
+            termPills.Children.Add(allTermsBtn);
+
+            foreach (var termName in vm.ActiveTerms)
+            {
+                var capturedTerm = termName;
+                bool isTermActive = string.Equals(
+                    vm.ActiveTermFilter,
+                    capturedTerm,
+                    StringComparison.OrdinalIgnoreCase
+                );
+                var tBtn = UiBuilder.GhostButton(
+                    capturedTerm,
+                    null,
+                    () => vm.SelectTermView(capturedTerm),
+                    isActive: isTermActive
+                );
+                tBtn.Margin = new Thickness(0, 0, 4, 4);
+                termPills.Children.Add(tBtn);
+            }
+            filterBar.Children.Add(termPills);
         }
-        filterBar.Children.Add(termPills);
 
         var effectiveGrouping =
             vm.ActiveGrouping == TaskGroupingMode.Default
@@ -445,18 +448,38 @@ public sealed partial class MainWindow
         if (groupingMode == TaskGroupingMode.Term)
         {
             var termGroups = new List<(string Title, List<TaskItem> Tasks, bool IsUrgent)>();
-            foreach (var termName in new[] { "Prelims", "Midterms", "Prefinals", "Finals" })
+            var configuredTerms = new List<string>
+            {
+                "Prelims",
+                "Midterms",
+                "Prefinals",
+                "Finals",
+            };
+            foreach (
+                var custom in tasks
+                    .Select(t => TaskItem.NormalizeTerm(t.Term) ?? t.Term?.Trim())
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Cast<string>()
+            )
+            {
+                if (!configuredTerms.Contains(custom, StringComparer.OrdinalIgnoreCase))
+                    configuredTerms.Add(custom);
+            }
+            var matchedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var termName in configuredTerms)
             {
                 var matched = tasks.Where(t => TaskQueryService.MatchesTerm(t, termName)).ToList();
                 if (matched.Count > 0)
+                {
+                    foreach (var m in matched)
+                        matchedIds.Add(m.Id);
                     termGroups.Add((termName, matched, false));
+                }
             }
 
             var uncategorized = tasks
-                .Where(t =>
-                    string.IsNullOrWhiteSpace(TaskItem.NormalizeTerm(t.Term))
-                    && !t.Labels.Any(l => TaskItem.NormalizeTerm(l) is not null)
-                )
+                .Where(t => !matchedIds.Contains(t.Id))
                 .ToList();
             if (uncategorized.Count > 0)
                 termGroups.Add(("General / Uncategorized", uncategorized, false));

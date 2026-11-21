@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace ScholarFlow.Elms.Parsing;
+namespace ScholarFlow.Core.Services;
 
 /// <summary>
 /// Produces clean, deterministic, Linux/Windows-safe filenames and directory names.

@@ -479,7 +479,7 @@ public static partial class QuizStudioViewBuilder
                         {
                             Title = "Export Printable Quiz PDF",
                             SuggestedFileName =
-                                $"{Elms.Parsing.FilenameSanitizer.SanitizeFileName(quiz.Title, ".pdf")}",
+                                $"{ScholarFlow.Core.Services.FilenameSanitizer.SanitizeFileName(quiz.Title, ".pdf")}",
                             DefaultExtension = "pdf",
                         }
                     );
@@ -507,7 +507,7 @@ public static partial class QuizStudioViewBuilder
                         {
                             Title = "Export Quiz Deck JSON",
                             SuggestedFileName =
-                                $"{Elms.Parsing.FilenameSanitizer.SanitizeFileName(quiz.Title, ".json")}",
+                                $"{ScholarFlow.Core.Services.FilenameSanitizer.SanitizeFileName(quiz.Title, ".json")}",
                             DefaultExtension = "json",
                         }
                     );

@@ -1,3 +1,5 @@
+using ScholarFlow.Core.Sync;
+
 namespace ScholarFlow.Elms.Models;
 
 /// <summary>
@@ -83,4 +85,4 @@ public sealed record AuthOptions
 /// Thrown when an authenticated eLMS session cannot be established silently and interactive browser login is disabled.
 /// </summary>
 public sealed class ElmsAuthenticationRequiredException(string message)
-    : InvalidOperationException(message) { }
+    : ProviderAuthenticationRequiredException(message) { }

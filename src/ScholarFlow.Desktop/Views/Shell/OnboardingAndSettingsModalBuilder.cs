@@ -4,6 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Material.Icons;
+using ScholarFlow.Core.Models;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.UI;
 using ScholarFlow.Desktop.ViewModels;
@@ -12,7 +13,7 @@ namespace ScholarFlow.Desktop.Views.Shell;
 
 /// <summary>
 /// Pure-C# builders for the First-Run Onboarding Wizard and Desktop Settings Modal
-/// (Tray, OS Notifications, Startup Registration, and Study Vault Setup).
+/// (Pluggable Basin Sync Providers, Per-Basin Account/Config Fields, Tray, OS Notifications, and Startup).
 /// </summary>
 public static class OnboardingAndSettingsModalBuilder
 {
@@ -37,7 +38,7 @@ public static class OnboardingAndSettingsModalBuilder
                     new TextBlock
                     {
                         Text =
-                            "Set up your local Study Vault and optionally link your STI eLMS account.",
+                            "Set up a local Study Basin and choose its sync provider (Local Knowledge Hub or an LMS integration).",
                         FontSize = 12.5,
                         Foreground = ThemeService.Brush(ThemeService.TextSecondary),
                         TextWrapping = TextWrapping.Wrap,
@@ -58,10 +59,10 @@ public static class OnboardingAndSettingsModalBuilder
         }
         stack.Children.Add(header);
 
-        // Step 1: Study Vault Folder
+        // Step 1: Study Basin Folder
         var vaultCard = new StackPanel { Spacing = 8 };
         vaultCard.Children.Add(
-            UiBuilder.SectionHeader("1. Study Vault Location (courses, PDFs, tasks & quizzes)")
+            UiBuilder.SectionHeader("1. Basin Folder Location (courses, PDFs, tasks & quizzes)")
         );
 
         var pathGrid = new Grid
@@ -72,7 +73,7 @@ public static class OnboardingAndSettingsModalBuilder
         var pathBox = new TextBox
         {
             Text = vm.OnboardingVaultPath,
-            Watermark = "/path/to/Study-Vault",
+            Watermark = "/path/to/Study-Basin",
             FontSize = 12.5,
         };
         pathBox.PropertyChanged += (_, e) =>
@@ -90,7 +91,7 @@ public static class OnboardingAndSettingsModalBuilder
                 var picked = await owner.StorageProvider.OpenFolderPickerAsync(
                     new FolderPickerOpenOptions
                     {
-                        Title = "Select or Create ScholarFlow Study Vault Folder",
+                        Title = "Select or Create ScholarFlow Study Basin Folder",
                         AllowMultiple = false,
                     }
                 );
@@ -110,20 +111,91 @@ public static class OnboardingAndSettingsModalBuilder
         vaultCard.Children.Add(pathGrid);
         stack.Children.Add(UiBuilder.Card(vaultCard, padding: new Thickness(12, 10)));
 
-        // Step 2: STI eLMS Account
-        var elmsCard = new StackPanel { Spacing = 6 };
-        elmsCard.Children.Add(UiBuilder.SectionHeader("2. STI eLMS Connection (Optional)"));
-        elmsCard.Children.Add(
-            new TextBlock
-            {
-                Text =
-                    "Link your STI eLMS account to automatically sync courses, deadlines, handouts, and syllabus term schedules — or start offline and connect later.",
-                FontSize = 12,
-                Foreground = ThemeService.Brush(ThemeService.TextSecondary),
-                TextWrapping = TextWrapping.Wrap,
-            }
+        // Step 2: Pluggable Sync Provider Selector & Dynamic Config Fields
+        var providerCard = new StackPanel { Spacing = 8 };
+        providerCard.Children.Add(UiBuilder.SectionHeader("2. Basin Sync Provider"));
+
+        var providerPills = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var provider in vm.AvailableSyncProviders)
+        {
+            var captured = provider;
+            bool isSelected = string.Equals(
+                vm.OnboardingProviderId,
+                captured.ProviderId,
+                StringComparison.OrdinalIgnoreCase
+            );
+            var pill = UiBuilder.GhostButton(
+                captured.DisplayName,
+                captured.Capabilities.SupportsSync
+                    ? MaterialIconKind.CloudSyncOutline
+                    : MaterialIconKind.BookOpenPageVariantOutline,
+                () => vm.SelectOnboardingProvider(captured.ProviderId),
+                isActive: isSelected
+            );
+            pill.Margin = new Thickness(0, 0, 6, 6);
+            providerPills.Children.Add(pill);
+        }
+        providerCard.Children.Add(providerPills);
+
+        var selectedProvider = vm.SyncCoordinator.ResolveProvider(
+            new BasinConfig { ProviderId = vm.OnboardingProviderId }
         );
-        stack.Children.Add(UiBuilder.Card(elmsCard, padding: new Thickness(12, 10)));
+
+        if (selectedProvider.Capabilities.SupportsSync)
+        {
+            var acctBox = new TextBox
+            {
+                Text = vm.OnboardingAccountKey,
+                Watermark = "Account Profile Key (e.g. default, school-main)",
+                FontSize = 12,
+            };
+            acctBox.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == TextBox.TextProperty)
+                    vm.OnboardingAccountKey = acctBox.Text ?? "default";
+            };
+            providerCard.Children.Add(acctBox);
+
+            foreach (var field in selectedProvider.Capabilities.ConfigFields ?? [])
+            {
+                var capturedField = field;
+                var initialVal = vm.OnboardingProviderSettings.TryGetValue(
+                    capturedField.Key,
+                    out var existing
+                )
+                    ? existing
+                    : capturedField.DefaultValue;
+                var fieldBox = new TextBox
+                {
+                    Text = initialVal,
+                    Watermark = capturedField.Placeholder ?? capturedField.Label,
+                    PasswordChar = capturedField.IsSecret ? '•' : '\0',
+                    FontSize = 12,
+                };
+                fieldBox.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                        vm.OnboardingProviderSettings[capturedField.Key] =
+                            fieldBox.Text ?? string.Empty;
+                };
+                providerCard.Children.Add(fieldBox);
+            }
+        }
+        else
+        {
+            providerCard.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Local Knowledge Hub basins store subjects, books, PDFs, notes, and recall decks purely offline with zero background LMS polling.",
+                    FontSize = 12,
+                    Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                    TextWrapping = TextWrapping.Wrap,
+                }
+            );
+        }
+
+        stack.Children.Add(UiBuilder.Card(providerCard, padding: new Thickness(12, 10)));
 
         // Action Buttons
         var actions = new Grid
@@ -132,7 +204,7 @@ public static class OnboardingAndSettingsModalBuilder
             ColumnSpacing = 8,
         };
         var offlineBtn = UiBuilder.GhostButton(
-            "Start Offline (Vault Only)",
+            "Create as Local Basin",
             MaterialIconKind.FolderCheckOutline,
             async () =>
                 await vm.CompleteOnboardingAsync(
@@ -144,18 +216,22 @@ public static class OnboardingAndSettingsModalBuilder
         Grid.SetColumn(offlineBtn, 1);
         actions.Children.Add(offlineBtn);
 
-        var connectBtn = UiBuilder.PrimaryButton(
-            "Connect STI eLMS & Sync",
-            MaterialIconKind.CloudSyncOutline,
-            async () =>
-                await vm.CompleteOnboardingAsync(
-                    vm.OnboardingVaultPath,
-                    runElmsAuth: true,
-                    runInitialSync: true
-                )
-        );
-        Grid.SetColumn(connectBtn, 2);
-        actions.Children.Add(connectBtn);
+        if (selectedProvider.Capabilities.SupportsSync)
+        {
+            var connectBtn = UiBuilder.PrimaryButton(
+                $"Connect {selectedProvider.DisplayName} & Sync",
+                MaterialIconKind.CloudSyncOutline,
+                async () =>
+                    await vm.CompleteOnboardingAsync(
+                        vm.OnboardingVaultPath,
+                        runElmsAuth: true,
+                        runInitialSync: true
+                    )
+            );
+            Grid.SetColumn(connectBtn, 2);
+            actions.Children.Add(connectBtn);
+        }
+
         stack.Children.Add(actions);
 
         return new Border
@@ -174,13 +250,13 @@ public static class OnboardingAndSettingsModalBuilder
 
     public static Control BuildSettingsModal(MainWindowViewModel vm)
     {
-        var stack = new StackPanel { Spacing = 12 };
+        var stack = new StackPanel { Spacing = 10 };
 
         var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
         header.Children.Add(
             new TextBlock
             {
-                Text = "Desktop Settings & Integration",
+                Text = "Basin Sync Provider & Desktop Settings",
                 FontSize = 16,
                 FontWeight = FontWeight.Bold,
                 Foreground = ThemeService.Brush(ThemeService.TextPrimary),
@@ -192,6 +268,158 @@ public static class OnboardingAndSettingsModalBuilder
         header.Children.Add(closeBtn);
         stack.Children.Add(header);
         stack.Children.Add(UiBuilder.HairlineDivider());
+
+        // 1. Active Basin & Pluggable Sync Provider Configuration Card
+        var basinCard = new StackPanel { Spacing = 8 };
+        basinCard.Children.Add(
+            UiBuilder.SectionHeader($"Active Basin: {vm.BasinConfig.Name}")
+        );
+
+        var providerRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var provider in vm.AvailableSyncProviders)
+        {
+            var captured = provider;
+            bool isCurrent = string.Equals(
+                vm.ActiveSyncProvider.ProviderId,
+                captured.ProviderId,
+                StringComparison.OrdinalIgnoreCase
+            );
+            var btn = UiBuilder.GhostButton(
+                captured.DisplayName,
+                captured.Capabilities.SupportsSync
+                    ? MaterialIconKind.CloudSyncOutline
+                    : MaterialIconKind.BookOpenPageVariantOutline,
+                async () => await vm.SetBasinProviderAsync(captured.ProviderId),
+                isActive: isCurrent
+            );
+            btn.Margin = new Thickness(0, 0, 6, 4);
+            providerRow.Children.Add(btn);
+        }
+        basinCard.Children.Add(providerRow);
+
+        if (vm.SupportsActiveBasinSync)
+        {
+            // Dynamic Config Fields + Account Key
+            var fieldsGrid = new Grid
+            {
+                ColumnDefinitions = ColumnDefinitions.Parse("160,*"),
+                ColumnSpacing = 8,
+            };
+
+            var acctBox = new TextBox
+            {
+                Text = vm.BasinConfig.AccountKey,
+                Watermark = "Account Key (default)",
+                FontSize = 12,
+            };
+            acctBox.LostFocus += async (_, _) =>
+                await vm.SetBasinAccountKeyAsync(acctBox.Text ?? "default");
+            fieldsGrid.Children.Add(acctBox);
+
+            var configFields = vm.ActiveCapabilities.ConfigFields ?? [];
+            if (configFields.Count > 0)
+            {
+                var firstField = configFields[0];
+                var val = vm.BasinConfig.GetProviderSetting(
+                    firstField.Key,
+                    firstField.DefaultValue
+                );
+                var fieldBox = new TextBox
+                {
+                    Text = val,
+                    Watermark = firstField.Placeholder ?? firstField.Label,
+                    PasswordChar = firstField.IsSecret ? '•' : '\0',
+                    FontSize = 12,
+                };
+                fieldBox.LostFocus += async (_, _) =>
+                    await vm.SetBasinProviderSettingAsync(
+                        firstField.Key,
+                        fieldBox.Text ?? firstField.DefaultValue
+                    );
+                Grid.SetColumn(fieldBox, 1);
+                fieldsGrid.Children.Add(fieldBox);
+            }
+            basinCard.Children.Add(fieldsGrid);
+
+            foreach (var extraField in configFields.Skip(1))
+            {
+                var capturedField = extraField;
+                var val = vm.BasinConfig.GetProviderSetting(
+                    capturedField.Key,
+                    capturedField.DefaultValue
+                );
+                var extraBox = new TextBox
+                {
+                    Text = val,
+                    Watermark = capturedField.Placeholder ?? capturedField.Label,
+                    PasswordChar = capturedField.IsSecret ? '•' : '\0',
+                    FontSize = 12,
+                };
+                extraBox.LostFocus += async (_, _) =>
+                    await vm.SetBasinProviderSettingAsync(
+                        capturedField.Key,
+                        extraBox.Text ?? capturedField.DefaultValue
+                    );
+                basinCard.Children.Add(extraBox);
+            }
+
+            // Per-Basin Background Polling & Auth Action Strip
+            var providerActions = new WrapPanel { Orientation = Orientation.Horizontal };
+            var bgSyncBtn = UiBuilder.GhostButton(
+                vm.BasinConfig.BackgroundSyncEnabled
+                    ? "Background Polling: ON"
+                    : "Background Polling: OFF",
+                vm.BasinConfig.BackgroundSyncEnabled
+                    ? MaterialIconKind.CheckCircleOutline
+                    : MaterialIconKind.PauseCircleOutline,
+                async () => await vm.ToggleBasinBackgroundSyncAsync(),
+                isActive: vm.BasinConfig.BackgroundSyncEnabled
+            );
+            bgSyncBtn.Margin = new Thickness(0, 2, 6, 2);
+            providerActions.Children.Add(bgSyncBtn);
+
+            var authBtn = UiBuilder.GhostButton(
+                "Connect / Verify Session",
+                MaterialIconKind.AccountCheckOutline,
+                async () => await vm.AuthenticateActiveProviderAsync()
+            );
+            authBtn.Margin = new Thickness(0, 2, 6, 2);
+            providerActions.Children.Add(authBtn);
+
+            var signOutBtn = UiBuilder.GhostButton(
+                "Sign Out",
+                MaterialIconKind.LogoutVariant,
+                async () => await vm.DisconnectActiveProviderAsync()
+            );
+            signOutBtn.Margin = new Thickness(0, 2, 0, 2);
+            providerActions.Children.Add(signOutBtn);
+
+            basinCard.Children.Add(providerActions);
+
+            // Excluded Courses Quick-Restore Chips
+            var excludedCourses = vm
+                .Courses.Where(vm.IsCourseSyncExcluded)
+                .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (excludedCourses.Count > 0)
+            {
+                var excludedWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+                foreach (var course in excludedCourses)
+                {
+                    var capturedCourse = course;
+                    var chip = UiBuilder.GhostButton(
+                        $"Excluded: {capturedCourse.Title} (Click to Include)",
+                        MaterialIconKind.EyeOffOutline,
+                        async () => await vm.ToggleCourseSyncExclusionAsync(capturedCourse)
+                    );
+                    chip.Margin = new Thickness(0, 2, 6, 2);
+                    excludedWrap.Children.Add(chip);
+                }
+                basinCard.Children.Add(excludedWrap);
+            }
+        }
+
+        stack.Children.Add(UiBuilder.Card(basinCard, padding: new Thickness(12, 10)));
 
         Control BuildToggleRow(string title, string subtitle, bool isEnabled, Func<Task> onToggle)
         {
@@ -238,17 +466,8 @@ public static class OnboardingAndSettingsModalBuilder
 
         stack.Children.Add(
             BuildToggleRow(
-                "STI eLMS Integration & Background Sync",
-                "Enable automatic STI eLMS assignment polling and handout syncing. Turn off for a pure offline/local study vault.",
-                vm.Settings.EnableElmsIntegration,
-                vm.ToggleElmsIntegrationAsync
-            )
-        );
-
-        stack.Children.Add(
-            BuildToggleRow(
                 "Minimize to System Tray on Close",
-                "Keep ScholarFlow running in the background when closing the window so eLMS polling and reminders stay active.",
+                "Keep ScholarFlow running in the background when closing the window so multi-basin polling and reminders stay active.",
                 vm.Settings.MinimizeToTrayOnClose,
                 vm.ToggleMinimizeToTrayAsync
             )
@@ -257,7 +476,7 @@ public static class OnboardingAndSettingsModalBuilder
         stack.Children.Add(
             BuildToggleRow(
                 "OS Notification Tray Alerts",
-                "Dispatch native Linux (notify-send) or Windows Toast notifications for new assignments and deadlines.",
+                "Dispatch native Linux (notify-send) or Windows Toast notifications for new assignments and deadlines across all synced basins.",
                 vm.Settings.EnableDesktopNotifications,
                 vm.ToggleDesktopNotificationsAsync
             )
@@ -272,7 +491,7 @@ public static class OnboardingAndSettingsModalBuilder
             )
         );
 
-        // Study Vault & Setup Wizard Footer
+        // Study Basin & Setup Wizard Footer
         var vaultRow = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,Auto"),
@@ -286,7 +505,7 @@ public static class OnboardingAndSettingsModalBuilder
                 {
                     new TextBlock
                     {
-                        Text = "Active Study Vault",
+                        Text = "Active Basin Path",
                         FontSize = 12.5,
                         FontWeight = FontWeight.SemiBold,
                         Foreground = ThemeService.Brush(ThemeService.TextPrimary),
@@ -304,7 +523,7 @@ public static class OnboardingAndSettingsModalBuilder
             }
         );
         var wizardBtn = UiBuilder.GhostButton(
-            "Setup Wizard",
+            "New Basin Wizard",
             MaterialIconKind.WizardHat,
             vm.OpenOnboardingWizard
         );
@@ -314,7 +533,7 @@ public static class OnboardingAndSettingsModalBuilder
 
         return new Border
         {
-            Width = 540,
+            Width = 560,
             Background = ThemeService.Brush(ThemeService.BgElevated),
             BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
             BorderThickness = new Thickness(1),

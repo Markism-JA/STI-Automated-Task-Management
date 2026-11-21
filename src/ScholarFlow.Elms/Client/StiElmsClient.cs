@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Elms.Abstractions;
 using ScholarFlow.Elms.Auth;
 using ScholarFlow.Elms.Models;
@@ -555,6 +556,8 @@ public sealed class StiElmsClient : IElmsClient
             // Ignore non-fatal cookie persistence race
         }
     }
+
+    public ISyncExecutor CreateSyncExecutor() => new Sync.SyncExecutor(HttpClient);
 
     public ValueTask DisposeAsync()
     {

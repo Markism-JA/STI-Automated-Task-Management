@@ -1,14 +1,11 @@
 using System.Diagnostics;
-using ScholarFlow.Elms.Auth;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Desktop.Services;
 
 /// <summary>
 /// Cross-platform launcher (Linux + Windows + macOS):
 /// Opens text/Markdown notes using $VISUAL / $EDITOR (with terminal wrapper when needed) or the OS default handler,
-/// opens binary/PDF files via the native OS shell (UseShellExecute on Windows, xdg-open on Linux, open on macOS),
-/// and launches authenticated standalone Chromium/Edge --app windows for eLMS assignments.
+/// and opens binary/PDF files via the native OS shell (UseShellExecute on Windows, xdg-open on Linux, open on macOS).
 /// </summary>
 public static class ExternalFileLauncher
 {
@@ -59,6 +56,21 @@ public static class ExternalFileLauncher
             return;
 
         OpenWithOsDefault(fullPath);
+    }
+
+    public static void OpenUrl(string url)
+    {
+        if (
+            string.IsNullOrWhiteSpace(url)
+            || (
+                !url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return;
+        }
+        OpenWithOsDefault(url);
     }
 
     private static bool TryLaunchConfiguredEditor(string fullPath)
@@ -163,30 +175,6 @@ public static class ExternalFileLauncher
         catch
         {
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Launches an authenticated Chromium --app window for an eLMS URL and invokes onWindowClosed when the user closes it.
-    /// </summary>
-    public static async Task OpenInElmsAppAndWatchAsync(
-        string urlOrPath,
-        Func<Task>? onWindowClosed = null,
-        AuthOptions? options = null
-    )
-    {
-        var proc = ElmsBrowserLauncher.LaunchAppWindow(urlOrPath, options);
-        if (proc is null || onWindowClosed is null)
-            return;
-
-        try
-        {
-            await proc.WaitForExitAsync();
-            await onWindowClosed();
-        }
-        catch
-        {
-            // Ignore process watch errors
         }
     }
 }

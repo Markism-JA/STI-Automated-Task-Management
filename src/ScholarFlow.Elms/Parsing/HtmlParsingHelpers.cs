@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
+using ScholarFlow.Core.Services;
 using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Elms.Parsing;

@@ -55,6 +55,19 @@ public sealed class CourseFilterAndSessionTests : IDisposable
         Assert.Equal("abc123", loaded.Cookies[0].Value);
     }
 
+    [Fact]
+    public void ElmsSessionStore_BuildAuthOptionsIsolatesNamedAccountKeys()
+    {
+        var defaultOpts = ElmsSessionStore.BuildAuthOptions("default");
+        var customOpts = ElmsSessionStore.BuildAuthOptions("student-alt", "https://custom.elms.edu");
+
+        Assert.NotEqual(defaultOpts.SessionFilePath, customOpts.SessionFilePath);
+        Assert.NotEqual(defaultOpts.BrowserProfileDirectory, customOpts.BrowserProfileDirectory);
+        Assert.Contains("student-alt", customOpts.SessionFilePath);
+        Assert.Contains("student-alt", customOpts.BrowserProfileDirectory);
+        Assert.Equal("https://custom.elms.edu", customOpts.BaseUrl);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

@@ -1,19 +1,65 @@
 namespace ScholarFlow.Core.Models;
 
+public static class SyncProviderIds
+{
+    public const string None = "none";
+    public const string StiElms = "sti-elms";
+}
+
+public enum CourseOrigin
+{
+    Synced,
+    LocalSubject,
+    KnowledgeCollection,
+}
+
 public sealed class BasinConfig
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public string Name { get; set; } = "School Basin";
+    public string ProviderId { get; set; } = SyncProviderIds.StiElms;
+    public string AccountKey { get; set; } = "default";
+    public bool BackgroundSyncEnabled { get; set; } = true;
     public string ElmsBaseUrl { get; set; } = "https://elms.sti.edu";
+    public Dictionary<string, string> ProviderSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public int FastPollIntervalMinutes { get; set; } = 15;
     public int FullSyncIntervalMinutes { get; set; } = 60;
     public bool AutoCompileMasterPdf { get; set; } = true;
+    public List<string> Terms { get; set; } = ["Prelims", "Midterms", "Prefinals", "Finals"];
+    public List<string> ExcludedCourseIds { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string GetProviderSetting(string key, string fallback = "")
+    {
+        if (ProviderSettings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val))
+            return val;
+        if (
+            string.Equals(key, "baseUrl", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(ElmsBaseUrl)
+        )
+            return ElmsBaseUrl;
+        return fallback;
+    }
 }
+
+/// <summary>
+/// Provider-neutral discovered course metadata passed by sync plugins to <see cref="Services.BasinService"/>.
+/// </summary>
+public sealed record DiscoveredCourse(
+    string CourseId,
+    string Title,
+    string FolderName,
+    string? CourseCode = null,
+    string? SectionCode = null,
+    string? TermSuffix = null,
+    string? CourseUrl = null,
+    CourseOrigin Origin = CourseOrigin.Synced
+);
 
 public sealed class BasinCourseEntry
 {
     public string? CourseId { get; set; }
+    public CourseOrigin Origin { get; set; } = CourseOrigin.LocalSubject;
     public string Title { get; set; } = string.Empty;
     public string FolderName { get; set; } = string.Empty;
     public string Alias { get; set; } = string.Empty;
@@ -22,6 +68,12 @@ public sealed class BasinCourseEntry
     public string? TermSuffix { get; set; }
     public string? CourseUrl { get; set; }
     public bool IsArchived { get; set; }
+
+    public bool IsSyncableCourse =>
+        !IsArchived
+        && Origin == CourseOrigin.Synced
+        && !string.IsNullOrWhiteSpace(CourseId)
+        && !CourseId.StartsWith("local-", StringComparison.OrdinalIgnoreCase);
 }
 
 public static class CourseAliasGenerator

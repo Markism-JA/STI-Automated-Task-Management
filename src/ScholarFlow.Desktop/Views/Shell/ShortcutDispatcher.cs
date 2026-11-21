@@ -287,7 +287,7 @@ public static class ShortcutDispatcher
 
             case Key.P
                 when e.KeyModifiers.HasFlag(KeyModifiers.Shift)
-                    && vm.Settings.EnableElmsIntegration:
+                    && vm.EnforcesActiveSingleSession:
                 e.Handled = true;
                 vm.TogglePollingPaused();
                 break;

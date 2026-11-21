@@ -6,7 +6,6 @@ using ScholarFlow.Core.Sync;
 using ScholarFlow.Core.Tasks;
 using ScholarFlow.Desktop.Services;
 using ScholarFlow.Desktop.Theme;
-using ScholarFlow.Elms.Client;
 
 namespace ScholarFlow.Desktop.ViewModels;
 
@@ -68,9 +67,7 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     private readonly TaskLifecycleService _lifecycleService = new();
     private readonly LegacyImporter _legacyImporter;
     private readonly MasterPdfService _pdfService = new();
-    private readonly StiElmsClient _elmsClient = new();
-    private readonly ElmsBasinSyncService _syncService;
-    private readonly ElmsPollingService _pollingService;
+    public MultiBasinSyncCoordinator SyncCoordinator { get; }
     private readonly DesktopNotificationService _notificationService = new();
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
@@ -79,6 +76,17 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public AppSettings Settings { get; private set; } = new();
     public string BasinRoot { get; private set; } = string.Empty;
     public BasinConfig BasinConfig { get; private set; } = new();
+    public IBasinSyncProvider ActiveSyncProvider => SyncCoordinator.ResolveProvider(BasinConfig);
+    public ProviderCapabilities ActiveCapabilities => ActiveSyncProvider.Capabilities;
+    public string ActiveProviderName => ActiveSyncProvider.DisplayName;
+    public bool SupportsActiveBasinSync => ActiveCapabilities.SupportsSync;
+    public bool SupportsActiveFastPoll => ActiveCapabilities.SupportsFastPoll;
+    public bool SupportsActivePerCourseSync => ActiveCapabilities.SupportsPerCourseSync;
+    public bool SupportsActiveSingleItemRefresh => ActiveCapabilities.SupportsSingleItemRefresh;
+    public bool EnforcesActiveSingleSession => ActiveCapabilities.EnforcesSingleConcurrentSession;
+    public IReadOnlyList<string> ActiveTerms => BasinConfig.Terms;
+    public IReadOnlyList<IBasinSyncProvider> AvailableSyncProviders =>
+        SyncCoordinator.AvailableProviders;
 
     public WorkspaceTabMode ActiveMode { get; private set; } = WorkspaceTabMode.TaskList;
     public SmartViewKind ActiveSmartView { get; private set; } = SmartViewKind.Today;
@@ -122,8 +130,19 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
             "Documents",
             "ScholarFlow-Basin"
         );
+    public string OnboardingProviderId { get; set; } = SyncProviderIds.StiElms;
+    public string OnboardingAccountKey { get; set; } = "default";
+    public Dictionary<string, string> OnboardingProviderSettings { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
 
-    public bool IsSyncing { get; private set; }
+    private bool _isLocalSyncOperation;
+    public bool IsSyncing
+    {
+        get =>
+            _isLocalSyncOperation
+            || (SyncCoordinator.GetBasinState(BasinRoot)?.IsSyncing ?? false);
+        private set => _isLocalSyncOperation = value;
+    }
     public string StatusText { get; private set; } = "Ready";
 
     public List<AppNotification> Notifications { get; } = [];
@@ -137,16 +156,21 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public event EventHandler? StateChanged;
     public event EventHandler<UiChangeKind>? UiChanged;
 
-    public MainWindowViewModel()
+    public MainWindowViewModel(
+        Func<BasinService, MasterPdfService, IEnumerable<IBasinSyncProvider>>? providerFactory = null
+    )
     {
         _legacyImporter = new LegacyImporter(_basinService);
-        _syncService = new ElmsBasinSyncService(
-            _elmsClient,
-            _basinService,
-            pdfService: _pdfService
+        var providers = providerFactory is not null
+            ? providerFactory(_basinService, _pdfService)
+            : [];
+        SyncCoordinator = new MultiBasinSyncCoordinator(
+            new BasinSyncProviderRegistry(providers),
+            _basinService
         );
-        _pollingService = new ElmsPollingService(_syncService);
-        _pollingService.NotificationEmitted += OnPollingNotification;
+        SyncCoordinator.NotificationEmitted += OnCoordinatorNotification;
+        SyncCoordinator.StateChanged += (_, _) =>
+            Dispatcher.UIThread.Post(() => NotifyStateChanged(UiChangeKind.StatusOnly));
         QuizStudio = new QuizStudioViewModel(this);
     }
 
@@ -187,16 +211,22 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
             : Directory.Exists(defaultSchoolFiles) ? defaultSchoolFiles
             : OnboardingVaultPath;
 
+        await SyncCoordinator.RegisterKnownBasinsAsync(
+            Settings.KnownBasins,
+            globalElmsFallback: Settings.EnableElmsIntegration
+        );
+
         await OpenBasinAsync(initialBasin);
     }
 
     public async Task OpenBasinAsync(string basinPath)
     {
         _watcher?.Dispose();
-        _pollingService.Stop();
 
         BasinRoot = Path.GetFullPath(basinPath);
         BasinConfig = await _basinService.InitializeOrOpenAsync(BasinRoot);
+        if (BasinConfig.SchemaVersion < 2 && !Settings.EnableElmsIntegration)
+            BasinConfig.ProviderId = SyncProviderIds.None;
 
         // If courses.json is empty and legacy subdirectories exist, run non-destructive legacy import automatically
         var existingCourses = await _basinService.LoadCoursesAsync(BasinRoot);
@@ -236,10 +266,11 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
         _watcher.BasinChanged += (_, _) =>
             Dispatcher.UIThread.Post(async () => await ReloadBasinDataAsync());
 
-        if (Settings.EnableElmsIntegration)
-            _pollingService.Start(BasinRoot, BasinConfig);
-        else
-            _pollingService.Stop();
+        await SyncCoordinator.RegisterOrUpdateBasinAsync(
+            BasinRoot,
+            BasinConfig,
+            startLoop: BasinConfig.BackgroundSyncEnabled
+        );
     }
 
     public async Task ReloadBasinDataAsync()
@@ -297,8 +328,8 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _watcher?.Dispose();
+        SyncCoordinator.NotificationEmitted -= OnCoordinatorNotification;
         PdfReader.Dispose();
-        await _pollingService.DisposeAsync();
-        await _elmsClient.DisposeAsync();
+        await SyncCoordinator.DisposeAsync();
     }
 }

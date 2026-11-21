@@ -3,38 +3,37 @@ using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Pdf;
 using ScholarFlow.Core.Services;
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Elms.Abstractions;
 using ScholarFlow.Elms.Models;
 using ScholarFlow.Elms.Parsing;
-using ScholarFlow.Elms.Sync;
 
-namespace ScholarFlow.Core.Sync;
-
-public sealed record BasinSyncReport(
-    int CoursesSynced,
-    int FilesDownloaded,
-    int FilesUpdated,
-    int FilesRelocated,
-    int TasksUpserted,
-    int MasterPdfsCompiled,
-    IReadOnlyList<AppNotification> Notifications,
-    IReadOnlyList<string> Errors
-);
+namespace ScholarFlow.Elms.Sync;
 
 /// <summary>
-/// Orchestrates ScholarFlow.Elms scraping/downloading into a Basin, upserts LMS assignments into tasks.md,
+/// Orchestrates STI eLMS scraping and downloading into a Basin, upserts assignments into tasks.md,
 /// diffs PollState to emit AppNotifications, and triggers incremental MasterPdfService compilation.
 /// </summary>
 public sealed class ElmsBasinSyncService(
-    IElmsClient elmsClient,
+    Func<BasinConfig, IElmsClient> clientResolver,
     BasinService? basinService = null,
     ISyncResolver? syncResolver = null,
     MasterPdfService? pdfService = null,
     ILogger<ElmsBasinSyncService>? logger = null
 )
 {
-    private readonly IElmsClient _elmsClient =
-        elmsClient ?? throw new ArgumentNullException(nameof(elmsClient));
+    public ElmsBasinSyncService(
+        IElmsClient elmsClient,
+        BasinService? basinService = null,
+        ISyncResolver? syncResolver = null,
+        MasterPdfService? pdfService = null,
+        ILogger<ElmsBasinSyncService>? logger = null
+    )
+        : this(_ => elmsClient ?? throw new ArgumentNullException(nameof(elmsClient)), basinService, syncResolver, pdfService, logger)
+    { }
+
+    private readonly Func<BasinConfig, IElmsClient> _clientResolver =
+        clientResolver ?? throw new ArgumentNullException(nameof(clientResolver));
     private readonly BasinService _basinService = basinService ?? new BasinService();
     private readonly ISyncResolver _syncResolver = syncResolver ?? new SyncResolver();
     private readonly MasterPdfService _pdfService = pdfService ?? new MasterPdfService();
@@ -53,12 +52,10 @@ public sealed class ElmsBasinSyncService(
         var errors = new List<string>();
 
         var config = await _basinService.InitializeOrOpenAsync(basinRoot, ct: ct);
-        await _elmsClient.EnsureConnectedAsync(
-            new AuthOptions
-            {
-                BaseUrl = config.ElmsBaseUrl,
-                AllowInteractiveBrowser = allowInteractiveAuth,
-            },
+        var client = _clientResolver(config);
+        var baseUrl = config.GetProviderSetting("baseUrl", "https://elms.sti.edu");
+        await client.EnsureConnectedAsync(
+            ElmsSessionStore.BuildAuthOptions(config.AccountKey, baseUrl, allowInteractiveAuth),
             ct
         );
 
@@ -66,8 +63,24 @@ public sealed class ElmsBasinSyncService(
             CourseFilterStore.GetDefaultFilterPath(basinRoot),
             ct
         );
-        var discoveredCourses = await _elmsClient.GetEnrolledCoursesAsync(ignoreFilter, ct: ct);
-        var basinCourses = await _basinService.UpsertCoursesAsync(basinRoot, discoveredCourses, ct);
+        var discoveredCourses = (await client.GetEnrolledCoursesAsync(ignoreFilter, ct: ct))
+            .Where(c => !config.ExcludedCourseIds.Contains(c.CourseId, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var basinCourses = await _basinService.UpsertCoursesAsync(
+            basinRoot,
+            discoveredCourses.Select(c => new DiscoveredCourse(
+                c.CourseId,
+                c.Title,
+                c.SanitizedFolderName,
+                c.CourseCode,
+                c.TermOrSection,
+                c.TermSuffix,
+                c.CourseUrl,
+                CourseOrigin.Synced
+            )),
+            ct
+        );
 
         var statePath = LocalSyncStateStore.GetDefaultStatePath(basinRoot);
         var syncState = await LocalSyncStateStore.LoadAsync(statePath, ct);
@@ -100,6 +113,7 @@ public sealed class ElmsBasinSyncService(
 
             var elmsCourse = rawElmsCourse with { SanitizedFolderName = courseEntry.FolderName };
             var (d, u, r, t, p) = await SyncSingleCourseInternalAsync(
+                client,
                 basinRoot,
                 config,
                 courseEntry,
@@ -138,10 +152,6 @@ public sealed class ElmsBasinSyncService(
         );
     }
 
-    /// <summary>
-    /// Selectively syncs a single registered course (handouts, assignments, and Master PDF if stale)
-    /// without hitting every other enrolled course on eLMS.
-    /// </summary>
     public async Task<BasinSyncReport> SyncCourseAsync(
         string basinRoot,
         string courseFolder,
@@ -165,14 +175,17 @@ public sealed class ElmsBasinSyncService(
             return new BasinSyncReport(0, 0, 0, 0, 0, 0, notifications, errors);
         }
 
-        await _elmsClient.EnsureConnectedAsync(
-            new AuthOptions { BaseUrl = config.ElmsBaseUrl },
+        var client = _clientResolver(config);
+        var baseUrl = config.GetProviderSetting("baseUrl", "https://elms.sti.edu");
+        await client.EnsureConnectedAsync(
+            ElmsSessionStore.BuildAuthOptions(config.AccountKey, baseUrl, allowInteractiveBrowser: true),
             ct
         );
+
         var elmsCourse = new ElmsCourse(
             CourseId: courseEntry.CourseId,
             Title: courseEntry.Title,
-            CourseUrl: $"{config.ElmsBaseUrl.TrimEnd('/')}/student_class/show/{courseEntry.CourseId}",
+            CourseUrl: $"{baseUrl.TrimEnd('/')}/student_class/show/{courseEntry.CourseId}",
             SanitizedFolderName: courseEntry.FolderName,
             CourseCode: courseEntry.CourseCode
         );
@@ -182,6 +195,7 @@ public sealed class ElmsBasinSyncService(
         var pollState = await _basinService.LoadPollStateAsync(basinRoot, ct);
 
         var (d, u, r, t, p) = await SyncSingleCourseInternalAsync(
+            client,
             basinRoot,
             config,
             courseEntry,
@@ -202,9 +216,6 @@ public sealed class ElmsBasinSyncService(
         return new BasinSyncReport(1, d, u, r, t, p, notifications, errors);
     }
 
-    /// <summary>
-    /// Refreshes a single eLMS assignment/quiz task in-place (1-2 HTTP requests) without scanning any course list.
-    /// </summary>
     public async Task<bool> SyncSingleAssignmentAsync(
         string basinRoot,
         TaskItem task,
@@ -223,12 +234,15 @@ public sealed class ElmsBasinSyncService(
             return false;
 
         var courseId = courseEntry.CourseId ?? string.Empty;
-        await _elmsClient.EnsureConnectedAsync(
-            new AuthOptions { BaseUrl = config.ElmsBaseUrl },
+        var client = _clientResolver(config);
+        var baseUrl = config.GetProviderSetting("baseUrl", "https://elms.sti.edu");
+        await client.EnsureConnectedAsync(
+            ElmsSessionStore.BuildAuthOptions(config.AccountKey, baseUrl, allowInteractiveBrowser: true),
             ct
         );
-        var html = await _elmsClient.FetchAuthenticatedHtmlAsync(task.LmsUrl, ct);
-        var parsed = AssignmentParser.Parse(html, task.LmsUrl, courseId, config.ElmsBaseUrl);
+
+        var html = await client.FetchAuthenticatedHtmlAsync(task.LmsUrl, ct);
+        var parsed = AssignmentParser.Parse(html, task.LmsUrl, courseId, baseUrl);
         if (parsed is null)
             return false;
 
@@ -279,6 +293,7 @@ public sealed class ElmsBasinSyncService(
         int TasksUpserted,
         int PdfsCompiled
     )> SyncSingleCourseInternalAsync(
+        IElmsClient client,
         string basinRoot,
         BasinConfig config,
         BasinCourseEntry courseEntry,
@@ -300,12 +315,12 @@ public sealed class ElmsBasinSyncService(
             pdfsCompiled = 0;
         try
         {
-            var snapshot = await _elmsClient.GetCourseSnapshotAsync(elmsCourse, progress, ct);
+            var snapshot = await client.GetCourseSnapshotAsync(elmsCourse, progress, ct);
             var plan = _syncResolver.Resolve(snapshot, syncState, basinRoot, forceRedownload);
 
             await CourseArtifactWriter.WriteCourseArtifactsAsync(snapshot, basinRoot, ct);
 
-            var executor = new SyncExecutor(((Elms.Client.StiElmsClient)_elmsClient).HttpClient);
+            var executor = client.CreateSyncExecutor();
             var execResult = await executor.ExecuteAsync(
                 plan,
                 new SyncOptions
@@ -378,10 +393,6 @@ public sealed class ElmsBasinSyncService(
         return (downloaded, updated, relocated, tasksUpserted, pdfsCompiled);
     }
 
-    /// <summary>
-    /// Lightweight assignment-only poll across registered courses (1 HTML fetch per course)
-    /// to detect new deadlines, due-date changes, and newly posted grades.
-    /// </summary>
     public async Task<IReadOnlyList<AppNotification>> FastPollAssignmentsAsync(
         string basinRoot,
         bool allowInteractiveAuth = true,
@@ -390,17 +401,18 @@ public sealed class ElmsBasinSyncService(
     {
         var notifications = new List<AppNotification>();
         var config = await _basinService.InitializeOrOpenAsync(basinRoot, ct: ct);
-        await _elmsClient.EnsureConnectedAsync(
-            new AuthOptions
-            {
-                BaseUrl = config.ElmsBaseUrl,
-                AllowInteractiveBrowser = allowInteractiveAuth,
-            },
+        var client = _clientResolver(config);
+        var baseUrl = config.GetProviderSetting("baseUrl", "https://elms.sti.edu");
+        await client.EnsureConnectedAsync(
+            ElmsSessionStore.BuildAuthOptions(config.AccountKey, baseUrl, allowInteractiveAuth),
             ct
         );
 
         var courses = (await _basinService.LoadCoursesAsync(basinRoot, ct))
-            .Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
+            .Where(c =>
+                c.IsSyncableCourse
+                && !config.ExcludedCourseIds.Contains(c.CourseId!, StringComparer.OrdinalIgnoreCase)
+            )
             .ToList();
 
         var pollState = await _basinService.LoadPollStateAsync(basinRoot, ct);
@@ -410,7 +422,7 @@ public sealed class ElmsBasinSyncService(
             ct.ThrowIfCancellationRequested();
             try
             {
-                var assignments = await _elmsClient.GetAssignmentsAsync(course.CourseId!, ct);
+                var assignments = await client.GetAssignmentsAsync(course.CourseId!, ct);
                 await UpsertCourseAssignmentsAsync(
                     basinRoot,
                     course,
@@ -431,7 +443,7 @@ public sealed class ElmsBasinSyncService(
         return notifications;
     }
 
-    public static async Task<int> UpsertCourseAssignmentsAsync(
+    public static Task<int> UpsertCourseAssignmentsAsync(
         string basinRoot,
         BasinCourseEntry course,
         IReadOnlyList<ElmsAssignment> assignments,
@@ -441,238 +453,54 @@ public sealed class ElmsBasinSyncService(
         IReadOnlyList<ElmsLesson>? lessons = null
     )
     {
-        var tasksPath = BasinService.GetCourseTasksPath(basinRoot, course.FolderName);
-        var existingTasks = await MarkdownTaskCodec.LoadFileAsync(tasksPath, course.FolderName, ct);
-        var courseTermMap = BasinService.LoadCourseTermMap(basinRoot, course.FolderName);
-        var courseDir = Path.Combine(basinRoot, course.FolderName);
-        var syllabusPdfPath = SyllabusTermParser.FindSyllabusPdfPath(courseDir);
-
-        var incomingTasks = new List<TaskItem>();
-        foreach (var a in assignments)
-        {
-            var isDone = a.Status is AssignmentStatus.Submitted or AssignmentStatus.Graded;
-            var noteSubfolder = isDone ? "completed" : "ongoing";
-            var noteFileName = FilenameSanitizer.SanitizeFileName(a.Title, ".md");
-            var assignmentStem = FilenameSanitizer.SanitizeFileName(a.Title, "").TrimEnd('.');
-
-            var instructionFiles = a
-                .Attachments.Where(r => r.Kind == ElmsResourceKind.AssignmentAttachment)
-                .Select(r => r.RelativeTargetPath)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (lessons is not null && !string.IsNullOrWhiteSpace(assignmentStem))
-            {
-                foreach (var lesson in lessons)
+        var syncedAssignments = assignments
+            .Select(a => new SyncedAssignment(
+                ExternalId: a.LmsId,
+                CourseId: a.CourseId,
+                Title: a.Title,
+                Url: a.Url,
+                DueDate: a.DueDate,
+                Status: a.Status switch
                 {
-                    bool lessonMatches =
-                        lesson.Title.Equals(a.Title, StringComparison.OrdinalIgnoreCase)
-                        || lesson.SanitizedFolderName.Equals(
-                            assignmentStem,
-                            StringComparison.OrdinalIgnoreCase
-                        );
-
-                    foreach (var res in lesson.Resources)
-                    {
-                        var resStem = Path.GetFileNameWithoutExtension(res.RelativeTargetPath)
-                            .TrimEnd('_');
-                        if (
-                            lessonMatches
-                            || resStem.Equals(assignmentStem, StringComparison.OrdinalIgnoreCase)
-                        )
-                        {
-                            if (
-                                !instructionFiles.Contains(
-                                    res.RelativeTargetPath,
-                                    StringComparer.OrdinalIgnoreCase
-                                )
-                            )
-                                instructionFiles.Add(res.RelativeTargetPath);
-                        }
-                    }
-                }
-            }
-
-            var submissionFiles = a
-                .SubmissionInfo.SubmittedFiles.Where(r =>
-                    r.Kind == ElmsResourceKind.SubmittedArtifact
-                )
-                .Select(r => r.RelativeTargetPath)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var linkedFiles = new List<string>();
-
-            var resolvedTerm = BasinService.ResolveAcademicTerm(
-                courseTermMap,
-                a.TermHeader,
-                a.Title,
-                a.ParentModuleTitle
-            );
-            if (resolvedTerm is null && syllabusPdfPath is not null)
-            {
-                resolvedTerm = SyllabusTermParser.InferTaskTermFromSyllabus(
-                    syllabusPdfPath,
-                    courseDir,
-                    a.Title,
-                    a.ParentModuleTitle
-                );
-            }
-
-            var inferredTags = BasinService.InferAcademicTags(
-                a.Title,
-                resolvedTerm,
-                a.Kind.ToString()
-            );
-
-            var priority = ComputeInitialPriority(a);
-            var task = new TaskItem
-            {
-                Id = $"lms-{a.LmsId}",
-                Title = a.Title,
-                IsCompleted = isDone,
-                DueDate = a.DueDate.HasValue
-                    ? DateOnly.FromDateTime(a.DueDate.Value.LocalDateTime)
-                    : null,
-                DueTime = a.DueDate.HasValue
-                    ? TimeOnly.FromDateTime(a.DueDate.Value.LocalDateTime)
-                    : null,
-                CompletedDate = isDone ? DateOnly.FromDateTime(DateTime.Today) : null,
-                Priority = priority,
-                CourseFolder = course.FolderName,
-                CourseAlias = course.Alias,
-                Term = resolvedTerm,
-                Section = a.ParentModuleTitle,
-                LmsKind = a.Kind != ElmsAssignmentKind.Unknown ? a.Kind.ToString() : null,
-                WeightPercent = a.WeightPercent,
-                Labels = inferredTags,
-                InstructionFiles = instructionFiles,
-                SubmissionFiles = submissionFiles,
-                LinkedFiles = linkedFiles,
-                NotePath = $"{noteSubfolder}/{noteFileName}",
-                LmsId = a.LmsId,
-                LmsStatus = a.Status.ToString(),
-                LmsScore = a.Score,
-                LmsUrl = a.Url,
-                SourceMarkdownPath = tasksPath,
-            };
-            incomingTasks.Add(task);
-
-            DiffPollSnapshot(course, a, pollState, notifications);
-        }
-
-        var merged = MarkdownTaskCodec.MergeLmsTasks(existingTasks, incomingTasks);
-        foreach (var t in merged)
-        {
-            BasinService.EnrichTaskMetadataAndFiles(basinRoot, course, t, courseTermMap);
-        }
-        await MarkdownTaskCodec.SaveDocumentAsync(tasksPath, merged, course.Title, ct: ct);
-        return incomingTasks.Count;
-    }
-
-    private static void DiffPollSnapshot(
-        BasinCourseEntry course,
-        ElmsAssignment assignment,
-        PollState pollState,
-        List<AppNotification> notifications
-    )
-    {
-        if (!pollState.AssignmentsByLmsId.TryGetValue(assignment.LmsId, out var prev))
-        {
-            if (assignment.Status == AssignmentStatus.Pending)
-            {
-                notifications.Add(
-                    new AppNotification(
-                        NotificationKind.NewAssignment,
-                        $"New Assignment: {assignment.Title}",
-                        $"[{course.Title}] Due {assignment.DueDate?.ToString("MMM d, h:mm tt") ?? "TBD"}",
-                        course.FolderName,
-                        assignment.Url
+                    AssignmentStatus.Submitted => SyncedAssignmentStatus.Submitted,
+                    AssignmentStatus.Graded => SyncedAssignmentStatus.Graded,
+                    AssignmentStatus.Missing => SyncedAssignmentStatus.Missing,
+                    _ => SyncedAssignmentStatus.Pending,
+                },
+                Score: a.Score,
+                TermHeader: a.TermHeader,
+                ParentModuleTitle: a.ParentModuleTitle,
+                Kind: a.Kind != ElmsAssignmentKind.Unknown ? a.Kind.ToString() : null,
+                WeightPercent: a.WeightPercent,
+                InstructionFiles: a
+                    .Attachments.Where(r => r.Kind == ElmsResourceKind.AssignmentAttachment)
+                    .Select(r => r.RelativeTargetPath)
+                    .ToList(),
+                SubmissionFiles: a
+                    .SubmissionInfo.SubmittedFiles.Where(r =>
+                        r.Kind == ElmsResourceKind.SubmittedArtifact
                     )
-                );
-            }
-        }
-        else
-        {
-            if (prev.DueDate != assignment.DueDate && assignment.DueDate.HasValue)
-            {
-                notifications.Add(
-                    new AppNotification(
-                        NotificationKind.DueDateChanged,
-                        $"Due Date Updated: {assignment.Title}",
-                        $"[{course.Title}] New due date: {assignment.DueDate.Value:MMM d, h:mm tt}",
-                        course.FolderName,
-                        assignment.Url
-                    )
-                );
-            }
+                    .Select(r => r.RelativeTargetPath)
+                    .ToList()
+            ))
+            .ToList();
 
-            if (
-                assignment.Status == AssignmentStatus.Graded
-                && !string.Equals(
-                    prev.Status,
-                    AssignmentStatus.Graded.ToString(),
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                notifications.Add(
-                    new AppNotification(
-                        NotificationKind.GradePosted,
-                        $"Grade Posted: {assignment.Title}",
-                        $"[{course.Title}] Score: {assignment.Score ?? "Graded"}",
-                        course.FolderName,
-                        assignment.Url
-                    )
-                );
-            }
-        }
+        var syncedLessons = lessons
+            ?.Select(l => new SyncedLessonInfo(
+                l.Title,
+                l.SanitizedFolderName,
+                l.Resources.Select(r => new SyncedLessonResource(r.RelativeTargetPath)).ToList()
+            ))
+            .ToList();
 
-        if (assignment.Status == AssignmentStatus.Pending && assignment.DueDate.HasValue)
-        {
-            var remaining = assignment.DueDate.Value - DateTimeOffset.Now;
-            if (remaining > TimeSpan.Zero && remaining <= TimeSpan.FromHours(24))
-            {
-                notifications.Add(
-                    new AppNotification(
-                        NotificationKind.DueSoon,
-                        $"Due Soon: {assignment.Title}",
-                        $"[{course.Title}] Due in {(int)remaining.TotalHours}h ({assignment.DueDate.Value:MMM d, h:mm tt})",
-                        course.FolderName,
-                        assignment.Url
-                    )
-                );
-            }
-        }
-
-        pollState.AssignmentsByLmsId[assignment.LmsId] = new PollAssignmentSnapshot
-        {
-            LmsId = assignment.LmsId,
-            CourseId = assignment.CourseId,
-            Title = assignment.Title,
-            Status = assignment.Status.ToString(),
-            Score = assignment.Score,
-            DueDate = assignment.DueDate,
-            Url = assignment.Url,
-        };
-    }
-
-    private static TaskPriority ComputeInitialPriority(ElmsAssignment a)
-    {
-        if (a.Status == AssignmentStatus.Missing)
-            return TaskPriority.P1;
-
-        if (a.DueDate.HasValue)
-        {
-            var days = (a.DueDate.Value.Date - DateTime.Today).TotalDays;
-            if (days <= 2)
-                return TaskPriority.P1;
-            if (days <= 7)
-                return TaskPriority.P2;
-            if (days <= 14)
-                return TaskPriority.P3;
-        }
-
-        return TaskPriority.P4;
+        return BasinTaskSynchronizer.UpsertCourseAssignmentsAsync(
+            basinRoot,
+            course,
+            syncedAssignments,
+            pollState,
+            notifications,
+            ct,
+            syncedLessons
+        );
     }
 }

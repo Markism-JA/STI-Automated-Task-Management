@@ -22,7 +22,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScholarFlow.Core\ScholarFlow.Core.csproj" />
-    <ProjectReference Include="..\..\src\ScholarFlow.Elms\ScholarFlow.Elms.csproj" />
   </ItemGroup>
 
 </Project>

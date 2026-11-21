@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using ScholarFlow.Core.Markdown;
 using ScholarFlow.Core.Models;
 using ScholarFlow.Core.Tasks;
-using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Core.Services;
 
@@ -89,6 +88,16 @@ public sealed partial class BasinService
 
         await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
         return config;
+    }
+
+    public Task SaveBasinConfigAsync(
+        string basinRoot,
+        BasinConfig config,
+        CancellationToken ct = default
+    )
+    {
+        Directory.CreateDirectory(GetMetaDir(basinRoot));
+        return SaveJsonAsync(GetBasinConfigPath(basinRoot), config, ct);
     }
 
     [SuppressMessage(
@@ -328,11 +337,11 @@ public sealed partial class BasinService
     }
 
     /// <summary>
-    /// Registers or updates discovered eLMS courses in courses.json, generating unique short aliases (#sqa, #os).
+    /// Registers or updates discovered remote courses in courses.json, generating unique short aliases (#sqa, #os).
     /// </summary>
     public async Task<List<BasinCourseEntry>> UpsertCoursesAsync(
         string basinRoot,
-        IEnumerable<ElmsCourse> discoveredCourses,
+        IEnumerable<DiscoveredCourse> discoveredCourses,
         CancellationToken ct = default
     )
     {
@@ -346,16 +355,17 @@ public sealed partial class BasinService
         {
             var match = existing.FirstOrDefault(c =>
                 (!string.IsNullOrWhiteSpace(c.CourseId) && c.CourseId == elms.CourseId)
-                || c.FolderName.Equals(elms.SanitizedFolderName, StringComparison.OrdinalIgnoreCase)
-                || IsSameCourseFuzzy(c.FolderName, elms.SanitizedFolderName)
+                || c.FolderName.Equals(elms.FolderName, StringComparison.OrdinalIgnoreCase)
+                || IsSameCourseFuzzy(c.FolderName, elms.FolderName)
                 || IsSameCourseFuzzy(c.Title, elms.Title)
             );
 
             if (match is not null)
             {
                 match.CourseId = elms.CourseId;
+                match.Origin = elms.Origin;
                 match.CourseCode = elms.CourseCode ?? match.CourseCode;
-                match.SectionCode = elms.TermOrSection ?? match.SectionCode;
+                match.SectionCode = elms.SectionCode ?? match.SectionCode;
                 match.TermSuffix = elms.TermSuffix ?? match.TermSuffix;
                 match.CourseUrl = elms.CourseUrl;
                 if (string.IsNullOrWhiteSpace(match.Alias))
@@ -371,11 +381,12 @@ public sealed partial class BasinService
                 match = new BasinCourseEntry
                 {
                     CourseId = elms.CourseId,
+                    Origin = elms.Origin,
                     Title = elms.Title,
-                    FolderName = elms.SanitizedFolderName,
+                    FolderName = elms.FolderName,
                     Alias = alias,
                     CourseCode = elms.CourseCode,
-                    SectionCode = elms.TermOrSection,
+                    SectionCode = elms.SectionCode,
                     TermSuffix = elms.TermSuffix,
                     CourseUrl = elms.CourseUrl,
                 };
@@ -411,8 +422,7 @@ public sealed partial class BasinService
             .Where(a => !string.IsNullOrWhiteSpace(a))
             .ToList();
 
-        var sanitizedFolder = Elms
-            .Parsing.FilenameSanitizer.SanitizeFileName(title.Trim(), "")
+        var sanitizedFolder = FilenameSanitizer.SanitizeFileName(title.Trim(), "")
             .TrimEnd('.');
         if (string.IsNullOrWhiteSpace(sanitizedFolder))
             sanitizedFolder = $"Course_{Guid.NewGuid().ToString("N")[..6]}";
@@ -690,7 +700,7 @@ public sealed partial class BasinService
         if (!Directory.Exists(courseDir))
             return changed;
 
-        var taskStem = Elms.Parsing.FilenameSanitizer.SanitizeFileName(task.Title, "").TrimEnd('.');
+        var taskStem = FilenameSanitizer.SanitizeFileName(task.Title, "").TrimEnd('.');
         if (string.IsNullOrWhiteSpace(taskStem))
             return changed;
 

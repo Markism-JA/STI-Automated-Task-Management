@@ -334,12 +334,14 @@ public static partial class MarkdownTaskCodec
             return;
         }
 
+        var emittedTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var term in OrderedTerms)
         {
             var termTasks = items
                 .Where(t =>
                     string.Equals(
-                        TaskItem.NormalizeTerm(t.Term),
+                        TaskItem.NormalizeTerm(t.Term) ?? t.Term?.Trim(),
                         term,
                         StringComparison.OrdinalIgnoreCase
                     )
@@ -348,6 +350,7 @@ public static partial class MarkdownTaskCodec
             if (termTasks.Count == 0)
                 continue;
 
+            emittedTerms.Add(term);
             sb.AppendLine($"### {term}");
             sb.AppendLine();
             foreach (var t in termTasks)
@@ -355,8 +358,37 @@ public static partial class MarkdownTaskCodec
             sb.AppendLine();
         }
 
+        var customTerms = items
+            .Select(t => TaskItem.NormalizeTerm(t.Term) ?? t.Term?.Trim())
+            .Where(t => !string.IsNullOrWhiteSpace(t) && !emittedTerms.Contains(t!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
+
+        foreach (var customTerm in customTerms)
+        {
+            var termTasks = items
+                .Where(t =>
+                    string.Equals(
+                        TaskItem.NormalizeTerm(t.Term) ?? t.Term?.Trim(),
+                        customTerm,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                .ToList();
+            if (termTasks.Count == 0)
+                continue;
+
+            emittedTerms.Add(customTerm);
+            sb.AppendLine($"### {customTerm}");
+            sb.AppendLine();
+            foreach (var t in termTasks)
+                sb.AppendLine(SerializeTask(t));
+            sb.AppendLine();
+        }
+
         var uncategorized = items
-            .Where(t => string.IsNullOrWhiteSpace(TaskItem.NormalizeTerm(t.Term)))
+            .Where(t => string.IsNullOrWhiteSpace(TaskItem.NormalizeTerm(t.Term) ?? t.Term?.Trim()))
             .ToList();
         if (uncategorized.Count > 0)
         {

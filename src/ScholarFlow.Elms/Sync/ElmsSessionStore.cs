@@ -1,11 +1,12 @@
 using System.Text.Json;
+using ScholarFlow.Core.Services;
 using ScholarFlow.Elms.Models;
 
 namespace ScholarFlow.Elms.Sync;
 
 /// <summary>
-/// Persists <see cref="ElmsSession"/> cookies to disk so subsequent runs skip launching Playwright
-/// whenever the cached session is still valid.
+/// Persists <see cref="ElmsSession"/> cookies and browser profiles on disk, scoped by optional
+/// <c>accountKey</c> so multi-account STI eLMS basins remain isolated.
 /// </summary>
 public static class ElmsSessionStore
 {
@@ -15,12 +16,50 @@ public static class ElmsSessionStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public static string GetDefaultSessionPath() =>
+    private static string AppLocalDir =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "scholarflow",
-            "session.json"
+            "scholarflow"
         );
+
+    public static string GetDefaultSessionPath() => GetSessionPathForAccount(null);
+
+    public static string GetSessionPathForAccount(string? accountKey)
+    {
+        if (
+            string.IsNullOrWhiteSpace(accountKey)
+            || string.Equals(accountKey.Trim(), "default", StringComparison.OrdinalIgnoreCase)
+        )
+            return Path.Combine(AppLocalDir, "session.json");
+
+        var safe = FilenameSanitizer.SanitizeFolderName(accountKey, "account");
+        return Path.Combine(AppLocalDir, "sessions", safe, "session.json");
+    }
+
+    public static string GetBrowserProfileForAccount(string? accountKey)
+    {
+        if (
+            string.IsNullOrWhiteSpace(accountKey)
+            || string.Equals(accountKey.Trim(), "default", StringComparison.OrdinalIgnoreCase)
+        )
+            return Path.Combine(AppLocalDir, "browser_session");
+
+        var safe = FilenameSanitizer.SanitizeFolderName(accountKey, "account");
+        return Path.Combine(AppLocalDir, "sessions", safe, "browser_session");
+    }
+
+    public static AuthOptions BuildAuthOptions(
+        string? accountKey,
+        string? baseUrl = null,
+        bool allowInteractiveBrowser = true
+    ) =>
+        new()
+        {
+            BaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "https://elms.sti.edu" : baseUrl.Trim(),
+            SessionFilePath = GetSessionPathForAccount(accountKey),
+            BrowserProfileDirectory = GetBrowserProfileForAccount(accountKey),
+            AllowInteractiveBrowser = allowInteractiveBrowser,
+        };
 
     public static async Task<ElmsSession?> LoadAsync(
         string? path = null,

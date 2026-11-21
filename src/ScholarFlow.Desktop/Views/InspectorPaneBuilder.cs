@@ -22,8 +22,6 @@ namespace ScholarFlow.Desktop.Views;
 /// </summary>
 public static class InspectorPaneBuilder
 {
-    private static readonly string[] AcademicTerms = ["Prelims", "Midterms", "Prefinals", "Finals"];
-
     public static Control Build(MainWindowViewModel vm)
     {
         var task = vm.SelectedTask;
@@ -313,27 +311,30 @@ public static class InspectorPaneBuilder
 
         stack.Children.Add(timeRow);
 
-        // Academic Term Selector (Prelims / Midterms / Prefinals / Finals)
-        stack.Children.Add(UiBuilder.SectionHeader("Academic Term"));
-        var termRow = new WrapPanel { Orientation = Orientation.Horizontal };
-        var currentTerm = TaskItem.NormalizeTerm(task.Term);
-        foreach (var termName in AcademicTerms)
+        // Dynamic Academic Term Selector (from BasinConfig.Terms)
+        if (vm.ActiveTerms.Count > 0)
         {
-            var isCurrentTerm = string.Equals(
-                currentTerm,
-                termName,
-                StringComparison.OrdinalIgnoreCase
-            );
-            var termBtn = UiBuilder.GhostButton(
-                termName,
-                MaterialIconKind.SchoolOutline,
-                async () => await vm.SetTaskTermAsync(task, isCurrentTerm ? null : termName),
-                isActive: isCurrentTerm
-            );
-            termBtn.Margin = new Thickness(0, 0, 4, 4);
-            termRow.Children.Add(termBtn);
+            stack.Children.Add(UiBuilder.SectionHeader("Academic Term"));
+            var termRow = new WrapPanel { Orientation = Orientation.Horizontal };
+            var currentTerm = TaskItem.NormalizeTerm(task.Term) ?? task.Term?.Trim();
+            foreach (var termName in vm.ActiveTerms)
+            {
+                var isCurrentTerm = string.Equals(
+                    currentTerm,
+                    termName,
+                    StringComparison.OrdinalIgnoreCase
+                );
+                var termBtn = UiBuilder.GhostButton(
+                    termName,
+                    MaterialIconKind.SchoolOutline,
+                    async () => await vm.SetTaskTermAsync(task, isCurrentTerm ? null : termName),
+                    isActive: isCurrentTerm
+                );
+                termBtn.Margin = new Thickness(0, 0, 4, 4);
+                termRow.Children.Add(termBtn);
+            }
+            stack.Children.Add(termRow);
         }
-        stack.Children.Add(termRow);
 
         // Priority & Difficulty Compact Selectors
         stack.Children.Add(UiBuilder.SectionHeader("Priority & Difficulty"));
@@ -838,7 +839,7 @@ public static class InspectorPaneBuilder
                     new TextBlock
                     {
                         Text = !string.IsNullOrWhiteSpace(task.LmsId)
-                            ? $"Submission & eLMS #{task.LmsId}"
+                            ? $"Submission & {vm.ActiveProviderName} #{task.LmsId}"
                             : "Submission & Deliverables",
                         FontSize = 12,
                         FontWeight = FontWeight.SemiBold,
@@ -902,10 +903,10 @@ public static class InspectorPaneBuilder
 
         if (!string.IsNullOrWhiteSpace(task.LmsUrl) || !string.IsNullOrWhiteSpace(task.LmsId))
         {
-            if (vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(task.LmsUrl))
+            if (vm.SupportsActiveSingleItemRefresh && !string.IsNullOrWhiteSpace(task.LmsUrl))
             {
                 var refreshElmsBtn = UiBuilder.GhostButton(
-                    "Refresh from eLMS",
+                    $"Refresh from {vm.ActiveProviderName}",
                     MaterialIconKind.Refresh,
                     async () => await vm.RefreshTaskFromElmsAsync(task)
                 );
@@ -914,7 +915,7 @@ public static class InspectorPaneBuilder
             }
 
             var elmsBtn = UiBuilder.ActionButton(
-                "Submit in eLMS (O)",
+                $"Open in {vm.ActiveProviderName} (O)",
                 MaterialIconKind.OpenInApp,
                 async () => await vm.OpenTaskInElmsAppAsync(task),
                 isPrimary: true

@@ -106,10 +106,10 @@ public static class CourseWorkspaceViewBuilder
         addBtn.Margin = new Thickness(0, 0, 6, 6);
         actionWrap.Children.Add(addBtn);
 
-        if (vm.Settings.EnableElmsIntegration && !string.IsNullOrWhiteSpace(course.CourseId))
+        if (vm.SupportsActivePerCourseSync && course.IsSyncableCourse)
         {
             var syncCourseBtn = UiBuilder.GhostButton(
-                "Sync Course",
+                $"Sync from {vm.ActiveProviderName}",
                 MaterialIconKind.CloudSyncOutline,
                 async () => await vm.RunCourseSyncAsync(course)
             );
@@ -184,13 +184,9 @@ public static class CourseWorkspaceViewBuilder
         if (!string.IsNullOrWhiteSpace(course.CourseUrl))
         {
             var elmsBtn = UiBuilder.GhostButton(
-                "Open in eLMS",
+                $"Open in {vm.ActiveSyncProvider.DisplayName}",
                 MaterialIconKind.OpenInApp,
-                async () =>
-                    await ExternalFileLauncher.OpenInElmsAppAndWatchAsync(
-                        course.CourseUrl,
-                        () => vm.RunFastPollAsync()
-                    )
+                async () => await vm.OpenUrlInProviderAppAsync(course.CourseUrl)
             );
             elmsBtn.Margin = new Thickness(0, 0, 6, 6);
             actionWrap.Children.Add(elmsBtn);

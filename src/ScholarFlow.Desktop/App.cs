@@ -8,9 +8,11 @@ using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using Material.Icons.Avalonia;
 using ScholarFlow.Core.Models;
+using ScholarFlow.Core.Sync;
 using ScholarFlow.Desktop.Theme;
 using ScholarFlow.Desktop.ViewModels;
 using ScholarFlow.Desktop.Views;
+using ScholarFlow.Elms.Sync;
 
 namespace ScholarFlow.Desktop;
 
@@ -20,12 +22,9 @@ namespace ScholarFlow.Desktop;
 public sealed class App : Application
 {
     private MainWindowViewModel? _mainVm;
+    private MainWindow? _mainWindow;
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
     private TrayIcon? _trayIcon;
-    private NativeMenuItem? _trayPauseItem;
-    private NativeMenuItem? _trayPollItem;
-    private NativeMenuItem? _trayCourseSyncItem;
-    private NativeMenuItem? _trayFullSyncItem;
-    private NativeMenuItemSeparator? _trayElmsSeparator;
     private string? _lastTrayStateSignature;
     private bool _isExplicitExit;
 
@@ -127,8 +126,12 @@ public sealed class App : Application
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            _mainVm = new MainWindowViewModel();
+            _desktop = desktop;
+            _mainVm = new MainWindowViewModel(
+                (basin, pdf) => [new StiElmsBasinSyncProvider(basin, pdf)]
+            );
             var window = new MainWindow(_mainVm);
+            _mainWindow = window;
             desktop.MainWindow = window;
 
             window.Closing += (_, e) =>
@@ -144,7 +147,11 @@ public sealed class App : Application
 
             desktop.Exit += async (_, _) =>
             {
-                _mainVm?.StateChanged -= OnMainVmStateChanged;
+                if (_mainVm is not null)
+                {
+                    _mainVm.StateChanged -= OnMainVmStateChanged;
+                    _mainVm.SyncCoordinator.StateChanged -= OnCoordinatorStateChanged;
+                }
                 _trayIcon?.Dispose();
                 if (_mainVm is not null)
                     await _mainVm.DisposeAsync();
@@ -174,45 +181,6 @@ public sealed class App : Application
                 icon = new WindowIcon(stream);
 
             var menu = new NativeMenu();
-            var showItem = new NativeMenuItem("Show ScholarFlow");
-            showItem.Click += (_, _) => RestoreMainWindow(window);
-            menu.Items.Add(showItem);
-
-            _trayElmsSeparator = new NativeMenuItemSeparator();
-            menu.Items.Add(_trayElmsSeparator);
-
-            _trayPauseItem = new NativeMenuItem("Pause Background Polling");
-            _trayPauseItem.Click += (_, _) => _mainVm?.TogglePollingPaused();
-            menu.Items.Add(_trayPauseItem);
-
-            _trayPollItem = new NativeMenuItem("Fast Poll Assignments");
-            _trayPollItem.Click += async (_, _) =>
-            {
-                if (_mainVm is not null)
-                    await _mainVm.RunFastPollAsync();
-            };
-            menu.Items.Add(_trayPollItem);
-
-            _trayCourseSyncItem = new NativeMenuItem("Sync Course") { Menu = [] };
-            menu.Items.Add(_trayCourseSyncItem);
-
-            _trayFullSyncItem = new NativeMenuItem("Full eLMS Sync (All Courses)");
-            _trayFullSyncItem.Click += async (_, _) =>
-            {
-                if (_mainVm is not null)
-                    await _mainVm.RunFullSyncAsync();
-            };
-            menu.Items.Add(_trayFullSyncItem);
-
-            menu.Items.Add(new NativeMenuItemSeparator());
-
-            var quitItem = new NativeMenuItem("Quit ScholarFlow");
-            quitItem.Click += (_, _) =>
-            {
-                _isExplicitExit = true;
-                desktop.Shutdown();
-            };
-            menu.Items.Add(quitItem);
 
             _trayIcon = new TrayIcon
             {
@@ -226,6 +194,7 @@ public sealed class App : Application
             if (_mainVm is not null)
             {
                 _mainVm.StateChanged += OnMainVmStateChanged;
+                _mainVm.SyncCoordinator.StateChanged += OnCoordinatorStateChanged;
                 UpdateTrayMenuState();
             }
         }
@@ -235,86 +204,258 @@ public sealed class App : Application
         }
     }
 
-    private void OnMainVmStateChanged(object? sender, EventArgs e)
-    {
+    private void OnMainVmStateChanged(object? sender, EventArgs e) =>
         Dispatcher.UIThread.Post(UpdateTrayMenuState);
-    }
+
+    private void OnCoordinatorStateChanged(object? sender, EventArgs e) =>
+        Dispatcher.UIThread.Post(UpdateTrayMenuState);
 
     private void UpdateTrayMenuState()
     {
-        if (_trayIcon is null || _mainVm is null)
+        if (_trayIcon is null || _mainVm is null || _desktop is null || _mainWindow is null)
             return;
 
-        bool elmsEnabled = _mainVm.Settings.EnableElmsIntegration;
-        bool isPaused = _mainVm.IsPollingPaused;
-        bool isSyncing = _mainVm.IsSyncing;
-
-        var syncableCourses = elmsEnabled
-            ? _mainVm
-                .Courses.Where(c => !c.IsArchived && !string.IsNullOrWhiteSpace(c.CourseId))
-                .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
-                .ToList()
-            : [];
-
-        string courseSig = string.Join(
-            "|",
-            syncableCourses.Select(c => $"{c.FolderName}:{c.Title}")
+        var registeredBasins = _mainVm.SyncCoordinator.GetRegisteredBasins();
+        var activeRoot = string.IsNullOrWhiteSpace(_mainVm.BasinRoot)
+            ? string.Empty
+            : Path.GetFullPath(_mainVm.BasinRoot);
+        bool hasSingleSessionProvider = registeredBasins.Any(b =>
+            b.Provider.Capabilities.EnforcesSingleConcurrentSession
         );
-        string sig = $"{elmsEnabled}:{isPaused}:{isSyncing}:{courseSig}";
+        bool isSingleSessionPaused =
+            hasSingleSessionProvider
+            && _mainVm.SyncCoordinator.IsAnySingleSessionProviderPaused();
+
+        var syncingBasins = registeredBasins.Where(b => b.IsSyncing).ToList();
+        var knownSignature = string.Join(
+            "|",
+            _mainVm.Settings.KnownBasins.Select(k => $"{k.Name}:{k.FilePath}")
+        );
+        var basinSignature = string.Join(
+            "|",
+            registeredBasins.Select(b =>
+            {
+                var excluded = new HashSet<string>(b.Config.ExcludedCourseIds, StringComparer.OrdinalIgnoreCase);
+                var courses = b.Courses
+                    .Where(c => c.IsSyncableCourse && !excluded.Contains(c.CourseId!))
+                    .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+                    .Select(c => $"{c.FolderName}:{c.Title}");
+                return $"{b.BasinRoot}:{b.Config.Name}:{b.Config.ProviderId}:{b.Config.BackgroundSyncEnabled}:{b.IsSyncing}:{b.LastStatus}:{string.Join(",", courses)}";
+            })
+        );
+        string sig = $"{activeRoot}::{isSingleSessionPaused}::{knownSignature}::{basinSignature}";
         if (sig == _lastTrayStateSignature)
             return;
         _lastTrayStateSignature = sig;
 
         _trayIcon.ToolTipText =
-            isSyncing ? "ScholarFlow — Syncing eLMS..."
-            : elmsEnabled && isPaused ? "ScholarFlow — eLMS Polling PAUSED"
+            syncingBasins.Count > 0
+                ? $"ScholarFlow — Syncing {string.Join(", ", syncingBasins.Select(b => b.Config.Name))}..."
+            : isSingleSessionPaused ? "ScholarFlow — STI eLMS Polling PAUSED"
             : "ScholarFlow — Academic Workspace";
 
-        _trayElmsSeparator?.IsVisible = elmsEnabled;
+        var menu = _trayIcon.Menu ?? new NativeMenu();
+        menu.Items.Clear();
 
-        if (_trayPauseItem is not null)
+        var showItem = new NativeMenuItem("Show ScholarFlow");
+        showItem.Click += (_, _) => RestoreMainWindow(_mainWindow);
+        menu.Items.Add(showItem);
+
+        AddSwitchBasinSubmenu(menu, registeredBasins, activeRoot);
+
+        var syncableBasins = registeredBasins
+            .Where(b => b.Provider.Capabilities.SupportsSync)
+            .ToList();
+
+        if (hasSingleSessionProvider || syncableBasins.Count > 0)
+            menu.Items.Add(new NativeMenuItemSeparator());
+
+        if (hasSingleSessionProvider)
         {
-            _trayPauseItem.IsVisible = elmsEnabled;
-            _trayPauseItem.Header = isPaused
-                ? "Resume Background Polling"
-                : "Pause Background Polling";
+            var pauseItem = new NativeMenuItem(
+                isSingleSessionPaused ? "Resume STI eLMS Polling" : "Pause STI eLMS Polling"
+            );
+            pauseItem.Click += (_, _) =>
+            {
+                if (_mainVm.SyncCoordinator.IsAnySingleSessionProviderPaused())
+                    _mainVm.SyncCoordinator.ResumeAllSingleSessionProviders();
+                else
+                    _mainVm.SyncCoordinator.PauseAllSingleSessionProviders();
+                UpdateTrayMenuState();
+            };
+            menu.Items.Add(pauseItem);
         }
 
-        if (_trayPollItem is not null)
+        foreach (var basin in syncableBasins)
+            menu.Items.Add(BuildSyncableBasinMenuItem(basin, activeRoot));
+
+        menu.Items.Add(new NativeMenuItemSeparator());
+
+        var quitItem = new NativeMenuItem("Quit ScholarFlow");
+        quitItem.Click += (_, _) =>
         {
-            _trayPollItem.IsVisible = elmsEnabled;
-            _trayPollItem.IsEnabled = !isSyncing;
+            _isExplicitExit = true;
+            _desktop.Shutdown();
+        };
+        menu.Items.Add(quitItem);
+
+        _trayIcon.Menu = menu;
+    }
+
+    private void AddSwitchBasinSubmenu(
+        NativeMenu rootMenu,
+        IReadOnlyList<RegisteredBasinSyncState> registeredBasins,
+        string activeRoot
+    )
+    {
+        var switchMenu = new NativeMenu();
+        var stateByPath = registeredBasins.ToDictionary(
+            b => b.BasinRoot,
+            b => b,
+            StringComparer.OrdinalIgnoreCase
+        );
+
+        foreach (var entry in _mainVm!.Settings.KnownBasins)
+        {
+            if (string.IsNullOrWhiteSpace(entry.FilePath))
+                continue;
+
+            var full = Path.GetFullPath(entry.FilePath);
+            bool isActive = string.Equals(full, activeRoot, StringComparison.OrdinalIgnoreCase);
+            string kindTag =
+                stateByPath.TryGetValue(full, out var state) && state.Provider.Capabilities.SupportsSync
+                    ? state.Provider.DisplayName
+                    : "Local";
+            string prefix = isActive ? "✓ " : "";
+
+            var item = new NativeMenuItem($"{prefix}{entry.Name} [{kindTag}]");
+            item.Click += async (_, _) =>
+            {
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    await _mainVm.OpenBasinAsync(full);
+                });
+            };
+            switchMenu.Items.Add(item);
         }
 
-        if (_trayFullSyncItem is not null)
+        if (switchMenu.Items.Count > 0)
         {
-            _trayFullSyncItem.IsVisible = elmsEnabled;
-            _trayFullSyncItem.IsEnabled = !isSyncing;
-            _trayFullSyncItem.Header = isSyncing
-                ? "Syncing eLMS..."
-                : "Full eLMS Sync (All Courses)";
+            rootMenu.Items.Add(new NativeMenuItem("Switch Basin") { Menu = switchMenu });
+        }
+    }
+
+    private NativeMenuItem BuildSyncableBasinMenuItem(
+        RegisteredBasinSyncState basin,
+        string activeRoot
+    )
+    {
+        bool isActive = string.Equals(basin.BasinRoot, activeRoot, StringComparison.OrdinalIgnoreCase);
+        string activePrefix = isActive ? "● " : "";
+        string syncSuffix = basin.IsSyncing ? " — Syncing..." : "";
+
+        var subMenu = new NativeMenu();
+
+        var statusItem = new NativeMenuItem($"Status: {basin.LastStatus}") { IsEnabled = false };
+        subMenu.Items.Add(statusItem);
+        subMenu.Items.Add(new NativeMenuItemSeparator());
+
+        if (basin.Provider.Capabilities.SupportsFastPoll)
+        {
+            var pollItem = new NativeMenuItem("Fast Poll Assignments") { IsEnabled = !basin.IsSyncing };
+            pollItem.Click += async (_, _) => await TriggerTrayFastPollAsync(basin, isActive);
+            subMenu.Items.Add(pollItem);
         }
 
-        if (_trayCourseSyncItem is not null)
-        {
-            _trayCourseSyncItem.IsVisible = elmsEnabled && syncableCourses.Count > 0;
-            _trayCourseSyncItem.IsEnabled = !isSyncing;
+        var excluded = new HashSet<string>(
+            basin.Config.ExcludedCourseIds,
+            StringComparer.OrdinalIgnoreCase
+        );
+        var syncableCourses = basin
+            .Courses.Where(c => c.IsSyncableCourse && !excluded.Contains(c.CourseId!))
+            .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            var subMenu = _trayCourseSyncItem.Menu ?? [];
-            subMenu.Items.Clear();
+        if (basin.Provider.Capabilities.SupportsPerCourseSync && syncableCourses.Count > 0)
+        {
+            var courseMenu = new NativeMenu();
             foreach (var course in syncableCourses)
             {
-                var captured = course;
-                var courseItem = new NativeMenuItem(captured.Title) { IsEnabled = !isSyncing };
-                courseItem.Click += async (_, _) =>
+                var capturedCourse = course;
+                var courseItem = new NativeMenuItem(capturedCourse.Title)
                 {
-                    if (_mainVm is not null)
-                        await _mainVm.RunCourseSyncAsync(captured);
+                    IsEnabled = !basin.IsSyncing,
                 };
-                subMenu.Items.Add(courseItem);
+                courseItem.Click += async (_, _) =>
+                    await TriggerTrayCourseSyncAsync(basin, capturedCourse, isActive);
+                courseMenu.Items.Add(courseItem);
             }
-            _trayCourseSyncItem.Menu = subMenu;
+            subMenu.Items.Add(
+                new NativeMenuItem("Sync Course") { IsEnabled = !basin.IsSyncing, Menu = courseMenu }
+            );
         }
+
+        var fullSyncItem = new NativeMenuItem(
+            basin.IsSyncing ? "Syncing..." : $"Full {basin.Provider.DisplayName} Sync"
+        )
+        {
+            IsEnabled = !basin.IsSyncing,
+        };
+        fullSyncItem.Click += async (_, _) => await TriggerTrayFullSyncAsync(basin, isActive);
+        subMenu.Items.Add(fullSyncItem);
+
+        subMenu.Items.Add(new NativeMenuItemSeparator());
+        var openItem = new NativeMenuItem("Open Basin in Window");
+        openItem.Click += async (_, _) =>
+        {
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                await _mainVm!.OpenBasinAsync(basin.BasinRoot);
+                RestoreMainWindow(_mainWindow!);
+            });
+        };
+        subMenu.Items.Add(openItem);
+
+        return new NativeMenuItem(
+            $"{activePrefix}{basin.Config.Name} ({basin.Provider.DisplayName}){syncSuffix}"
+        )
+        {
+            Menu = subMenu,
+        };
+    }
+
+    private async Task TriggerTrayFastPollAsync(RegisteredBasinSyncState basin, bool isActive)
+    {
+        if (_mainVm is null)
+            return;
+        if (isActive)
+            await Dispatcher.UIThread.InvokeAsync(_mainVm.RunFastPollAsync);
+        else
+            await _mainVm.SyncCoordinator.TriggerFastPollAsync(basin.BasinRoot);
+    }
+
+    private async Task TriggerTrayCourseSyncAsync(
+        RegisteredBasinSyncState basin,
+        BasinCourseEntry course,
+        bool isActive
+    )
+    {
+        if (_mainVm is null)
+            return;
+        if (isActive)
+            await Dispatcher.UIThread.InvokeAsync(() => _mainVm.RunCourseSyncAsync(course));
+        else
+            await _mainVm.SyncCoordinator.TriggerCourseSyncAsync(basin.BasinRoot, course.FolderName);
+    }
+
+    private async Task TriggerTrayFullSyncAsync(RegisteredBasinSyncState basin, bool isActive)
+    {
+        if (_mainVm is null)
+            return;
+        if (isActive)
+            await Dispatcher.UIThread.InvokeAsync(_mainVm.RunFullSyncAsync);
+        else
+            await _mainVm.SyncCoordinator.TriggerFullSyncAsync(basin.BasinRoot);
     }
 
     private static void RestoreMainWindow(MainWindow window)
