@@ -79,6 +79,58 @@ public sealed class TaskLifecycleAndImporterTests : IDisposable
         Assert.Equal(TaskPriority.P1, tasks[0].Priority);
     }
 
+    [Fact]
+    public async Task ImportAndDeleteCourseFolder_SupportsInBasinExternalAndSafeDelete()
+    {
+        var basinService = new BasinService();
+
+        // 1. In-Basin folder registered in-place
+        var inBasinDir = Path.Combine(_tempRoot, "Linear_Algebra");
+        Directory.CreateDirectory(inBasinDir);
+        await File.WriteAllTextAsync(Path.Combine(inBasinDir, "notes.txt"), "eigenvalues");
+
+        var inPlace = await basinService.ImportCourseFolderAsync(_tempRoot, inBasinDir);
+        Assert.Equal("Linear_Algebra", inPlace.FolderName);
+        Assert.Equal("Linear Algebra", inPlace.Title);
+        Assert.True(File.Exists(Path.Combine(_tempRoot, "Linear_Algebra", "notes.txt")));
+
+        // 2. External folder copied into Basin
+        var externalRoot = Path.Combine(Path.GetTempPath(), $"sf-ext-course-{Guid.NewGuid():N}");
+        var externalCourse = Path.Combine(externalRoot, "Discrete_Math");
+        Directory.CreateDirectory(externalCourse);
+        await File.WriteAllTextAsync(Path.Combine(externalCourse, "syllabus.txt"), "graphs");
+        try
+        {
+            var imported = await basinService.ImportCourseFolderAsync(
+                _tempRoot,
+                externalCourse,
+                customTitle: "Discrete Mathematics",
+                customAlias: "dmath"
+            );
+            Assert.Equal("dmath", imported.Alias);
+            Assert.True(
+                File.Exists(Path.Combine(_tempRoot, imported.FolderName, "syllabus.txt"))
+            );
+
+            // 3. Remove course without deleting folder
+            await basinService.DeleteCourseAsync(_tempRoot, inPlace, deleteFolderFromDisk: false);
+            Assert.True(Directory.Exists(inBasinDir));
+
+            // 4. Delete course & folder from disk
+            var importedDir = Path.Combine(_tempRoot, imported.FolderName);
+            await basinService.DeleteCourseAsync(_tempRoot, imported, deleteFolderFromDisk: true);
+            Assert.False(Directory.Exists(importedDir));
+
+            var remaining = await basinService.LoadCoursesAsync(_tempRoot);
+            Assert.Empty(remaining);
+        }
+        finally
+        {
+            if (Directory.Exists(externalRoot))
+                Directory.Delete(externalRoot, recursive: true);
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))

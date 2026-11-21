@@ -525,6 +525,90 @@ public sealed partial class MainWindowViewModel
         NotifyStateChanged();
     }
 
+    public string? ConfirmingDeleteCourseFolder { get; private set; }
+
+    public void BeginConfirmDeleteCourse(BasinCourseEntry course)
+    {
+        ConfirmingDeleteCourseFolder = course.FolderName;
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public void CancelConfirmDeleteCourse()
+    {
+        ConfirmingDeleteCourseFolder = null;
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
+    }
+
+    public async Task ImportCourseFolderAsync(
+        string sourceFolderPath,
+        string? title,
+        string? alias,
+        string? courseCode
+    )
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || string.IsNullOrWhiteSpace(sourceFolderPath))
+            return;
+
+        try
+        {
+            var imported = await _basinService.ImportCourseFolderAsync(
+                BasinRoot,
+                sourceFolderPath,
+                title,
+                alias,
+                courseCode
+            );
+            IsAddCourseModalOpen = false;
+            await ReloadBasinDataAsync();
+            SelectCourse(imported, showMaterials: true);
+            StatusText = $"Imported course '{imported.Title}' (#{imported.Alias})";
+            NotifyStateChanged();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not import course folder: {ex.Message}";
+            NotifyStateChanged(UiChangeKind.StatusOnly);
+        }
+    }
+
+    public async Task DeleteCourseAsync(BasinCourseEntry course, bool deleteFolderFromDisk)
+    {
+        if (string.IsNullOrWhiteSpace(BasinRoot) || course is null)
+            return;
+
+        try
+        {
+            var title = course.Title;
+            await _basinService.DeleteCourseAsync(BasinRoot, course, deleteFolderFromDisk);
+            ConfirmingDeleteCourseFolder = null;
+
+            if (
+                ActiveCourse is not null
+                && ActiveCourse.FolderName.Equals(
+                    course.FolderName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                ActiveCourse = null;
+                ActiveMode = WorkspaceTabMode.TaskList;
+                ActiveSmartView = ScholarFlow.Core.Tasks.SmartViewKind.Inbox;
+            }
+
+            await ReloadBasinDataAsync();
+            StatusText = deleteFolderFromDisk
+                ? $"Deleted course '{title}' and its folder"
+                : $"Removed course '{title}' from ScholarFlow (folder kept on disk)";
+            NotifyStateChanged();
+        }
+        catch (Exception ex)
+        {
+            ConfirmingDeleteCourseFolder = null;
+            StatusText = $"Could not delete course: {ex.Message}";
+            NotifyStateChanged(UiChangeKind.StatusOnly);
+        }
+    }
+
     public async Task ImportPdfsToCourseAsync(
         BasinCourseEntry course,
         IReadOnlyList<string> sourcePdfPaths

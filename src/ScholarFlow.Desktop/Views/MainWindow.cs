@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
     > _taskRowsById = new(StringComparer.Ordinal);
     private string? _lastHighlightedTaskId;
     private string _mountedModalKind = string.Empty;
+    private bool _lastRenderedIsSyncing;
     private bool _suppressTextCallbacks;
     private bool _lastAutoSidebarCollapse;
     private Vector _sidebarScrollOffset;
@@ -172,6 +173,8 @@ public sealed partial class MainWindow : Window
 
             case UiChangeKind.StatusOnly:
                 RefreshStatusBar();
+                if (_lastRenderedIsSyncing != _vm.IsSyncing)
+                    RefreshSidebar();
                 break;
 
             case UiChangeKind.NotificationsOnly:
@@ -256,6 +259,7 @@ public sealed partial class MainWindow : Window
 
     private void RefreshSidebar()
     {
+        _lastRenderedIsSyncing = _vm.IsSyncing;
         _sidebarContainer.Child = BuildSidebar();
     }
 

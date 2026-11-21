@@ -672,27 +672,254 @@ public static class OnboardingAndSettingsModalBuilder
     {
         var stack = new StackPanel { Spacing = 12 };
 
-        var header = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,Auto") };
-        header.Children.Add(
-            new TextBlock
-            {
-                Text = "Create Local Course / Subject",
-                FontSize = 16,
-                FontWeight = FontWeight.Bold,
-                Foreground = ThemeService.Brush(ThemeService.TextPrimary),
-                VerticalAlignment = VerticalAlignment.Center,
-            }
+        // 1. Unified Floating Modal Header
+        var header = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*,Auto,Auto"),
+            ColumnSpacing = 8,
+        };
+        var headerIcon = UiBuilder.Icon(
+            MaterialIconKind.FolderPlusOutline,
+            18,
+            ThemeService.Brush(ThemeService.AccentPrimary)
         );
+        headerIcon.VerticalAlignment = VerticalAlignment.Center;
+        header.Children.Add(headerIcon);
+
+        var titleStack = new StackPanel
+        {
+            Spacing = 1,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Add or Import Course",
+                    FontSize = 14.5,
+                    FontWeight = FontWeight.Bold,
+                    Foreground = ThemeService.Brush(ThemeService.TextPrimary),
+                },
+                new TextBlock
+                {
+                    Text = "Create a new subject folder in this Basin or import an existing folder.",
+                    FontSize = 11.5,
+                    Foreground = ThemeService.Brush(ThemeService.TextSecondary),
+                },
+            },
+        };
+        Grid.SetColumn(titleStack, 1);
+        header.Children.Add(titleStack);
+
+        var escChip = UiBuilder.KbdChip("Esc");
+        escChip.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(escChip, 2);
+        header.Children.Add(escChip);
+
         var closeBtn = UiBuilder.IconButton(MaterialIconKind.Close, vm.ToggleAddCourseModal, 16);
-        Grid.SetColumn(closeBtn, 1);
+        closeBtn.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(closeBtn, 3);
         header.Children.Add(closeBtn);
         stack.Children.Add(header);
         stack.Children.Add(UiBuilder.HairlineDivider());
+
+        // 2. Mode Switcher (Create New vs Import Existing Folder)
+        bool isImportMode = false;
+        string? selectedImportFolder = null;
 
         var titleBox = new TextBox
         {
             Watermark = "Course Title (e.g. Linear Algebra, Organic Chemistry, Ethics)",
             FontSize = 13,
+        };
+        var aliasBox = new TextBox
+        {
+            Watermark = "Short #alias (optional, e.g. math)",
+            FontSize = 12.5,
+        };
+        var codeBox = new TextBox
+        {
+            Watermark = "Course Code (optional, e.g. MATH101)",
+            FontSize = 12.5,
+        };
+
+        var folderPathText = new TextBlock
+        {
+            Text = "No folder selected yet.",
+            FontSize = 11.5,
+            Foreground = ThemeService.Brush(ThemeService.TextMuted),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var folderHintText = new TextBlock
+        {
+            Text =
+                "Folders already inside this Basin are linked in-place; external folders are copied into the Basin.",
+            FontSize = 10.5,
+            Foreground = ThemeService.Brush(ThemeService.TextMuted),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var importCard = new Border
+        {
+            IsVisible = false,
+            Background = ThemeService.Brush(ThemeService.BgElevated),
+            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10),
+        };
+        var importInner = new StackPanel { Spacing = 8 };
+        var pickRow = new Grid
+        {
+            ColumnDefinitions = ColumnDefinitions.Parse("Auto,*"),
+            ColumnSpacing = 10,
+        };
+        var chooseFolderBtn = UiBuilder.GhostButton(
+            "Choose Folder...",
+            MaterialIconKind.FolderOpenOutline,
+            async () =>
+            {
+                var top = TopLevel.GetTopLevel(importCard);
+                if (top?.StorageProvider is null)
+                    return;
+
+                var startFolder =
+                    !string.IsNullOrWhiteSpace(vm.BasinRoot) && Directory.Exists(vm.BasinRoot)
+                        ? await top.StorageProvider.TryGetFolderFromPathAsync(
+                            new Uri(vm.BasinRoot)
+                        )
+                        : null;
+
+                var picked = await top.StorageProvider.OpenFolderPickerAsync(
+                    new FolderPickerOpenOptions
+                    {
+                        Title = "Select Course Folder to Import",
+                        AllowMultiple = false,
+                        SuggestedStartLocation = startFolder,
+                    }
+                );
+                var localPath =
+                    picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+                if (string.IsNullOrWhiteSpace(localPath))
+                    return;
+
+                selectedImportFolder = localPath;
+                folderPathText.Text = localPath;
+                folderPathText.Foreground = ThemeService.Brush(ThemeService.TextPrimary);
+
+                if (string.IsNullOrWhiteSpace(titleBox.Text))
+                {
+                    var inferred = Path.GetFileName(
+                        localPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    ).Replace('_', ' ');
+                    titleBox.Text = inferred;
+                }
+
+                var parentDir = Path.GetDirectoryName(
+                    localPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                );
+                bool inBasin =
+                    parentDir is not null
+                    && !string.IsNullOrWhiteSpace(vm.BasinRoot)
+                    && string.Equals(
+                        Path.GetFullPath(parentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        Path.GetFullPath(vm.BasinRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                folderHintText.Text = inBasin
+                    ? "Detected inside this Basin — will register in-place without copying files."
+                    : "External folder — will copy contents into a new course folder in this Basin.";
+            }
+        );
+        pickRow.Children.Add(chooseFolderBtn);
+        Grid.SetColumn(folderPathText, 1);
+        pickRow.Children.Add(folderPathText);
+        importInner.Children.Add(pickRow);
+        importInner.Children.Add(folderHintText);
+        importCard.Child = importInner;
+
+        var modeStrip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        Button? createModeBtn = null;
+        Button? importModeBtn = null;
+        Button? submitBtn = null;
+
+        void UpdateModeUi()
+        {
+            importCard.IsVisible = isImportMode;
+            if (createModeBtn is not null)
+            {
+                createModeBtn.Background = !isImportMode
+                    ? ThemeService.Brush(ThemeService.AccentSoftBg)
+                    : Brushes.Transparent;
+                createModeBtn.BorderBrush = !isImportMode
+                    ? ThemeService.Brush(ThemeService.AccentPrimary)
+                    : ThemeService.Brush(ThemeService.BorderSubtle);
+            }
+            if (importModeBtn is not null)
+            {
+                importModeBtn.Background = isImportMode
+                    ? ThemeService.Brush(ThemeService.AccentSoftBg)
+                    : Brushes.Transparent;
+                importModeBtn.BorderBrush = isImportMode
+                    ? ThemeService.Brush(ThemeService.AccentPrimary)
+                    : ThemeService.Brush(ThemeService.BorderSubtle);
+            }
+            if (submitBtn?.Content is StackPanel sp && sp.Children.LastOrDefault() is TextBlock tb)
+            {
+                tb.Text = isImportMode ? "Import Course" : "Create Course";
+            }
+        }
+
+        createModeBtn = UiBuilder.GhostButton(
+            "Create New",
+            MaterialIconKind.Plus,
+            () =>
+            {
+                isImportMode = false;
+                UpdateModeUi();
+            },
+            isActive: true
+        );
+        importModeBtn = UiBuilder.GhostButton(
+            "Import Folder",
+            MaterialIconKind.FolderDownloadOutline,
+            () =>
+            {
+                isImportMode = true;
+                UpdateModeUi();
+            },
+            isActive: false
+        );
+        modeStrip.Children.Add(createModeBtn);
+        modeStrip.Children.Add(importModeBtn);
+        stack.Children.Add(modeStrip);
+        stack.Children.Add(importCard);
+
+        async Task SubmitAsync()
+        {
+            if (isImportMode)
+            {
+                if (!string.IsNullOrWhiteSpace(selectedImportFolder))
+                    await vm.ImportCourseFolderAsync(
+                        selectedImportFolder,
+                        titleBox.Text,
+                        aliasBox.Text,
+                        codeBox.Text
+                    );
+            }
+            else if (!string.IsNullOrWhiteSpace(titleBox.Text))
+            {
+                await vm.CreateLocalCourseAsync(titleBox.Text, aliasBox.Text, codeBox.Text);
+            }
+        }
+
+        titleBox.KeyDown += async (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                await SubmitAsync();
+            }
         };
         stack.Children.Add(titleBox);
 
@@ -701,21 +928,12 @@ public static class OnboardingAndSettingsModalBuilder
             ColumnDefinitions = ColumnDefinitions.Parse("*,*"),
             ColumnSpacing = 8,
         };
-        var aliasBox = new TextBox
-        {
-            Watermark = "Short #alias (optional, e.g. math)",
-            FontSize = 12.5,
-        };
         row2.Children.Add(aliasBox);
-
-        var codeBox = new TextBox
-        {
-            Watermark = "Course Code (optional, e.g. MATH101)",
-            FontSize = 12.5,
-        };
         Grid.SetColumn(codeBox, 1);
         row2.Children.Add(codeBox);
         stack.Children.Add(row2);
+
+        stack.Children.Add(UiBuilder.HairlineDivider());
 
         var actions = new Grid
         {
@@ -726,28 +944,27 @@ public static class OnboardingAndSettingsModalBuilder
         Grid.SetColumn(cancelBtn, 1);
         actions.Children.Add(cancelBtn);
 
-        var createBtn = UiBuilder.PrimaryButton(
+        submitBtn = UiBuilder.PrimaryButton(
             "Create Course",
-            MaterialIconKind.Plus,
-            async () =>
-            {
-                if (!string.IsNullOrWhiteSpace(titleBox.Text))
-                    await vm.CreateLocalCourseAsync(titleBox.Text, aliasBox.Text, codeBox.Text);
-            }
+            MaterialIconKind.Check,
+            async () => await SubmitAsync()
         );
-        Grid.SetColumn(createBtn, 2);
-        actions.Children.Add(createBtn);
+        Grid.SetColumn(submitBtn, 2);
+        actions.Children.Add(submitBtn);
         stack.Children.Add(actions);
 
         return new Border
         {
-            Width = 480,
-            Background = ThemeService.Brush(ThemeService.BgElevated),
-            BorderBrush = ThemeService.Brush(ThemeService.BorderSubtle),
+            MinWidth = 420,
+            MaxWidth = 540,
+            Background = ThemeService.Brush(ThemeService.BgSurface),
+            BorderBrush = ThemeService.Brush(ThemeService.BorderStrong),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(20, 18),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            BoxShadow = BoxShadows.Parse("0 16 40 0 #66000000"),
+            Padding = new Thickness(18, 16),
+            Margin = new Thickness(24, 32),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Child = stack,
         };

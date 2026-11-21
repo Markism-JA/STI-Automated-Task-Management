@@ -202,7 +202,71 @@ public static class CourseWorkspaceViewBuilder
             actionWrap.Children.Add(elmsBtn);
         }
 
+        var deleteCourseBtn = UiBuilder.GhostButton(
+            "Delete Course",
+            MaterialIconKind.TrashCanOutline,
+            () => vm.BeginConfirmDeleteCourse(course)
+        );
+        deleteCourseBtn.Margin = new Thickness(0, 0, 6, 6);
+        actionWrap.Children.Add(deleteCourseBtn);
+
         headerStack.Children.Add(actionWrap);
+
+        if (
+            string.Equals(
+                vm.ConfirmingDeleteCourseFolder,
+                course.FolderName,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            var confirmWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            confirmWrap.Children.Add(
+                new TextBlock
+                {
+                    Text = $"Remove '{course.Title}'?",
+                    FontSize = 12,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 4),
+                }
+            );
+
+            var unlinkBtn = UiBuilder.GhostButton(
+                "Remove Only (Keep Folder)",
+                MaterialIconKind.LinkOff,
+                async () => await vm.DeleteCourseAsync(course, deleteFolderFromDisk: false)
+            );
+            unlinkBtn.Margin = new Thickness(0, 0, 6, 4);
+            confirmWrap.Children.Add(unlinkBtn);
+
+            var delDiskBtn = UiBuilder.GhostButton(
+                "Delete Course & Folder",
+                MaterialIconKind.DeleteOutline,
+                async () => await vm.DeleteCourseAsync(course, deleteFolderFromDisk: true)
+            );
+            delDiskBtn.Foreground = ThemeService.Brush(ThemeService.PriorityP1Fg);
+            delDiskBtn.Margin = new Thickness(0, 0, 6, 4);
+            confirmWrap.Children.Add(delDiskBtn);
+
+            var cancelDelBtn = UiBuilder.GhostButton("Cancel", null, vm.CancelConfirmDeleteCourse);
+            cancelDelBtn.Margin = new Thickness(0, 0, 0, 4);
+            confirmWrap.Children.Add(cancelDelBtn);
+
+            headerStack.Children.Add(
+                new Border
+                {
+                    Background = ThemeService.Brush(ThemeService.BgElevated),
+                    BorderBrush = ThemeService.Brush(ThemeService.PriorityP1Fg),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(10, 7),
+                    Child = confirmWrap,
+                }
+            );
+        }
+
         root.Children.Add(headerStack);
 
         // 2. Clean Sub-Tab Switcher (Tasks vs Modules & Handouts)

@@ -560,53 +560,39 @@ public sealed partial class MainWindow
                 footer.Children.Add(pausedBannerBtn);
             }
 
-            // Row 1: Primary Sync / Add Course + Fast Poll
-            var syncRow = new Grid
-            {
-                ColumnDefinitions =
-                    _vm.SupportsActiveBasinSync && _vm.SupportsActiveFastPoll
-                        ? ColumnDefinitions.Parse("*,Auto")
-                        : ColumnDefinitions.Parse("*"),
-                ColumnSpacing = 4,
-            };
-            Button syncBtn;
+            // Row 1: Primary Sync + Fast Poll (only when basin has an active sync provider)
             if (_vm.SupportsActiveBasinSync)
             {
-                syncBtn = UiBuilder.GhostButton(
+                var syncRow = new Grid
+                {
+                    ColumnDefinitions = _vm.SupportsActiveFastPoll
+                        ? ColumnDefinitions.Parse("*,Auto")
+                        : ColumnDefinitions.Parse("*"),
+                    ColumnSpacing = 4,
+                };
+                var syncBtn = UiBuilder.GhostButton(
                     _vm.IsSyncing ? "Syncing..." : $"{_vm.ActiveProviderName} Sync ▾",
                     MaterialIconKind.CloudSyncOutline,
                     () => { }
                 );
                 syncBtn.IsEnabled = !_vm.IsSyncing;
                 syncBtn.Flyout = BuildElmsSyncFlyout();
-                ToolTip.SetTip(
-                    syncBtn,
-                    $"Choose Fast Poll, Per-Course Sync, or Full {_vm.ActiveProviderName} Sync"
-                );
-            }
-            else
-            {
-                syncBtn = UiBuilder.GhostButton(
-                    "Add Course",
-                    MaterialIconKind.FolderPlusOutline,
-                    _vm.ToggleAddCourseModal
-                );
-            }
-            syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-            syncRow.Children.Add(syncBtn);
+                syncBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
+                syncRow.Children.Add(syncBtn);
 
-            if (_vm.SupportsActiveBasinSync && _vm.SupportsActiveFastPoll)
-            {
-                var pollBtn = UiBuilder.IconButton(
-                    MaterialIconKind.Refresh,
-                    async () => await _vm.RunFastPollAsync(),
-                    14.5
-                );
-                ToolTip.SetTip(pollBtn, $"Fast poll {_vm.ActiveProviderName} assignments now (R)");
-                Grid.SetColumn(pollBtn, 1);
-                syncRow.Children.Add(pollBtn);
+                if (_vm.SupportsActiveFastPoll)
+                {
+                    var pollBtn = UiBuilder.IconButton(
+                        MaterialIconKind.Refresh,
+                        async () => await _vm.RunFastPollAsync(),
+                        14.5
+                    );
+                    pollBtn.IsEnabled = !_vm.IsSyncing;
+                    Grid.SetColumn(pollBtn, 1);
+                    syncRow.Children.Add(pollBtn);
+                }
+                footer.Children.Add(syncRow);
             }
-            footer.Children.Add(syncRow);
 
             // Row 2: Evenly spaced Utility Strip (Pause/Resume, Theme, Settings, Shortcuts)
             var utilRow = new Grid

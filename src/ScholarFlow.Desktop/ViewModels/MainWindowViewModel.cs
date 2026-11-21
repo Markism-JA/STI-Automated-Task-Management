@@ -303,6 +303,7 @@ public sealed partial class MainWindowViewModel : IAsyncDisposable
 
         IsInspectorOpen = false;
         IsAddCourseModalOpen = false;
+        ConfirmingDeleteCourseFolder = null;
         IsPacketOrganizerModalOpen = false;
         PacketOrganizerCourse = null;
         ActivePacketPlan = null;

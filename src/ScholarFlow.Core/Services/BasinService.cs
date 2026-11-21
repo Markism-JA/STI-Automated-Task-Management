@@ -488,6 +488,188 @@ public sealed partial class BasinService
         return entry;
     }
 
+    /// <summary>
+    /// Imports an existing directory on disk as a local course workspace.
+    /// If the directory is already a direct child of <paramref name="basinRoot"/>, it is registered in-place;
+    /// otherwise its contents are copied into a new course folder under <paramref name="basinRoot"/>.
+    /// </summary>
+    public async Task<BasinCourseEntry> ImportCourseFolderAsync(
+        string basinRoot,
+        string sourceFolderPath,
+        string? customTitle = null,
+        string? customAlias = null,
+        string? courseCode = null,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(sourceFolderPath) || !Directory.Exists(sourceFolderPath))
+            throw new DirectoryNotFoundException($"Source folder not found: {sourceFolderPath}");
+
+        var existing = await DeduplicateAndMergeCoursesAsync(basinRoot, ct);
+        var fullBasin = Path.GetFullPath(basinRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullSource = Path.GetFullPath(sourceFolderPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (string.Equals(fullBasin, fullSource, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Cannot import the Basin root folder itself as a course.");
+
+        var sourceParent = Path.GetDirectoryName(fullSource)?
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        bool isDirectChildOfBasin =
+            sourceParent is not null
+            && string.Equals(sourceParent, fullBasin, StringComparison.OrdinalIgnoreCase);
+
+        var rawFolderName = Path.GetFileName(fullSource);
+        var inferredTitle = !string.IsNullOrWhiteSpace(customTitle)
+            ? customTitle.Trim()
+            : rawFolderName.Replace('_', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(inferredTitle))
+            inferredTitle = "Imported Course";
+
+        // If already registered in courses.json, return existing entry (updating title/alias if provided)
+        if (isDirectChildOfBasin)
+        {
+            var already = existing.FirstOrDefault(c =>
+                c.FolderName.Equals(rawFolderName, StringComparison.OrdinalIgnoreCase)
+            );
+            if (already is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(customTitle))
+                    already.Title = customTitle.Trim();
+                if (!string.IsNullOrWhiteSpace(customAlias))
+                    already.Alias = customAlias.Trim().TrimStart('#').ToLowerInvariant();
+                if (!string.IsNullOrWhiteSpace(courseCode))
+                    already.CourseCode = courseCode.Trim();
+                already.IsArchived = false;
+                await SaveCoursesAsync(basinRoot, existing, ct);
+                return already;
+            }
+        }
+
+        string folderName;
+        if (isDirectChildOfBasin)
+        {
+            folderName = rawFolderName;
+        }
+        else
+        {
+            var sanitized = FilenameSanitizer.SanitizeFileName(inferredTitle, "").TrimEnd('.');
+            if (string.IsNullOrWhiteSpace(sanitized))
+                sanitized = $"Course_{Guid.NewGuid().ToString("N")[..6]}";
+
+            folderName = sanitized;
+            int suffix = 2;
+            while (
+                existing.Any(c =>
+                    c.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase)
+                ) || Directory.Exists(Path.Combine(basinRoot, folderName))
+            )
+            {
+                folderName = $"{sanitized}_{suffix++}";
+            }
+
+            var destDir = Path.Combine(basinRoot, folderName);
+            CopyDirectoryRecursive(fullSource, destDir);
+        }
+
+        var usedAliases = existing
+            .Select(c => c.Alias)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToList();
+        var alias = !string.IsNullOrWhiteSpace(customAlias)
+            ? customAlias.Trim().TrimStart('#').ToLowerInvariant()
+            : CourseAliasGenerator.Generate(inferredTitle, usedAliases);
+
+        var entry = new BasinCourseEntry
+        {
+            CourseId = $"local-{Guid.NewGuid():N}"[..14],
+            Origin = CourseOrigin.LocalSubject,
+            Title = inferredTitle,
+            FolderName = folderName,
+            Alias = alias,
+            CourseCode = string.IsNullOrWhiteSpace(courseCode) ? null : courseCode.Trim(),
+        };
+
+        existing.Add(entry);
+
+        var courseDir = Path.Combine(basinRoot, entry.FolderName);
+        Directory.CreateDirectory(Path.Combine(courseDir, "ongoing"));
+        Directory.CreateDirectory(Path.Combine(courseDir, "completed"));
+
+        var tasksPath = GetCourseTasksPath(basinRoot, entry.FolderName);
+        if (!File.Exists(tasksPath))
+            await File.WriteAllTextAsync(tasksPath, $"# {entry.Title}\n\n", ct);
+
+        await SaveCoursesAsync(basinRoot, existing, ct);
+        return entry;
+    }
+
+    /// <summary>
+    /// Removes a course from <c>courses.json</c> and optionally deletes its folder from disk.
+    /// </summary>
+    public async Task DeleteCourseAsync(
+        string basinRoot,
+        BasinCourseEntry course,
+        bool deleteFolderFromDisk,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(basinRoot) || course is null)
+            return;
+
+        var existing = await LoadCoursesAsync(basinRoot, ct);
+        existing.RemoveAll(c =>
+            c.FolderName.Equals(course.FolderName, StringComparison.OrdinalIgnoreCase)
+            || (
+                !string.IsNullOrWhiteSpace(course.CourseId)
+                && string.Equals(
+                    c.CourseId,
+                    course.CourseId,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        );
+        await SaveCoursesAsync(basinRoot, existing, ct);
+
+        if (deleteFolderFromDisk && !string.IsNullOrWhiteSpace(course.FolderName))
+        {
+            var fullBasin = Path.GetFullPath(basinRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            var targetDir = Path.GetFullPath(Path.Combine(basinRoot, course.FolderName));
+
+            if (
+                targetDir.StartsWith(fullBasin, StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(targetDir)
+            )
+            {
+                Directory.Delete(targetDir, recursive: true);
+            }
+        }
+    }
+
+    private static void CopyDirectoryRecursive(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+
+        foreach (var file in Directory.GetFiles(sourceDir))
+        {
+            var name = Path.GetFileName(file);
+            if (name.StartsWith('.'))
+                continue;
+            File.Copy(file, Path.Combine(destDir, name), overwrite: true);
+        }
+
+        foreach (var subDir in Directory.GetDirectories(sourceDir))
+        {
+            var name = Path.GetFileName(subDir);
+            if (name.StartsWith('.'))
+                continue;
+            CopyDirectoryRecursive(subDir, Path.Combine(destDir, name));
+        }
+    }
+
     public async Task<IReadOnlyList<TaskItem>> LoadAllTasksAsync(
         string basinRoot,
         CancellationToken ct = default
