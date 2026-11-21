@@ -713,6 +713,28 @@ public static partial class QuizStudioViewBuilder
                             },
                         },
                     };
+                    tocRowBtn.PointerEntered += (_, _) =>
+                    {
+                        if (
+                            !string.Equals(
+                                studio.SelectedOrganizerQuestionId,
+                                q.Id,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                            tocRowBtn.Background = ThemeService.Brush(ThemeService.BgHover);
+                    };
+                    tocRowBtn.PointerExited += (_, _) =>
+                    {
+                        if (
+                            !string.Equals(
+                                studio.SelectedOrganizerQuestionId,
+                                q.Id,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                            tocRowBtn.Background = Brushes.Transparent;
+                    };
                     tocRowBtn.Click += (_, _) =>
                     {
                         studio.SelectOrganizerQuestion(
@@ -946,6 +968,50 @@ public static partial class QuizStudioViewBuilder
             },
         };
         lb.Styles.Add(itemResetStyle);
+
+        // Suppress FluentTheme's square ListBoxItem hover/selected/pressed backdrop so
+        // rounded TOC rows and rounded question cards never show a square halo behind them.
+        foreach (var pseudo in new[] { ":pointerover", ":selected", ":pressed" })
+        {
+            var capturedPseudo = pseudo;
+            lb.Styles.Add(
+                new Style(x =>
+                    x.OfType<ListBoxItem>()
+                        .Class(capturedPseudo)
+                        .Template()
+                        .OfType<Avalonia.Controls.Presenters.ContentPresenter>()
+                        .Name("PART_ContentPresenter")
+                )
+                {
+                    Setters =
+                    {
+                        new Setter(
+                            Avalonia.Controls.Presenters.ContentPresenter.BackgroundProperty,
+                            Brushes.Transparent
+                        ),
+                    },
+                }
+            );
+        }
+        lb.Styles.Add(
+            new Style(x =>
+                x.OfType<ListBoxItem>()
+                    .Class(":selected")
+                    .Class(":pointerover")
+                    .Template()
+                    .OfType<Avalonia.Controls.Presenters.ContentPresenter>()
+                    .Name("PART_ContentPresenter")
+            )
+            {
+                Setters =
+                {
+                    new Setter(
+                        Avalonia.Controls.Presenters.ContentPresenter.BackgroundProperty,
+                        Brushes.Transparent
+                    ),
+                },
+            }
+        );
 
         var savedOffset = SavedOrganizerScrollOffsets.GetValueOrDefault(scrollKey, Vector.Zero);
         var prevAnchorId = SavedOrganizerAnchorIds.GetValueOrDefault(scrollKey);
