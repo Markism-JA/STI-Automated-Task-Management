@@ -17,7 +17,9 @@ public sealed partial class MainWindowViewModel
 
     public void SelectTermView(string? term)
     {
-        var normalized = TaskItem.NormalizeTerm(term);
+        var normalized =
+            TaskItem.NormalizeTerm(term)
+            ?? (string.IsNullOrWhiteSpace(term) ? null : term.Trim());
         if (ActiveMode == WorkspaceTabMode.CourseWorkspace)
         {
             ActiveTermFilter = string.Equals(
@@ -43,13 +45,11 @@ public sealed partial class MainWindowViewModel
             else
             {
                 ActiveTermFilter = normalized;
-                if (ActiveSmartView is SmartViewKind.Completed)
-                    ActiveSmartView = SmartViewKind.All;
             }
         }
 
         RecomputeVisibleTasks();
-        NotifyStateChanged();
+        NotifyStateChanged(UiChangeKind.SearchOrTaskList);
     }
 
     public void SelectLabelView(string label)
